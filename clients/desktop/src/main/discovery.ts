@@ -159,13 +159,11 @@ export function browse(
     // three adapters on.
     const addresses = interfaceAddresses();
     if (addresses.length === 0) {
-      send(live, packet, null);
+      send(live, packet);
       state.asked += 1;
       return;
     }
-    for (const address of addresses) {
-      send(live, packet, address);
-    }
+    askEach(live, packet, addresses);
     state.asked += 1;
   };
 
@@ -288,17 +286,80 @@ export function browse(
   };
 }
 
-/** Sends one query, out of one interface when there is a choice. */
-function send(socket: Socket, packet: Buffer, from: string | null): void {
-  try {
-    if (from !== null) {
-      socket.setMulticastInterface(from);
+/**
+ * What a datagram socket has to look like to be asked, for a test to stand in.
+ *
+ * Three methods of `dgram.Socket`, because the property under test is the order
+ * they are called in and nothing else about a socket matters to it.
+ */
+export interface Sender {
+  setMulticastInterface(address: string): void;
+  send(
+    packet: Buffer,
+    offset: number,
+    length: number,
+    port: number,
+    address: string,
+    done?: (error: Error | null) => void,
+  ): void;
+}
+
+/**
+ * Asks once out of every interface, one at a time.
+ *
+ * **One at a time is the whole point.** `setMulticastInterface` is a setsockopt
+ * and takes effect at once; `socket.send` queues the datagram and returns. A
+ * loop that sets and sends, six times, therefore sets the interface six times
+ * and *then* transmits six datagrams — every one of them out of whichever
+ * interface was set last.
+ *
+ * The owner's machine has six adapters and the working one is second, so every
+ * question went out of `vEthernet (WSL (Hyper-V firewall))` and the server
+ * never saw one (2026-09-27). The machine this was written on has two, with the
+ * working one last, which is why it looked fine here.
+ *
+ * So each send waits for the one before it to be handed to the operating
+ * system. A send that fails is not a reason to stop: the next interface may be
+ * the venue's.
+ */
+export function askEach(
+  socket: Sender,
+  packet: Buffer,
+  addresses: readonly string[],
+  done?: () => void,
+): void {
+  const step = (at: number): void => {
+    if (at >= addresses.length) {
+      done?.();
+      return;
     }
+    const from = addresses[at];
+    try {
+      if (from !== undefined) {
+        socket.setMulticastInterface(from);
+      }
+    } catch {
+      // An interface that went away between the last question and this one, or
+      // one that cannot carry multicast at all.
+      step(at + 1);
+      return;
+    }
+    try {
+      socket.send(packet, 0, packet.length, PORT, GROUP, () => step(at + 1));
+    } catch {
+      // Threw before it queued anything, so nothing will call back.
+      step(at + 1);
+    }
+  };
+  step(0);
+}
+
+/** Sends one query, out of whichever interface the system prefers. */
+function send(socket: Socket, packet: Buffer): void {
+  try {
     socket.send(packet, 0, packet.length, PORT, GROUP);
   } catch {
-    // An interface that went away between the last send and this one, or one
-    // that cannot carry multicast at all. The others are still worth trying,
-    // and the next tick tries this one again.
+    // No route at all. The next tick tries again.
   }
 }
 
