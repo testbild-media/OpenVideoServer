@@ -1,0 +1,38 @@
+#!/bin/sh
+# What is left behind, and what is not.
+#
+# **`/var/lib/ovs` survives even a purge.** It holds every show on this machine,
+# the media store and the accounts, and none of that is the package's to delete.
+# A `purge` that took an evening's work with it would be a footgun with a
+# trigger guard made of documentation. Removing it is one command and it is the
+# operator's to type:
+#
+#   sudo rm -rf /var/lib/ovs
+#
+# The system accounts stay for the same reason: they own those files.
+
+set -e
+
+case "$1" in
+  remove | purge)
+    if [ -d /run/systemd/system ]; then
+      systemctl daemon-reload > /dev/null 2>&1 || true
+    fi
+    if [ "$1" = "purge" ] && [ -d /var/lib/ovs ]; then
+      echo ""
+      echo "The shows, the media and the accounts are still in /var/lib/ovs."
+      echo "Remove them yourself if that is what you want:"
+      echo "  sudo rm -rf /var/lib/ovs"
+      echo ""
+    fi
+    ;;
+
+  upgrade | failed-upgrade | abort-install | abort-upgrade | disappear) ;;
+
+  *)
+    echo "postrm called with unknown argument: $1" >&2
+    exit 1
+    ;;
+esac
+
+exit 0

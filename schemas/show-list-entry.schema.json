@@ -1,0 +1,59 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ShowListEntry",
+  "description": "One entry in the show list.",
+  "type": "object",
+  "required": [
+    "created_at",
+    "id",
+    "loadable",
+    "name",
+    "schema_version",
+    "updated_at"
+  ],
+  "properties": {
+    "created_at": {
+      "description": "When it was created.",
+      "type": "integer",
+      "format": "int64"
+    },
+    "folder": {
+      "description": "Where it is filed in this server's list.\n\nSlash-separated, empty for the root. Not part of the document: where a show is filed is a fact about this server's list rather than about the show (owner, 2026-09-23).",
+      "type": "string"
+    },
+    "id": {
+      "description": "Stable identifier.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/ShowId"
+        }
+      ]
+    },
+    "loadable": {
+      "description": "Whether this server build can open it.\n\nA show it cannot open is still listed, so it does not look deleted.",
+      "type": "boolean"
+    },
+    "name": {
+      "description": "Operator-visible name.",
+      "type": "string"
+    },
+    "schema_version": {
+      "description": "Schema version the stored show uses.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0.0
+    },
+    "updated_at": {
+      "description": "When it was last saved.",
+      "type": "integer",
+      "format": "int64"
+    }
+  },
+  "definitions": {
+    "ShowId": {
+      "description": "ShowId (ULID, 26 characters)",
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    }
+  }
+}

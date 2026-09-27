@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "FileMediaRequest",
+  "description": "Renames one media item, or moves it to another folder, or both.\n\n**Neither touches the file.** A display name is a label and a folder is a label; the asset keeps its object key and the content hash it is found by, so a show that plays this item goes on playing it (owner, 2026-09-23: \"organising media must not move the real files\").\n\nA field left out means \"leave this alone\", so a rename need not send a folder and a move need not send a name.",
+  "type": "object",
+  "properties": {
+    "display_name": {
+      "description": "The name the library shows.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "folder": {
+      "description": "Where it is filed. Empty is the root.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  }
+}

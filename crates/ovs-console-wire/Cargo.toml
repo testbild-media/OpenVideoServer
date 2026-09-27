@@ -1,0 +1,19 @@
+[package]
+name = "ovs-console-wire"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The wire between the System screen and the renderer that shows it"
+
+# **No dependencies, and that is the point.** Measured on the reference machine:
+# linking `getrandom` into the same binary as CEF makes Chromium abort inside
+# `ContentMainRunnerImpl::Initialize`, closing a file descriptor that will not
+# close. `ovs-ipc` reaches it through `ovs-types` and `ulid`, so the console
+# cannot use `ovs-ipc` — and a wire format that needs nothing is the answer that
+# does not put the same trap back later. See the module documentation.
+[dependencies]
+
+[lints.rust]
+unsafe_code = "forbid"

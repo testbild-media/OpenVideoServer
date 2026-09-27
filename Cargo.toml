@@ -1,0 +1,53 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/ovs-types",
+    "crates/ovs-db",
+    "crates/ovs-proto",
+    "crates/ovs-core",
+    "crates/ovs-ipc",
+    "crates/ovs-media",
+    "crates/ovs-renderer",
+    "crates/ovs-clock",
+    "crates/ovs-dmx",
+    # Draws the System screen off-screen. It carries the Chromium Embedded
+    # Framework, which the build fetches — one and a half gigabytes — unless
+    # `CEF_PATH` names a copy already on the machine. `tools/remote.sh` sets it;
+    # a machine building this for the first time runs
+    # `cargo run -p export-cef-dir -- --force ~/.local/share/cef` from the
+    # `cef-rs` checkout once.
+    "crates/ovs-console",
+    # The wire between them, which depends on nothing at all — see its own
+    # Cargo.toml for why that is a requirement rather than a preference.
+    "crates/ovs-console-wire",
+]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2021"
+rust-version = "1.98"
+license = "Apache-2.0"
+repository = "https://github.com/testbild-media/OpenVideoServer"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+schemars = "0.8"
+ulid = { version = "1", features = ["serde"] }
+thiserror = "2"
+ovs-types = { path = "crates/ovs-types" }
+ovs-proto = { path = "crates/ovs-proto" }
+ovs-media = { path = "crates/ovs-media" }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "unwind"
+debug = 1
+
+# The renderer is realtime infrastructure. Overflow checks stay on in release so a
+# scheduling or quantization bug surfaces as a panic in test and staging rather
+# than as silently wrong frame timing on stage.
+[profile.release.package.ovs-types]
+overflow-checks = true

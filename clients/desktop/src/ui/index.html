@@ -1,0 +1,806 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      The page loads from file:// and asks the main process for everything it
+      shows, so it needs almost no network of its own, and saying so here means
+      a bug cannot quietly give it one. The data: source is the still
+      composition preview, which arrives as bytes rather than as a URL because
+      an <img> cannot carry a bearer token.
+
+      The one exception is the live preview. Only a page can decode H.264 —
+      WebCodecs exists here and nowhere else in this client — so the socket
+      those pictures arrive on has to be opened from here. A socket scheme and
+      nothing else: this page still cannot fetch, post or navigate anywhere.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src ws: wss:; form-action 'none'; base-uri 'none'"
+    />
+    <title>OpenVideoServer</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <!--
+      The master clock lives in the top bar, where the Live Mode reference puts
+      it: there is exactly one of it in the whole system, so it is not
+      something the live screen owns and hides when another mode is on screen.
+      TAP sets it by ear, RESET puts the beat back on the downbeat without
+      changing the tempo, and the number can be typed.
+    -->
+    <header id="bar">
+      <!--
+        Three, and only three (owner, 2026-09-23): the show, the library, and
+        everything that is configured rather than performed. EDIT and PATCH were
+        two more top-level modes and are now two tabs inside SETTINGS, because
+        neither is something to reach for while a show is running.
+      -->
+      <div id="modes" role="group" aria-label="Mode">
+        <button id="mode-live" class="mode on" type="button">LIVE</button>
+        <button id="mode-media" class="mode" type="button">MEDIA</button>
+        <button id="mode-settings" class="mode" type="button">SETTINGS</button>
+      </div>
+      <div id="identity">
+        <strong id="show">No show</strong>
+        <span id="server"></span>
+      </div>
+      <!--
+        What went wrong, between the show's name and the renderer's state
+        (owner, 2026-09-23): "Ich möchte diese Rote Status/Hinweiß Leiste unten
+        nie wieder sehen… So verschiebt sich niemals die komplette GUI während
+        des bedienen."
+
+        It was a band at the foot of the window that grew when something failed
+        and shrank when it passed, and every one of those moved the whole
+        screen under the operator's hands. This is in the bar, which is a fixed
+        height, and it takes room from the show's name rather than from the
+        show.
+      -->
+      <div id="faults" aria-live="polite" hidden></div>
+      <div id="health">
+        <!--
+          How full the media disc is, while the library is on screen (owner,
+          2026-09-23). Whether there is room for tonight's clips is the
+          operator's business, and finding out by having an upload refused is
+          finding out too late. Hidden on the other screens: it is not a fact
+          about the show.
+        -->
+        <span id="storage" class="pill" hidden></span>
+        <span id="renderer" class="pill">Renderer: —</span>
+        <span id="link" class="pill">Offline</span>
+        <button id="disconnect" type="button" hidden>Disconnect</button>
+      </div>
+    </header>
+
+    <!--
+      Live Mode. Three bands: the global area, the
+      dominant layer × slot matrix, and the preview/work area under it.
+
+      Everything on this screen is live control. Nothing in it writes to the
+      show document — there is no control here for layer order, blend mode,
+      slot assignment or any `default_*` value, because those are the document
+      and the document is edited in Settings.
+    -->
+    <main id="live" hidden>
+      <!-- Banks, so many slots do not make the tiles too small to read
+          . Drawn from what the show has slots for. Above the
+           matrix because it decides what the matrix is showing. -->
+      <!--
+        Banks on the left; the two switches that are not about banks together
+        on the right (owner, 2026-09-23). DMX sat in the middle of the line,
+        which is where an eye running along a row of bank buttons does not
+        expect a switch that takes the show off the console.
+      -->
+      <section id="banks-bar" aria-label="Slot bank">
+        <div id="banks" role="group" aria-label="Slot bank"></div>
+        <div id="banks-bar-end">
+        <!--
+          The one switch that takes the show off the console and onto this
+          window (owner, 2026-09-23). When something goes wrong out there, an
+          operator has to be able to say “not any more” in one press and drive
+          by hand — which is what Live Mode is for.
+        -->
+        <button id="dmx-enabled" class="dmx-switch" type="button" disabled>
+          <span class="dmx-lamp"></span>DMX
+        </button>
+        <!--
+          Stores what is on stage right now into the open show (owner,
+          2026-09-23). It changes nothing live: the show carries on, and what is
+          written is the look the operator has spent the evening finding.
+        -->
+        <button id="save-live" type="button" disabled title="Store what is on stage into the open show. Nothing stops.">
+          Save
+        </button>
+        </div>
+      </section>
+
+      <section id="matrix" aria-label="Layers and slots"></section>
+
+      <!--
+        The master row: everything that is one per show, on one line, under the
+        layers and above the preview (owner, 2026-09-23). It was a tall band at
+        the top of the screen and a clock in the title bar, which is two places
+        to look for one thing and a great deal of room for four numbers.
+      -->
+      <section id="master-row" aria-label="Master">
+        <!--
+          The same fader the opacity bar and the transform use (owner,
+          2026-09-23). A row of controls reads as a row when they are the same
+          height, the same colour and the same shape, and as a pile of
+          unrelated widgets when each is whatever its platform draws.
+        -->
+        <div class="master-control">
+          <label class="fader" for="crossfader">
+            <span class="fader-bar bipolar">
+              <span class="fader-face"
+                ><span>CROSSFADER</span><span id="crossfader-value">—</span></span
+              >
+              <span id="crossfader-fill" class="fader-face on"
+                ><span>CROSSFADER</span><span id="crossfader-value-on">—</span></span
+              >
+              <input id="crossfader" type="range" min="0" max="1000" value="0" disabled />
+            </span>
+          </label>
+          <span class="master-ends"><span>A</span><span>B</span></span>
+        </div>
+
+        <div class="master-control">
+          <label class="fader" for="dimmer">
+            <span class="fader-bar">
+              <span class="fader-face"><span>DIMMER</span><span id="dimmer-value">—</span></span>
+              <span id="dimmer-fill" class="fader-face on"
+                ><span>DIMMER</span><span id="dimmer-value-on">—</span></span
+              >
+              <input id="dimmer" type="range" min="0" max="1000" value="1000" disabled />
+            </span>
+          </label>
+          <span class="master-reported" id="dimmer-reported"></span>
+        </div>
+
+        <div class="master-control">
+          <label>Speed <span id="speed-scale-value">—</span></label>
+          <div id="speed-scale" class="speed-steps"></div>
+          <span class="master-reported" id="speed-scale-reported"></span>
+        </div>
+
+        <!--
+          The clock. It was in the title bar, which is a long way from the
+          layers it keeps time for.
+
+          `inputmode="decimal"` and not `type="number"`: the spinner arrows a
+          number field draws are too small to hit in a dark room and there are
+          now − and + beside it that are not (owner, 2026-09-23). Empty rather
+          than zero until the server has sent a tempo, because a clock reading
+          0.0 is a number nobody set.
+        -->
+        <div id="clock">
+          <button id="tap" type="button" disabled>TAP</button>
+          <div id="clock-tempo">
+            <button id="bpm-down" class="bpm-step" type="button" disabled
+                    aria-label="One BPM slower">−</button>
+            <input
+              id="bpm"
+              type="text"
+              inputmode="decimal"
+              placeholder="—"
+              aria-label="Master BPM"
+              disabled
+            />
+            <button id="bpm-up" class="bpm-step" type="button" disabled
+                    aria-label="One BPM faster">+</button>
+            <span id="bpm-unit">BPM</span>
+          </div>
+          <button id="phase-reset" type="button" disabled
+                  title="Put the beat back on the downbeat">
+            SYNC
+          </button>
+          <!--
+            One lamp per beat of the bar, numbered, like the bar counter on a
+            CDJ: an operator sees at a glance which beat of four the show is
+            on, and therefore whether it is with the music (owner,
+            2026-09-23).
+          -->
+          <div id="beat-strip" role="img" aria-label="Master clock beat" hidden></div>
+          <span id="tap-note"></span>
+        </div>
+
+        <button id="freeze" type="button" disabled>FREEZE</button>
+      </section>
+
+      <!--
+        The preview/work area, as the drawing has its bottom band: the
+        preview/stream box on the left with COMPOSITION and SLICES lettered up
+        its right-hand edge, and the contextual work panel beside it with
+        BROWSER, GENERATOR, OPTIONS and EFFECTS up its left-hand edge
+       .
+
+        What each tab *is* — a view, live control, or a way into Settings — is
+        decided in `shared/work.ts` and each tab says it on screen. None of
+        them writes to the show: the two that would be live control if the
+        server had an endpoint say exactly that instead.
+      -->
+      <section id="work">
+        <section id="preview-panel">
+          <!--
+            The title alone. Which surface is showing is chosen on the rail
+            beside the picture (owner, 2026-09-23) — it was asked in both
+            places, and the row of buttons in here was a row of the picture's
+            own height.
+          -->
+          <div class="panel-head">
+            <h2>Preview</h2>
+          </div>
+          <div id="preview-frame">
+            <canvas id="preview-canvas" hidden></canvas>
+            <img id="preview" alt="" />
+          </div>
+          <!--
+            One line, and only when something is wrong: what the stream is
+            doing when it is not simply running.
+
+            The picture's own size and its encoder were written here and have
+            gone (owner, 2026-09-23) — they are answers to questions nobody
+            asks of a preview that is working, and the picture is what the line
+            was taking room from. The outlines and the piece notes went with the
+            PIECES rail, which asked the same question as the surface buttons
+            above the picture.
+          -->
+          <p id="preview-note"></p>
+        </section>
+
+        <!--
+          COMPOSITION and PIECES, upright beside the picture (owner,
+          2026-09-23). They are the two surfaces the server sends: the whole
+          composition, and the composition with everything not mapped onto a
+          wall taken out. Outputs join them when the server reports any.
+        -->
+        <div id="preview-surfaces" class="tab-rail" role="tablist" aria-label="What the preview shows"></div>
+
+        <!--
+          Two rails on opposite sides of the panel (owner, 2026-09-23): OPTIONS
+          alone on the left, the four browsers on the right. Two different
+          jobs — editing what is selected, and finding a thing to drag onto a
+          pad — so two places, rather than a list of five down one edge.
+        -->
+        <section id="work-panel">
+          <div id="work-tabs" class="tab-rail" role="tablist" aria-label="Work area tool"></div>
+          <div id="work-body">
+            <!--
+              The search sits on this line rather than under it (owner,
+              2026-09-23). A band that is a third of the window has no row to
+              spare for a box that is one control, and a title, what the tab is
+              and a search read perfectly well side by side.
+            -->
+            <div id="work-head" class="panel-head">
+              <h2 id="work-title">Browser</h2>
+              <span id="work-kind" class="tab-kind"></span>
+            </div>
+            <p id="work-says" class="tab-says"></p>
+            <div id="work-tool"></div>
+          </div>
+          <div id="browser-tabs" class="tab-rail" role="tablist" aria-label="Browsers"></div>
+        </section>
+      </section>
+    </main>
+
+    <!--
+      Settings: everything that is configured rather than performed (owner,
+      2026-09-23). It was three top-level modes; it is one, with tabs, because
+      none of it is something to reach for while a show is running and having
+      them beside LIVE invited exactly that.
+
+      The tabs are sections of one document. The show is loaded whole and
+      saved whole — the server has no per-field endpoint — so a Save in any of
+      them is the same Save.
+    -->
+    <main id="settings" hidden>
+      <!--
+        The owner's order, 2026-09-23: the show, then where its picture
+        goes, then what makes the picture, then what drives it.
+      -->
+      <nav id="settings-tabs" role="tablist" aria-label="Settings">
+        <button id="tab-show" class="settings-tab on" type="button" role="tab">
+          Show
+        </button>
+        <button id="tab-mapping" class="settings-tab" type="button" role="tab">
+          IO Mapping
+        </button>
+        <button id="tab-layers" class="settings-tab" type="button" role="tab">
+          Layers
+        </button>
+        <button id="tab-dmx" class="settings-tab" type="button" role="tab">DMX</button>
+
+        <!--
+          One Save for the whole of Settings, beside the tabs rather than
+          inside one of them (owner, 2026-09-23). Every tab edits one document
+          — there is no per-field endpoint and the server takes a show whole
+          — so a Save on each was four buttons for one action, and an operator
+          had to remember which tab they had changed something on.
+
+          **It changes no live state and restarts nothing.** The document is
+          installed under the running show without the restart policy going
+          anywhere near it, and what the live screen has filled in meanwhile is
+          merged rather than overwritten (`mergedForSave`).
+        -->
+        <div id="settings-actions">
+          <button id="settings-save" type="button" disabled>Save</button>
+          <button id="settings-discard" type="button" disabled>Discard</button>
+        </div>
+      </nav>
+
+    <!--
+      The show itself: which show is open, what it is called, and the
+      master settings it is restored to at startup.
+
+      The containers are here; what goes in them is drawn from the document and
+      from the catalogues the server publishes, so no control in this editor is
+      a list written into the page.
+    -->
+    <div id="settings-show" class="settings-pane" hidden>
+      <!--
+        Three columns (owner, 2026-09-23). It was one narrow panel down the
+        left of an empty tab, which spent a screen on a list and then had
+        nowhere to say anything about what was in it.
+
+        Left: every show, in folders. Middle: what the one you clicked on
+        holds — its outputs and its pieces — without opening it, because
+        "which of these forty is the one with the two walls in it" is the
+        question a list of names cannot answer. Right: the document that is
+        actually open, which is the only one anything here can edit.
+      -->
+      <aside id="show-side">
+        <section id="shows-panel">
+          <!--
+            A show that exists only on one server is a show that can be lost
+            (owner, 2026-09-23). Export writes the chosen show as a package:
+            the document and an inventory of the media it needs. Import puts one
+            back, here or on another server.
+          -->
+          <div class="panel-head">
+            <h2>Shows</h2>
+            <div id="show-list-actions">
+              <button id="show-export" type="button" disabled>Export</button>
+              <button id="show-export-all" type="button" disabled>Export all</button>
+              <button id="show-import" type="button">Import</button>
+              <button id="show-new-folder" type="button">New folder</button>
+            </div>
+          </div>
+          <!--
+            Folders down the left, what is in the open one to the right. They
+            are the list's own structure and never a path on any filesystem: a
+            show plays what it plays wherever it is filed. Drag a show
+            onto a folder to file it there.
+          -->
+          <div id="show-body">
+            <nav id="show-folders" aria-label="Show folders"></nav>
+            <div id="show-list"></div>
+          </div>
+          <form id="new-show-form">
+            <input
+              id="new-show-name"
+              type="text"
+              placeholder="New show name"
+              autocomplete="off"
+            />
+            <button id="new-show-button" type="submit">New show</button>
+          </form>
+        </section>
+      </aside>
+
+      <section id="show-main">
+        <section id="show-preview">
+          <div class="panel-head">
+            <h2 id="show-preview-title">Show</h2>
+            <span id="show-preview-says" class="tab-says"></span>
+          </div>
+          <div id="show-preview-body"></div>
+        </section>
+      </section>
+
+      <aside id="show-controls">
+        <section id="document-panel">
+          <div class="panel-head"><h2>Document</h2></div>
+          <div id="document-fields"></div>
+          <p id="document-note"></p>
+          <ul id="document-errors" aria-live="polite"></ul>
+        </section>
+
+        <!-- One master clock and one crossfader per show. These are what
+             they are restored to at startup; what they are doing right now is
+             the Live strip, and nothing here writes to it. -->
+        <section id="master-panel">
+          <div class="panel-head"><h2>Master</h2></div>
+          <div id="master-fields"></div>
+        </section>
+      </aside>
+    </div>
+
+    <!--
+      Layers: how many there are, what they are called, what they open on, and
+      what is in their slots. Configuration and not a show control — creating a
+      layer is not something to do while one is playing (owner, 2026-09-23).
+    -->
+    <div id="settings-layers" class="settings-pane" hidden>
+      <!--
+        The list down the left and the chosen layer beside it (owner,
+        2026-09-23). It was one column of stacked panels in a pane the width of
+        the window, which spent the screen on a list of three names.
+      -->
+      <aside id="layers-side">
+        <section id="layers-panel">
+          <div class="panel-head">
+            <h2>Layers</h2>
+            <button id="add-layer" type="button">Add layer</button>
+          </div>
+          <div id="layer-list"></div>
+        </section>
+      </aside>
+
+      <section id="edit-main">
+        <section id="layer-panel">
+          <div class="panel-head"><h2 id="layer-title">Layer</h2></div>
+          <div id="layer-fields"></div>
+        </section>
+
+        <section id="layer-effects-panel">
+          <div class="panel-head"><h2>Layer effect chain</h2></div>
+          <div id="layer-effects"></div>
+        </section>
+
+        <!--
+          The slots were here, as a pad matrix with a source chooser under it,
+          and they have gone (owner, 2026-09-23): a slot is filled by dragging
+          a clip, a generator or an effect onto its pad in LIVE, and a second
+          way of doing it sitting down was a second thing to keep in step.
+
+          How the clip in a slot *runs* — loop or once, forwards or backwards,
+          its own rate or the show's beat — moved to OPTIONS in LIVE, which is
+          where the owner put the settings for slots, effects and generators.
+          It is still a document edit; it goes through
+          `PUT …/slots/{n}/playback`, which edits the document the server holds
+          without reloading the show.
+        -->
+
+        <!-- Whatever is stopping the document being saved, said on the tab
+             where it might have been caused. The Save itself is beside the
+             tabs (owner, 2026-09-23). -->
+        <ul id="layers-errors" aria-live="polite"></ul>
+
+        <!--
+          Composition → Pieces → Outputs. A piece takes a rectangle of
+          the composition and puts it on a rectangle of an output, so both ends
+          are on screen at once: the composition with every piece drawn on it,
+          and each output with what lands on it.
+
+          Nothing in here is a list written into this page. The connectors, the
+          modes each offers and what each socket is for come from
+          /server/capabilities; the rectangles come from the document.
+        -->
+      </section>
+    </div>
+
+    <!--
+      Mapping: the composition, the outputs it lands on, and the pieces that
+      carry it there. Its own tab because it is a job of its own — somebody
+      sitting with a wall in front of them, not somebody building a show.
+    -->
+    <div id="settings-mapping" class="settings-pane" hidden>
+      <!--
+        Three columns, as the owner's reference has them (2026-09-23): what
+        there is down the left, the viewer in the middle, and the controls for
+        whatever is selected on the right.
+
+        The left is outputs, each with the pieces that draw to it underneath —
+        which is the relationship, and the one an operator holds in their head.
+        Add output and Add piece are there for the same reason: you add a thing
+        to the list you are looking at.
+      -->
+      <aside id="mapping-side">
+        <section id="composition-panel">
+          <div class="panel-head"><h2>Composition</h2></div>
+          <div id="composition-fields"></div>
+        </section>
+
+        <section id="outputs-panel">
+          <div class="panel-head"><h2>Outputs</h2></div>
+          <!-- One set of controls over the whole list, acting on whatever is
+               selected, rather than four buttons on every row. The selection
+               says what they act on, which is how the canvas beside them has
+               always worked. -->
+          <div id="output-controls" class="list-controls"></div>
+          <div id="output-list" role="listbox" aria-label="Outputs and pieces"></div>
+        </section>
+      </aside>
+
+      <!--
+        Adding an output is choosing a socket: an output is forced onto a GPU
+        and connector and stays there whatever is plugged in, so there is no
+        such thing as an output that is not on one. A dialogue rather than two
+        permanent fields above the list, because it is used when a rig is built
+        and then not again.
+      -->
+      <dialog id="add-output-dialog" class="chooser">
+        <h2>Add output</h2>
+        <div id="add-output-fields"></div>
+        <div class="chooser-buttons">
+          <button id="add-output-cancel" type="button">Cancel</button>
+          <button id="add-output-confirm" class="primary" type="button">Add</button>
+        </div>
+      </dialog>
+
+      <section id="mapping-main">
+        <!--
+          Two faces, as the reference drawing has them: Input Selection and
+          Output Transformation (owner, 2026-09-23). They are the two halves of
+          what a piece is — which rectangle of the composition it takes, and
+          where on a wall it lands — and an operator is doing one or the other,
+          never both in the same breath.
+        -->
+        <div id="mapping-faces" role="group" aria-label="Mapping">
+          <button id="mapping-face-input" class="settings-tab on" type="button">INPUT</button>
+          <button id="mapping-face-output" class="settings-tab" type="button">OUTPUT</button>
+          <!-- Starts this face off from the other one, for what is selected.
+               A starting point rather than a link: the two measure different
+               surfaces, and moving one afterwards does not move the other. -->
+          <button id="mapping-face-take" type="button">Take other side</button>
+          <!-- Puts the pieces on the walls themselves, on black, at their own
+               pixels. Here rather than over the list, because this row is what
+               is being looked at and the list is what the show contains. -->
+          <button id="mapping-test-pieces" type="button">Test Pieces</button>
+          <!--
+            The mapping goes onto the wall as it is made (owner, 2026-09-23):
+            lining a wall up is the one job that cannot be done blind, and a
+            mapping that only reached the wall on Save was edited against the
+            old one.
+
+            So it is live, and these two are what an operator does at the end:
+            keep it, or put back the mapping this session started from. Not the
+            Settings Save — that is about the rest of the document, and the
+            mapping has already been stored by the time it is pressed.
+          -->
+          <div id="mapping-live">
+            <span id="mapping-live-state" class="tab-says"></span>
+            <button id="mapping-revert" type="button" disabled>Put back</button>
+          </div>
+          <!--
+            A photograph of the wall, or a plan of it, behind the canvas to line
+            rectangles up against. Temporary and this client's own: it is a
+            working aid, not show data, so it is never written into the show
+            and never sent to a server. Each face keeps its own.
+          -->
+          <div id="mapping-backdrop-controls">
+            <button id="mapping-backdrop-pick" type="button">Backdrop…</button>
+            <button id="mapping-backdrop-clear" type="button" hidden>Clear</button>
+            <label id="mapping-backdrop-strength" hidden>
+              <span>Shows</span>
+              <input id="mapping-backdrop-opacity" type="range" min="0" max="100" step="1" value="40" />
+              <span id="mapping-backdrop-value">40%</span>
+            </label>
+          </div>
+        </div>
+
+        <section id="mapping-viewer">
+          <div class="panel-head">
+            <h2 id="mapping-stage-title">Composition</h2>
+            <!-- INPUT only: OUTPUT is one wall by construction, and a switch
+                 that did nothing there would be a control that lies. -->
+            <label id="stage-all-pieces" class="inline">
+              <input type="checkbox" id="mapping-all-pieces" />
+              All walls
+            </label>
+            <div id="stage-zoom" class="inline">
+              <button id="zoom-out" type="button">&#8722;</button>
+              <button id="zoom-fit" type="button">Fit</button>
+              <button id="zoom-in" type="button">+</button>
+            </div>
+          </div>
+          <p id="composition-caption" class="stage-caption"></p>
+          <!-- One surface at a time, and which one the face decides: the
+               composition every piece is taken from, or the output the
+               selected piece lands on. -->
+          <div id="composition-stage"></div>
+        </section>
+      </section>
+
+      <aside id="mapping-controls">
+        <section id="piece-panel">
+          <div class="panel-head"><h2 id="piece-title">Piece</h2></div>
+          <!-- Numbers, not just handles (owner, 2026-09-23). An LED wall is
+               patched to exact pixel boundaries and a processor's documentation
+               gives them as numbers, so this is where the mapping is actually
+               made; the rectangles on the canvas are for seeing whether it is
+               right. Which numbers depends on the face. -->
+          <div id="piece-fields"></div>
+        </section>
+        <p id="piece-none" class="empty-note">
+          Choose a piece on the left to set its numbers.
+        </p>
+      </aside>
+    </div>
+
+    <!--
+      The DMX-over-IP patch. A fixture personality bound to something
+      in this show, a universe and a start address. It is part of the same
+      document as everything in Settings — the patch lives in `fixture_patch` — so
+      the Save here is that Save, and the server takes the show whole.
+
+      Nothing in here is a list written into this page. The personalities, their
+      footprints and their channels come from /fixtures; where a fixture fits
+      comes from /shows/{id}/patch/address; what there is to patch comes from
+      the document.
+
+      This is configuration, not live control. It says which channel moves the
+      master dimmer, never what the dimmer is doing.
+    -->
+    <div id="settings-dmx" class="settings-pane" hidden>
+      <!--
+        What reaches this show, above everything that says where it goes. Two
+        switches rather than one, because a rig is not one thing: a venue's
+        house desk may speak sACN while a visiting console brings Art-Net, and
+        an operator who wants one of them to stop wants the other to keep going
+        (owner, 2026-09-23).
+
+        Switched off means it does not drive anything, not that it is not
+        listened for: the sockets stay open and the status keeps saying what is
+        on the wire, so "I switched it off" can be told from "the cable is out".
+      -->
+      <div id="dmx-protocols" role="group" aria-label="DMX protocols">
+        <button id="dmx-artnet" class="dmx-switch" type="button" disabled>
+          <span class="dmx-lamp"></span>Art-Net
+        </button>
+        <button id="dmx-sacn" class="dmx-switch" type="button" disabled>
+          <span class="dmx-lamp"></span>sACN
+        </button>
+        <span id="dmx-protocols-note" class="tab-says"></span>
+      </div>
+
+      <aside id="patch-side">
+        <!--
+          What there is to patch, laid out the way a lighting desk lays it out
+          (owner, 2026-09-23): the fixtures down the left, and you drag one onto
+          a channel. Everything here is something in *this* show — the
+          master, each layer, each module that publishes a personality — rather
+          than a catalogue of manufacturers' products, because that is what a
+          fixture is on this server.
+        -->
+        <section id="patch-fixtures-panel">
+          <div class="panel-head">
+            <h2>Fixtures</h2>
+          </div>
+          <div id="patch-fixtures"></div>
+        </section>
+
+        <section id="patch-document">
+          <div class="panel-head"><h2>Document</h2></div>
+          <div id="patch-document-fields"></div>
+          <p id="patch-document-note"></p>
+          <ul id="patch-errors" aria-live="polite"></ul>
+        </section>
+      </aside>
+
+      <section id="patch-main">
+        <!-- Universes along the top, one at a time underneath. A rig has a few
+             and a list of all of them at once is a page nobody reads. -->
+        <div id="patch-universe-tabs" role="group" aria-label="Universes"></div>
+
+        <section id="patch-universe-panel">
+          <div class="panel-head">
+            <h2 id="patch-universe-title">Universe</h2>
+            <span id="patch-universe-says" class="tab-says"></span>
+            <!--
+              Top right, and only once something is selected (owner,
+              2026-09-23). An address or a universe is changed by taking the
+              fixture out and dragging it in again, or by dragging it within
+              the universe it is in, so this is the one edit the grid needs a
+              button for.
+            -->
+            <button id="patch-delete" type="button" hidden>Delete fixture</button>
+          </div>
+          <!-- Five hundred and twelve channels, drawn as they are held. Two
+               blocks in the same place is the mistake this page exists to
+               catch, and a list of addresses does not show it. -->
+          <div id="patch-channels-grid"></div>
+          <ul id="patch-advisories" aria-live="polite"></ul>
+        </section>
+
+        <section id="patch-fixture-panel">
+          <div class="panel-head"><h2 id="patch-fixture-title">Fixture</h2></div>
+          <div id="patch-fixture-fields"></div>
+          <div id="patch-channels"></div>
+        </section>
+      </section>
+    </div>
+    </main>
+
+    <!--
+      Media. The library is a database view of what the server holds:
+      names, pictures, states and what the server measured. No path and no
+      storage key appears anywhere in it, because none is ever sent.
+
+      The import queue beside it is files on their way in: probed, hashed,
+      declared as what they turned out to be, uploaded resumably and verified.
+      Nothing in here is a list written into this page — the states come from
+      the server and the profiles, on the one screen that has to offer them,
+      come from the checked catalogue in limits.ts.
+    -->
+    <main id="media" hidden>
+      <!--
+        The library takes the width and the import queue moves beside it, with
+        the selected clip's properties under it (owner, 2026-09-23). Import was
+        a column of its own down the left, which cost the library a third of
+        the screen for a panel that is empty most of the time.
+      -->
+      <section id="library-panel">
+        <div class="panel-head">
+          <h2>Library</h2>
+          <button id="library-new-folder" type="button">New folder</button>
+          <button id="library-refresh" type="button">Refresh</button>
+        </div>
+        <!--
+          Folders down the left, what is in the open one to the right. The
+          folders are the library's own structure and never a path on any
+          filesystem: organising media must not move the real files (owner,
+          2026-09-23). A clip is dragged onto a folder to file it there.
+        -->
+        <div id="library-body">
+          <nav id="library-folders" aria-label="Folders"></nav>
+          <div id="library-content">
+            <p id="library-note"></p>
+            <div id="library-grid"></div>
+          </div>
+        </div>
+      </section>
+
+      <aside id="media-side">
+        <section id="ingest-panel">
+          <div class="panel-head">
+            <h2>Import</h2>
+            <button id="ingest-pick" type="button">Choose files…</button>
+            <button id="ingest-clear" type="button" disabled>Clear finished</button>
+          </div>
+          <div id="ingest-drop">
+            <p>Drop media here.</p>
+            <!-- Which folder, said out loud. A file dropped while standing in a
+                 folder is filed there, and an operator should be able to see
+                 where before they let go (owner, 2026-09-23). -->
+            <p id="ingest-into" class="tab-says"></p>
+            <p class="hint">
+              Each file is read to find out what it holds, hashed so the server
+              can say whether it already has it, then uploaded and verified. An
+              upload that stops carries on from where the server got to.
+            </p>
+          </div>
+          <div id="ingest-list"></div>
+        </section>
+
+        <section id="media-detail" hidden>
+          <div class="panel-head"><h2 id="media-title">Item</h2></div>
+          <div id="media-fields"></div>
+        </section>
+      </aside>
+    </main>
+
+    <section id="connect">
+      <form id="connect-form">
+        <h1>Connect to a server</h1>
+        <div id="found">
+          <p id="found-label">Servers on this network</p>
+          <div id="found-list"></div>
+          <p id="found-note">Looking…</p>
+        </div>
+        <label for="address">Server</label>
+        <input id="address" name="address" type="text" placeholder="10.0.0.12" autocomplete="off" />
+        <label for="username">Operator</label>
+        <input id="username" name="username" type="text" autocomplete="off" />
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="off" />
+        <button id="connect-button" type="submit">Connect</button>
+        <p id="connect-note"></p>
+      </form>
+    </section>
+
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

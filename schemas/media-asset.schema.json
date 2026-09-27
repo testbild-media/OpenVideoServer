@@ -1,0 +1,143 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MediaAsset",
+  "description": "One physical representation of a media item.\n\nA media item can have several assets, and in practice has one: the file that was uploaded for it. Nothing rewrites an asset, so a show keeps playing exactly the bytes it was built with.",
+  "type": "object",
+  "required": [
+    "byte_size",
+    "codec",
+    "container",
+    "created_at",
+    "id",
+    "media_item_id",
+    "object_key",
+    "sha256",
+    "validation"
+  ],
+  "properties": {
+    "byte_size": {
+      "description": "Size on disk in bytes.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "codec": {
+      "description": "Codec name, as the server read it out of the file.\n\n`h264`, `hevc`, `av1`, `prores`, `hap`, `png`. This is what the file holds, not what an upload claimed it held: the server probes every video it accepts, and a declaration that disagrees with the file loses.",
+      "type": "string"
+    },
+    "container": {
+      "description": "Container format, as the server read it out of the file.\n\nFFmpeg's own name for the demuxer, which is a list where one demuxer answers to several: `mov,mp4,m4a,3gp,3g2,mj2`.",
+      "type": "string"
+    },
+    "created_at": {
+      "description": "When the asset was registered.",
+      "type": "integer",
+      "format": "int64"
+    },
+    "id": {
+      "description": "Stable identifier.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/MediaAssetId"
+        }
+      ]
+    },
+    "media_item_id": {
+      "description": "The logical item this asset represents.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/MediaItemId"
+        }
+      ]
+    },
+    "object_key": {
+      "description": "Content-addressed storage key, for example `ab/abcdef....mov`.\n\nServer-internal. Never sent to the client, never shown to an operator and never stored in a show.",
+      "type": "string"
+    },
+    "sha256": {
+      "description": "Lowercase hex SHA-256 of the file, used for verification and deduplication.",
+      "type": "string"
+    },
+    "validation": {
+      "description": "Verification state.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/AssetValidation"
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "AssetValidation": {
+      "description": "Whether a physical asset has been verified against its recorded hash.",
+      "oneOf": [
+        {
+          "description": "Staged but not yet verified. Never playable.",
+          "type": "object",
+          "required": [
+            "state"
+          ],
+          "properties": {
+            "state": {
+              "type": "string",
+              "enum": [
+                "pending"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Hash and size matched what the client declared.",
+          "type": "object",
+          "required": [
+            "at",
+            "state"
+          ],
+          "properties": {
+            "at": {
+              "description": "When verification succeeded.",
+              "type": "integer",
+              "format": "int64"
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "verified"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Verification failed. Never playable.",
+          "type": "object",
+          "required": [
+            "reason",
+            "state"
+          ],
+          "properties": {
+            "reason": {
+              "description": "Why it failed, for the diagnostics view.",
+              "type": "string"
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "failed"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "MediaAssetId": {
+      "description": "MediaAssetId (ULID, 26 characters)",
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "MediaItemId": {
+      "description": "MediaItemId (ULID, 26 characters)",
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    }
+  }
+}

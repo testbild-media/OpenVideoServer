@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "UploadSession",
+  "description": "A resumable upload in progress.",
+  "type": "object",
+  "required": [
+    "byte_size",
+    "chunk_size",
+    "media_item_id",
+    "received_bytes",
+    "upload_id"
+  ],
+  "properties": {
+    "byte_size": {
+      "description": "Total bytes expected.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "chunk_size": {
+      "description": "Chunk size the server prefers, in bytes.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "media_item_id": {
+      "description": "The item the content will belong to once it is verified.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/MediaItemId"
+        }
+      ]
+    },
+    "received_bytes": {
+      "description": "Bytes already received, contiguous from the start.\n\nA client resumes by sending from this offset. Contiguous rather than a set of ranges because a single offset is all a resumable PUT needs, and a range set would invite out-of-order writes that complicate verification for no operator-visible benefit.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "upload_id": {
+      "description": "Identifies this upload.",
+      "type": "string"
+    }
+  },
+  "definitions": {
+    "MediaItemId": {
+      "description": "MediaItemId (ULID, 26 characters)",
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    }
+  }
+}

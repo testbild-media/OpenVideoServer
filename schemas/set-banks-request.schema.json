@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SetBanksRequest",
+  "description": "Sets how many banks of twelve a layer's matrix shows.\n\nIts own request because an operator asks for a bank in order to put something in it, and a count worked out from the slots would collapse back to what is filled on the next redraw (owner, 2026-09-23).",
+  "type": "object",
+  "required": [
+    "banks"
+  ],
+  "properties": {
+    "banks": {
+      "description": "How many banks to show, between one and `Layer::MAX_BANKS`.",
+      "type": "integer",
+      "format": "uint16",
+      "minimum": 0.0
+    }
+  }
+}

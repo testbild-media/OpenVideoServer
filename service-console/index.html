@@ -1,0 +1,1902 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=1024, initial-scale=1" />
+    <title>OpenVideoServer — System</title>
+    <style>
+      /*
+        1024x600, touch, and nothing else. The Service Display
+        is a small panel in a rack, read at arm's length in a dark room: large
+        numbers, high contrast, no hover states and nothing that needs a mouse.
+
+        The layout follows the owner's System1024x600 reference: the machine
+        down the left with a minute of history behind each number, and one
+        preview on the right with what it is showing underneath it.
+      */
+      :root {
+        --bg: #17171a;
+        --left: #202024;
+        --edge: #3a3a42;
+        --text: #f0f0f2;
+        --dim: #8f8f98;
+        --accent: #ff9900;
+        --good: #57d38c;
+        --bad: #ef5f5f;
+        --grid: #3a3a42;
+      }
+
+      * {
+        box-sizing: border-box;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #000;
+        color: var(--text);
+        font: 14px/1.3 "Segoe UI", system-ui, -apple-system, sans-serif;
+        user-select: none;
+        -webkit-text-size-adjust: none;
+      }
+
+      /*
+        The screen fills the panel it is on, whatever shape that is.
+
+        **The design box grows into the panel; it is never squeezed by it.** The
+        scale is the smaller of the two ratios, exactly as when this was
+        letterboxed — so the text is the size it always was — and the box is then
+        the panel divided by that scale. Whichever direction had room to spare
+        gets it, in design pixels, and the panel is covered exactly.
+
+        This used to be a fixed 1024x600 box centred with black around it on any
+        panel that was not 1024:600 — including 16:9, where the bars were thin
+        enough to look like a border and were not one. An output is taken whole
+        (owner, 2026-09-25: "Das System Display soll aber nur ein Display
+        komplett füllen").
+
+        Growing rather than shrinking is the part that was got wrong once: making
+        the box the panel's shape at a fixed height gave a 5:4 monitor a 750-wide
+        box, and the buttons under the preview came out reading TESTPATT COMPOSIT
+        and SHUTDOW. Filling a panel by taking room away is not filling it.
+
+        The left column stays 431 design pixels, because the box is never
+        *narrower* than 1024 — only the direction with room to spare grows.
+      */
+      #screen {
+        display: grid;
+        grid-template-columns: 431px 1fr;
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: var(--design-width, 1024px);
+        height: var(--design-height, 600px);
+        background: var(--bg);
+        transform: translate(-50%, -50%) scale(var(--fit, 1));
+        transform-origin: center;
+      }
+
+      /*
+        The pointer, which this page has to draw itself.
+
+        CEF paints the page and hands over the pixels; a cursor is not part of a
+        page, so nothing else would. Without it a mouse over this screen moves
+        something invisible — the presses land, and there is no way to see where.
+
+        **Fixed, not inside the screen.** `#screen` is scaled by `--fit`, and a
+        mouse event's coordinates are the panel's, not the design's. Sitting
+        outside the transform means the two agree without arithmetic; only the
+        size follows the scale, so the arrow is the same size on a 1024x600 rack
+        panel as on a 4K one.
+
+        `pointer-events: none` so it can never take a press meant for a button.
+      */
+      #pointer {
+        position: fixed;
+        left: 0;
+        top: 0;
+        width: calc(22px * var(--fit, 1));
+        height: calc(22px * var(--fit, 1));
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 120ms linear;
+        z-index: 10;
+        /* Drawn rather than a character: a glyph is a font's opinion, and this
+           panel has one font and no guarantee about what is in it. */
+        color: #fff;
+        filter: drop-shadow(0 0 calc(2px * var(--fit, 1)) rgba(0, 0, 0, 0.9));
+      }
+
+      #pointer.shown {
+        opacity: 1;
+      }
+
+      /* ---------------------------------------------------------------- left */
+
+      #left {
+        background: linear-gradient(100deg, var(--left) 72%, #2b2118 100%);
+        padding: 14px 16px 10px;
+        display: flex;
+        flex-direction: column;
+      }
+
+      #brand {
+        text-align: center;
+        padding: 4px 0 2px;
+      }
+
+      .logo {
+        display: block;
+        width: 260px;
+        height: 168px;
+        margin: 0 auto;
+        /* The owner's mark is drawn in one grey; on a dark panel it needs a
+           lighter one, so the file's grey is `currentColor` and this sets it. */
+        color: #c9c9cf;
+      }
+
+      #build {
+        margin-top: -14px;
+        padding-right: 8px;
+        text-align: right;
+        font-size: 11px;
+        color: var(--dim);
+      }
+
+      /* The address and the uptime; the reference drawing has
+         no room for a row of its own, so they sit under the mark where the eye
+         is already going. */
+      #host {
+        text-align: center;
+        font-size: 11px;
+        color: var(--dim);
+        margin: 6px 0 2px;
+        height: 14px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      #meters {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-evenly;
+      }
+
+      .meter {
+        display: grid;
+        /* Wide enough for the longest name on one line — `MEDIA DISK` — so all
+           five read as a column rather than one of them being two lines tall. */
+        grid-template-columns: 104px 1fr;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .meter .name {
+        text-align: center;
+        font-weight: 700;
+        font-size: 15px;
+        color: var(--accent);
+        letter-spacing: 0.01em;
+        line-height: 1.15;
+      }
+
+      /*
+        A reading is set smaller when it is long rather than wrapped or cut: a
+        disk that reads `1.23/12.34TB` is still a number somebody has to read,
+        and half of it is worse than all of it a point smaller. `fit` below
+        measures and picks the size; the ellipsis is the last resort under that.
+      */
+      .meter .value {
+        display: block;
+        color: var(--text);
+        font-size: 15px;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      /* A reading the machine does not offer is a dash, never a zero: a console
+         that showed 0 °C would look like a sensor that works. */
+      .meter .value.absent {
+        color: var(--dim);
+      }
+
+      .meter .extra {
+        display: block;
+        font-size: 10px;
+        color: var(--dim);
+        font-weight: 400;
+      }
+
+      .graph {
+        display: block;
+        width: 100%;
+        height: 62px;
+      }
+
+      /* --------------------------------------------------------------- right */
+
+      /*
+        Fixed rows, not stacked content.
+
+        The bar, the preview and the buttons are exactly as tall as they are
+        drawn; the panels take what is left. Nothing here is allowed to be sized
+        by its text, because the text changes — an output's mode is longer than
+        a composition's, one channel has six detail rows and another has four —
+        and with stacked content a longer line pushed the buttons off the bottom
+        of the screen. On a rack panel with no keyboard, a button that has moved
+        somewhere is a button that is gone.
+      */
+      #right {
+        background: linear-gradient(160deg, #241b12 0%, #1b1b1f 45%, #17171a 100%);
+        padding: 12px 16px 14px;
+        display: grid;
+        /*
+          The bar and the buttons are exactly as tall as they are drawn; the
+          preview and the panels share what is left.
+
+          At the design height the preview's floor of 274 is what binds, the
+          panels take the remaining 190, and the reference screen is what it
+          always was. A taller panel is past both floors and divides the extra in
+          half — the picture cannot always use its half, because on a narrow
+          column it is as wide as it can get and its height follows, but half is
+          a bounded waste and giving it all to either side is not.
+        */
+        grid-template-rows: 22px minmax(274px, 1fr) minmax(0, 1fr) 58px;
+        gap: 10px;
+        overflow: hidden;
+      }
+
+      /*
+        One line, always.
+
+        `minmax(0, …)` on every column is what lets them give way: the hint in
+        the middle goes first, because it is the one thing here nobody needs to
+        read twice, and the name and the mode ellipsize only if even that was
+        not enough. Without it the grid would rather overflow than shrink, and
+        an overflowing line wraps — which is how `1920x1080px 59.94Hz` ended up
+        on two lines and moved everything under it.
+      */
+      #channel-bar {
+        display: grid;
+        grid-template-columns: minmax(0, auto) minmax(0, 1fr) minmax(0, auto);
+        align-items: baseline;
+        gap: 10px;
+        font-weight: 700;
+        font-size: 15px;
+        color: var(--accent);
+        white-space: nowrap;
+        overflow: hidden;
+      }
+
+      #channel-bar > span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      #channel-hint {
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--dim);
+        letter-spacing: 0.02em;
+        text-align: center;
+      }
+
+      #channel-mode {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+
+      /*
+        The room the picture is centred in. The picture brings its own frame.
+
+        Nothing here has a shape: it is the whole cell, so a touch anywhere near
+        the preview counts, and the two pixels of padding are what the frame is
+        drawn in without being clipped by the row.
+      */
+      #preview {
+        position: relative;
+        padding: 2px;
+        width: 100%;
+        height: 100%;
+        display: grid;
+        place-items: center;
+        cursor: pointer;
+      }
+
+      /*
+        One surface, whatever drew on it, and it is its own frame.
+
+        The live stream decodes into this canvas and the polled stills draw into
+        the same one, so nothing here knows which of the two is running and there
+        is no second element to keep hidden.
+
+        **It sizes itself.** `paintPicture` sets the canvas to the picture's own
+        size — the renderer sends a wall in the wall's proportions, so a 4:3 wall
+        arrives 4:3 — and `max-width`/`max-height` scale that down keeping its
+        shape. The frame is therefore always exactly the picture.
+
+        The box used to carry the shape with the canvas stretched over it, which
+        held only while the box could take that shape. On a 5:4 panel the row is
+        taller than the column is wide: the box hit `max-width`, kept its height,
+        and drew a frame that was not 16:9 with black bands inside it.
+
+        Outlined rather than bordered, so the frame is drawn around the picture
+        instead of inside it: with `box-sizing: border-box` a border eats four
+        pixels of the picture's own width and leaves a hair of black down each
+        side.
+      */
+      #preview canvas {
+        display: none;
+        max-width: 100%;
+        max-height: 100%;
+        outline: 2px solid var(--accent);
+        background: #000;
+      }
+
+      #preview.has-picture canvas {
+        display: block;
+      }
+
+      /* Nothing to show yet, so this is what has the shape: the frame stays
+         where an operator expects it while the renderer is still coming up. */
+      #preview .empty {
+        outline: 2px solid var(--accent);
+        background: #000;
+        height: 100%;
+        aspect-ratio: var(--preview-aspect, 16 / 9);
+        max-width: 100%;
+        display: grid;
+        place-items: center;
+        color: var(--dim);
+        font-size: 12px;
+        text-align: center;
+        padding: 0 24px;
+      }
+
+      #preview.has-picture .empty {
+        display: none;
+      }
+
+      #panels {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+        min-height: 0;
+      }
+
+      .panel {
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 153, 0, 0.18);
+        border-radius: 3px;
+        padding: 8px 10px 10px;
+        /* A panel with more rows than fit is clipped, not grown: the one below
+           it is a row of buttons somebody is about to press. */
+        overflow: hidden;
+      }
+
+      .panel h2 {
+        margin: 2px 0 4px;
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--accent);
+        letter-spacing: 0.02em;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 8px;
+      }
+
+      /* The one instruction on this page. Quiet, because it is only needed
+         once: an operator who has cleared a count knows how. */
+      .panel h2 span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .panel h2 small {
+        font-size: 9px;
+        font-weight: 600;
+        color: var(--dim);
+        letter-spacing: 0.04em;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      /* The thing loaded, rather than an instruction about the heading: read at
+         the same weight as a reading, because it is one. */
+      .panel h2 small.loaded {
+        font-size: 12px;
+        font-weight: 400;
+        color: var(--text);
+        letter-spacing: 0;
+      }
+
+      /*
+        A count that can be put back to zero, and looks it.
+
+        The dotted rule under the number is the affordance — the row is not a
+        button, and dressing it as one would put four more buttons on a page
+        whose buttons stop shows.
+      */
+      .row.clearable {
+        cursor: pointer;
+      }
+
+      .row.clearable b {
+        border-bottom: 1px dotted rgba(255, 255, 255, 0.28);
+      }
+
+      .row.clearable:active,
+      .row.cleared {
+        background: rgba(255, 153, 0, 0.14);
+      }
+
+      .panel h2 + .row {
+        border-top: none;
+      }
+
+      .row {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 2px 0;
+        font-size: 12px;
+        color: var(--dim);
+        border-top: 1px solid rgba(255, 255, 255, 0.05);
+        white-space: nowrap;
+      }
+
+      /* The name of a row is fixed and fits; the value is whatever the machine
+         is called this evening, so that is the half that gives way. */
+      .row span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        flex: 0 1 auto;
+      }
+
+      .row b {
+        font-weight: 400;
+        color: var(--text);
+        font-variant-numeric: tabular-nums;
+        text-align: right;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+
+      .row b.good {
+        color: var(--good);
+      }
+
+      .row b.bad {
+        color: var(--bad);
+      }
+
+      /*
+        Four, and only four.
+
+        This row is where the two buttons that end a show live, so it is kept to
+        the things worth reaching for with a whole hand. Clearing a counter is
+        not one of them: it belongs to the number it clears, and that is where
+        it is (see `.clearable`).
+      */
+      #buttons {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+        margin-top: auto;
+      }
+
+      #buttons button {
+        height: 58px;
+        padding: 0 4px;
+        white-space: nowrap;
+        overflow: hidden;
+        background: transparent;
+        border: 2px solid var(--accent);
+        border-radius: 3px;
+        color: var(--accent);
+        font: 700 17px/1.1 inherit;
+        letter-spacing: 0.01em;
+        cursor: pointer;
+      }
+
+      #buttons button.on,
+      #buttons button.holding {
+        background: var(--accent);
+        color: #17171a;
+      }
+
+      #buttons button:disabled {
+        opacity: 0.4;
+      }
+
+      /* ------------------------------------------------------------- holding */
+
+      /* Six seconds of deliberate pressure. The screen says what is about to
+         happen and how to stop it, because the person holding the button is
+         about to end a show. */
+      #holding {
+        position: fixed;
+        inset: 0;
+        display: none;
+        place-content: center;
+        text-align: center;
+        background: rgba(15, 12, 8, 0.72);
+        z-index: 10;
+      }
+
+      #holding.shown {
+        display: grid;
+      }
+
+      #holding .what {
+        font-size: 46px;
+        font-weight: 700;
+        letter-spacing: 0.01em;
+      }
+
+      #holding .how {
+        margin-top: 6px;
+        font-size: 17px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+      }
+
+      #fault {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        padding: 8px 16px;
+        background: rgba(239, 95, 95, 0.16);
+        color: var(--bad);
+        font-size: 12px;
+        display: none;
+      }
+
+      #fault.shown {
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Outside `#screen`, because it is positioned in the panel's own pixels
+         rather than in the design's. See `#pointer` above.
+
+         **The viewBox starts at the tip, not at the corner.** The path's first
+         point is (5,2), and `translate()` puts the element's *origin* at the
+         pointer — so with a `0 0` box the ink sat below and right of the place a
+         press actually lands: 5 px and 2 px at `--fit` 1, and 17 px and 7 px on
+         a 4K panel. Aim the tip at the edge of a control and the press misses
+         it. Measured in a browser against this page, before and after. -->
+    <svg id="pointer" viewBox="5 2 24 24" aria-hidden="true">
+      <path
+        d="M5 2 L5 20 L9.5 15.5 L12.5 22 L15.5 20.5 L12.5 14.5 L19 14.5 Z"
+        fill="currentColor"
+        stroke="#000"
+        stroke-width="1.5"
+        stroke-linejoin="round"
+      />
+    </svg>
+
+    <div id="screen">
+      <aside id="left">
+        <div id="brand">
+          <svg class="logo" role="img" aria-label="OpenVideoServer" viewBox="0 0 1919.9999 1080" xmlns="http://www.w3.org/2000/svg" ><g ><g transform="matrix(3.4188856,0,0,3.4188856,471.52668,-124.40219)" ><path fill="currentColor" d="M 7.6016032,36.407597 C 3.1484878,36.569279 0,37.661046 0,39.293209 v 32.705497 c 0,2.176217 5.5973689,4.277775 12.421464,4.68912 l 44.623116,2.689758 c 6.185647,0.372877 11.144539,-0.980185 11.144539,-3.018421 V 45.727958 c 0,-2.038236 -4.958892,-4.176795 -11.144539,-4.78317 L 12.421464,36.570378 C 10.71544,36.403147 9.085975,36.353703 7.6016032,36.407597 Z m 72.6694658,7.102409 c -3.867075,0.178116 -6.599597,1.214874 -6.599597,2.735233 V 76.70953 c 0,2.027045 4.857518,3.963375 10.785388,4.320666 l 10.577133,0.637687 c 1.684509,-3.134374 4.198051,-5.815018 7.381457,-7.649145 2.9967,-1.730192 6.34803,-2.596674 9.70277,-2.597774 h 0.001 c 3.35475,-9.46e-4 6.71138,0.864526 9.71621,2.597774 h 0.002 l 11.25513,6.497278 c 1e-5,-0.0023 0.002,-0.0044 0.002,-0.0067 V 51.852132 c 0,-0.915608 -1.01699,-1.891727 -2.83342,-2.716113 -1.82442,-0.827484 -4.30904,-1.436507 -6.91379,-1.691887 L 84.4567,43.631962 c -1.481967,-0.145274 -2.896766,-0.181328 -4.185791,-0.121956 z m 63.478301,6.194454 c -1.13302,0.05935 -2.17724,0.207953 -3.06597,0.44235 -1.78346,0.470592 -2.78846,1.247513 -2.78846,2.158524 v 28.510922 c 0,0.911011 1.005,1.84741 2.78846,2.600358 1.77746,0.750051 4.17639,1.254495 6.66523,1.404565 l 34.19533,2.061373 c 4.76886,0.287452 8.59792,-0.934066 8.59792,-2.725415 V 57.235266 c 0,-1.79135 -3.82906,-3.619077 -8.59792,-4.086572 L 147.34863,49.79696 c -1.24442,-0.121994 -2.46625,-0.151849 -3.59926,-0.0925 z m 55.74026,5.457031 c -2.99553,0.196409 -5.1108,1.136608 -5.1108,2.473751 v 26.793196 c 0,1.782758 3.75999,3.454595 8.35402,3.731555 l 30.30254,1.826762 c 4.23633,0.255379 7.64346,-0.909152 7.64346,-2.598291 V 62.003451 c 0,-1.689139 -3.40713,-3.391663 -7.64346,-3.807003 l -30.30254,-2.970362 c -1.14851,-0.112578 -2.24471,-0.130065 -3.24322,-0.0646 z m 49.49982,4.837947 c -2.66675,0.200822 -4.54391,1.098387 -4.54391,2.359546 v 25.270809 c 0,1.681546 3.3372,3.246224 7.43366,3.49281 l 27.03659,1.629875 c 1.81843,0.109905 3.56681,-0.09119 4.8457,-0.557589 1.2689,-0.464897 1.98851,-1.156577 1.98851,-1.923913 V 66.256938 c 0,-0.767337 -0.71961,-1.572 -1.98851,-2.238623 -1.27889,-0.668822 -3.02727,-1.145623 -4.8457,-1.324467 L 251.8792,60.043363 c -1.02411,-0.100238 -2.00083,-0.110865 -2.88975,-0.04393 z M 12.421464,79.693327 C 5.5973689,79.294372 0,80.731384 0,82.907601 v 32.706009 c 0,1.0451 1.3220233,2.07714 3.6679932,2.86546 2.3359784,0.78632 5.4872971,1.26376 8.7534708,1.3317 l 44.623116,0.92398 c 2.979422,0.0609 5.821299,-0.27044 7.906494,-0.92087 2.076204,-0.64744 3.239079,-1.56072 3.239079,-2.53887 l -10e-4,-30.631203 c 0,-2.038237 -4.958892,-3.980784 -11.144539,-4.342371 z m 72.035396,4.210596 c -5.92787,-0.346401 -10.785388,1.012978 -10.785388,3.040124 v 30.464803 c 0,0.97316 1.14703,1.93207 3.183268,2.66444 2.027246,0.72837 4.764576,1.17044 7.60212,1.22938 l 8.234123,0.17054 V 90.850785 c 0,-2.216703 0.417135,-4.366779 1.12913,-6.399609 z m 62.89177,3.675744 c -0.68197,-0.03983 -1.31495,0.01332 -1.97249,0.02739 l 44.76574,25.842863 V 93.324536 c 0,-1.79135 -3.82906,-3.467266 -8.59792,-3.746024 z m 55.38422,3.237529 c -4.59403,-0.268568 -8.35402,0.95651 -8.35402,2.739367 v 22.339207 l 13.80278,7.96799 24.85378,0.51521 c 2.03824,0.042 3.98692,-0.24199 5.41569,-0.78651 1.42876,-0.54353 2.22777,-1.30279 2.22777,-2.11409 V 96.092843 c 0,-1.689139 -3.40713,-3.25701 -7.64346,-3.504696 z m 49.14635,2.872176 c -4.09646,-0.238993 -7.43366,0.928732 -7.43366,2.610176 v 25.270812 c 0,0.80731 0.78971,1.59938 2.1885,2.19986 1.39879,0.59948 3.28685,0.95742 5.24516,0.99839 l 27.03659,0.55914 c 1.81843,0.038 3.56681,-0.23175 4.8457,-0.74931 1.2689,-0.51455 1.98851,-1.2346 1.98851,-2.00194 V 98.562459 c 0,-0.767336 -0.71961,-1.543907 -1.98851,-2.160075 -1.27889,-0.618262 -3.02727,-1.026139 -4.8457,-1.132747 z M 12.421464,122.81628 c -3.2661737,-0.0619 -6.4174924,0.29207 -8.7534708,0.98547 C 1.3220233,124.49814 0,125.47689 0,126.52199 v 32.70602 c 0,1.04509 1.3220233,2.02436 3.6679932,2.72076 2.3359784,0.6934 5.4872971,1.0469 8.7534708,0.98495 L 57.04458,162.0914 c 2.979422,-0.0559 5.821299,-0.50068 7.906494,-1.23404 2.076204,-0.72936 3.239079,-1.68834 3.239079,-2.6665 v -30.63172 c 0,-0.97915 -1.162875,-1.93714 -3.239079,-2.6665 -2.085195,-0.73337 -4.927072,-1.17809 -7.906494,-1.23404 z m 72.035396,1.36012 c -2.837544,-0.054 -5.574874,0.27867 -7.60212,0.92811 -2.036238,0.65144 -3.183268,1.5647 -3.183268,2.53886 v 30.46326 c 0,0.97415 1.14703,1.88743 3.183268,2.53886 2.027246,0.64944 4.764576,0.98258 7.60212,0.92863 l 8.234123,-0.15555 v -37.08714 z m 128.32292,2.42156 c 5.49375,3.57784 8.8767,9.68219 8.87956,16.27239 v 0.002 c 0,6.60033 -3.38761,12.7129 -8.89145,16.28014 l 20.2675,-0.38241 c 2.03824,-0.039 3.98692,-0.39846 5.41569,-0.99994 1.42876,-0.59947 2.22777,-1.39166 2.22777,-2.20296 v -25.38502 c 0,-0.81029 -0.79901,-1.60297 -2.22777,-2.20244 -1.42877,-0.60148 -3.37745,-0.96097 -5.41569,-0.99994 z m 39.09942,0.73742 c -1.95831,-0.037 -3.84637,0.24712 -5.24516,0.79065 -1.39879,0.54553 -2.1885,1.30678 -2.1885,2.11408 v 25.26978 c 0,0.8073 0.78971,1.56908 2.1885,2.1146 1.39879,0.54353 3.28685,0.8271 5.24516,0.79013 l 27.03659,-0.51056 c 1.81843,-0.034 3.56681,-0.37253 4.8457,-0.94103 1.2689,-0.56552 1.98851,-1.31419 1.98851,-2.08153 v -24.013 c 0,-0.76734 -0.71961,-1.51602 -1.98851,-2.08153 -1.27889,-0.56851 -3.02727,-0.90706 -4.8457,-0.94103 z m 27.03659,33.08687 -27.03659,0.55914 c -1.95831,0.04 -3.84637,0.39891 -5.24516,0.99839 -1.39879,0.60048 -2.1885,1.39256 -2.1885,2.19986 v 25.27029 c 0,0.8083 0.78971,1.53769 2.1885,2.02727 1.39879,0.48857 3.28685,0.69733 5.24516,0.58343 l 27.03659,-1.58027 c 1.81843,-0.10691 3.56681,-0.5148 4.8457,-1.13326 1.2689,-0.61547 1.98851,-1.3917 1.98851,-2.15904 V 163.1735 c 0,-0.76734 -0.71961,-1.48738 -1.98851,-2.00194 -1.27889,-0.51755 -3.02727,-0.78728 -4.8457,-0.74931 z m -45.8804,0.9493 -24.86773,0.51469 -13.78883,7.96076 v 22.34644 c 0,0.85526 0.88726,1.62691 2.4629,2.14147 1.56965,0.51255 3.69102,0.7263 5.89112,0.59841 l 30.30254,-1.77147 c 2.03824,-0.1189 3.98692,-0.55648 5.41569,-1.21491 1.42876,-0.65543 2.22777,-1.479 2.22777,-2.2903 v -25.38501 c 0,-0.8113 -0.79901,-1.57056 -2.22777,-2.11409 -1.42877,-0.54453 -3.37745,-0.82795 -5.41569,-0.78599 z m -140.344407,2.90576 -8.234123,0.17053 c -2.837544,0.0589 -5.574874,0.5005 -7.60212,1.22887 -2.036238,0.73237 -3.183268,1.69129 -3.183268,2.66444 v 30.4648 c 0,0.97316 1.14703,1.84227 3.183268,2.41278 2.027246,0.5685 4.764576,0.79321 7.60212,0.62735 l 9.363253,-0.54726 c -0.712028,-2.03444 -1.12913,-4.1869 -1.12913,-6.40684 z m -35.646403,0.73794 -44.623116,0.92398 c -3.2661737,0.0679 -6.4174924,0.54589 -8.7534708,1.33221 C 1.3220233,168.05976 0,169.09181 0,170.1369 v 32.7055 c 0,1.0451 1.3220233,1.97259 3.6679932,2.57607 2.3359784,0.60048 5.4872971,0.82904 8.7534708,0.6382 l 44.623116,-2.60862 c 2.979422,-0.17385 5.821299,-0.73036 7.906494,-1.54565 2.076204,-0.81229 3.239079,-1.81753 3.239079,-2.79569 v -30.63172 c 0,-0.97915 -1.162875,-1.89143 -3.239079,-2.53887 -2.085195,-0.65042 -4.927072,-0.98182 -7.906494,-0.92087 z m 133.0973,7.27811 -44.77453,25.84958 c 0.66031,0.0144 1.29627,0.0673 1.98128,0.0274 l 34.19533,-1.99936 c 2.29601,-0.13389 4.48717,-0.60506 6.09678,-1.30845 1.60261,-0.70038 2.50114,-1.57681 2.50114,-2.43706 z m 88.77391,20.70365 -27.03659,1.6309 c -4.08647,0.24579 -7.43366,1.81127 -7.43366,3.49281 v 25.2703 c 0,1.68153 3.34719,2.71679 7.43366,2.31613 l 27.03659,-2.651 c 3.78673,-0.37167 6.83421,-1.96547 6.83421,-3.56309 v -24.01404 c 0,-1.59761 -3.04748,-2.70982 -6.83421,-2.48201 z m -45.8804,2.76675 -30.30151,1.82625 c -4.59403,0.27676 -8.35401,1.94861 -8.35401,3.73207 v 26.79268 c 0,1.78246 3.75998,2.85976 8.35401,2.40915 l 30.30151,-2.97036 c 4.23633,-0.41464 7.64346,-2.11846 7.64346,-3.807 v -25.38501 c 0,-1.68954 -3.40713,-2.85356 -7.64346,-2.59778 z m -51.49143,3.10317 -34.1943,2.06137 c -5.19749,0.31373 -9.45368,2.10809 -9.45368,4.00544 v 28.51041 c 0,1.89736 4.25619,3.01845 9.45368,2.50889 l 34.1943,-3.35225 c 4.76986,-0.4676 8.59844,-2.29461 8.59844,-4.08606 v -26.92187 c 0,-1.79145 -3.82858,-3.01368 -8.59844,-2.72593 z m -86.511001,5.2157 -10.575065,0.63769 c -5.92787,0.3567 -10.785388,2.2929 -10.785388,4.32015 v 30.46481 c 0,2.02724 4.857518,3.19374 10.785388,2.61224 l 38.890646,-3.81165 c 5.40832,-0.53054 9.74721,-2.50164 9.74721,-4.408 V 205.2407 c 0,-0.004 -0.003,-0.007 -0.003,-0.0114 l -11.24944,6.4947 0.01,-0.008 c -2.95361,1.7149 -6.30966,2.61327 -9.72861,2.61327 -3.42132,0 -6.7822,-0.90211 -9.73997,-2.62154 -3.1692,-1.82771 -5.672472,-4.49986 -7.351491,-7.62538 z m -37.987345,2.28979 -44.623116,2.68975 c -6.8240955,0.41164 -12.42146447,2.51301 -12.42146447,4.68912 v 32.7055 c 0,2.17612 5.59736897,3.39126 12.42146447,2.72283 l 44.623116,-4.37441 c 6.185647,-0.60647 11.145573,-2.74441 11.145573,-4.78265 v -30.63172 c 0,-2.03824 -4.959926,-3.3921 -11.145573,-3.01842 z" /><path fill="#ff9900" d="m 112.1208,82.077161 c -1.56784,6.54e-4 -3.13282,0.371219 -4.4142,1.111043 l -0.004,0.0021 -0.002,0.0021 c -2.71585,1.563925 -4.42609,4.519103 -4.42609,7.662065 V 194.89508 c 0,3.14764 1.71709,6.1081 4.3987,7.65276 l 0.0114,0.006 0.0119,0.006 c 1.33084,0.77505 2.86666,1.19114 4.42557,1.19114 1.55283,1e-5 3.09616,-0.41692 4.41626,-1.18339 l 0.006,-0.002 90.10974,-52.02318 c 2.71588,-1.56977 4.42125,-4.52648 4.42196,-7.66413 -0.001,-3.12758 -1.69955,-6.08504 -4.42402,-7.67188 L 116.54844,83.190271 c -1.28901,-0.743523 -2.85979,-1.113764 -4.42764,-1.11311 z" /></g><g fill="currentColor" transform="matrix(2.9580331,0,0,2.9580317,-638.93522,-1632.6773)" aria-label="OpenVideoServer"><path d="m 243.21602,903.80684 q -5.904,0 -10.872,-1.944 -4.968,-1.944 -8.64,-5.4 -3.672,-3.528 -5.688,-8.208 -2.016,-4.752 -2.016,-10.368 0,-5.616 2.016,-10.296 2.016,-4.752 5.688,-8.208 3.672,-3.528 8.64,-5.472 4.968,-1.944 10.8,-1.944 5.904,0 10.8,1.944 4.968,1.944 8.64,5.472 3.672,3.456 5.688,8.208 2.016,4.68 2.016,10.296 0,5.616 -2.016,10.368 -2.016,4.752 -5.688,8.208 -3.672,3.456 -8.64,5.4 -4.896,1.944 -10.728,1.944 z m -0.072,-8.208 q 3.816,0 7.056,-1.296 3.24,-1.296 5.616,-3.672 2.376,-2.448 3.672,-5.616 1.368,-3.24 1.368,-7.128 0,-3.888 -1.368,-7.056 -1.296,-3.24 -3.672,-5.616 -2.376,-2.448 -5.616,-3.744 -3.24,-1.296 -7.056,-1.296 -3.816,0 -7.056,1.296 -3.168,1.296 -5.616,3.744 -2.376,2.376 -3.744,5.616 -1.296,3.168 -1.296,7.056 0,3.816 1.296,7.056 1.368,3.24 3.744,5.688 2.376,2.376 5.616,3.672 3.24,1.296 7.056,1.296 z m 57.52807,7.992 q -4.68,0 -8.568,-2.16 -3.816,-2.16 -6.12,-6.48 -2.232,-4.392 -2.232,-11.088 0,-6.768 2.16,-11.088 2.232,-4.32 6.048,-6.408 3.816,-2.16 8.712,-2.16 5.688,0 10.008,2.448 4.392,2.448 6.912,6.84 2.592,4.392 2.592,10.368 0,5.976 -2.592,10.44 -2.52,4.392 -6.912,6.84 -4.32,2.448 -10.008,2.448 z m -21.312,13.464 v -52.416 h 8.568 v 9.072 l -0.288,10.224 0.72,10.224 v 22.896 z m 20.304,-21.168 q 3.24,0 5.76,-1.44 2.592,-1.44 4.104,-4.176 1.512,-2.736 1.512,-6.408 0,-3.744 -1.512,-6.408 -1.512,-2.736 -4.104,-4.176 -2.52,-1.44 -5.76,-1.44 -3.24,0 -5.832,1.44 -2.592,1.44 -4.104,4.176 -1.512,2.664 -1.512,6.408 0,3.672 1.512,6.408 1.512,2.736 4.104,4.176 2.592,1.44 5.832,1.44 z m 47.16006,7.704 q -6.408,0 -11.232,-2.52 -4.752,-2.592 -7.416,-7.056 -2.592,-4.464 -2.592,-10.152 0,-5.76 2.52,-10.152 2.592,-4.464 7.056,-6.984 4.536,-2.52 10.296,-2.52 5.616,0 10.008,2.448 4.392,2.448 6.912,6.912 2.52,4.464 2.52,10.512 0,0.576 -0.072,1.296 0,0.72 -0.072,1.368 h -32.04 v -5.976 h 27.288 l -3.528,1.872 q 0.072,-3.312 -1.368,-5.832 -1.44,-2.52 -3.96,-3.96 -2.448,-1.44 -5.688,-1.44 -3.312,0 -5.832,1.44 -2.448,1.44 -3.888,4.032 -1.368,2.52 -1.368,5.976 v 1.44 q 0,3.456 1.584,6.12 1.584,2.664 4.464,4.104 2.88,1.44 6.624,1.44 3.24,0 5.832,-1.008 2.592,-1.008 4.608,-3.168 l 4.824,5.544 q -2.592,3.024 -6.552,4.68 -3.888,1.584 -8.928,1.584 z m 26.71198,-0.504 v -38.448 h 8.568 v 10.368 l -1.512,-3.168 q 2.016,-3.672 5.832,-5.616 3.888,-2.016 8.928,-2.016 4.608,0 8.208,1.8 3.672,1.8 5.76,5.544 2.088,3.672 2.088,9.504 v 22.032 h -9 v -20.88 q 0,-5.112 -2.448,-7.632 -2.376,-2.52 -6.696,-2.52 -3.168,0 -5.616,1.296 -2.448,1.296 -3.816,3.888 -1.296,2.52 -1.296,6.408 v 19.44 z" /><path fill="#ff9900" d="m 438.6241,903.08684 -22.032,-50.4 h 10.152 l 19.656,45.576 h -5.832 l 19.872,-45.576 h 9.36 l -21.96,50.4 z m 35.99999,0 v -38.448 h 9 v 38.448 z m 4.536,-44.784 q -2.52,0 -4.176,-1.584 -1.584,-1.584 -1.584,-3.816 0,-2.304 1.584,-3.816 1.656,-1.584 4.176,-1.584 2.52,0 4.104,1.512 1.656,1.44 1.656,3.672 0,2.376 -1.584,4.032 -1.584,1.584 -4.176,1.584 z m 32.54398,45.288 q -5.544,0 -10.008,-2.448 -4.392,-2.52 -6.912,-6.912 -2.52,-4.392 -2.52,-10.368 0,-5.976 2.52,-10.368 2.52,-4.392 6.912,-6.84 4.464,-2.448 10.008,-2.448 4.824,0 8.64,2.16 3.816,2.088 6.048,6.408 2.232,4.32 2.232,11.088 0,6.696 -2.16,11.088 -2.16,4.32 -5.976,6.48 -3.816,2.16 -8.784,2.16 z m 1.08,-7.704 q 3.24,0 5.76,-1.44 2.592,-1.44 4.104,-4.176 1.584,-2.736 1.584,-6.408 0,-3.744 -1.584,-6.408 -1.512,-2.736 -4.104,-4.176 -2.52,-1.44 -5.76,-1.44 -3.24,0 -5.832,1.44 -2.52,1.44 -4.104,4.176 -1.512,2.664 -1.512,6.408 0,3.672 1.512,6.408 1.584,2.736 4.104,4.176 2.592,1.44 5.832,1.44 z m 11.664,7.2 v -9.072 l 0.36,-10.224 -0.72,-10.224 v -23.904 h 8.928 v 53.424 z m 38.51999,0.504 q -6.408,0 -11.232,-2.52 -4.752,-2.592 -7.416,-7.056 -2.592,-4.464 -2.592,-10.152 0,-5.76 2.52,-10.152 2.592,-4.464 7.056,-6.984 4.536,-2.52 10.296,-2.52 5.616,0 10.008,2.448 4.392,2.448 6.912,6.912 2.52,4.464 2.52,10.512 0,0.576 -0.072,1.296 0,0.72 -0.072,1.368 h -32.04 v -5.976 h 27.288 l -3.528,1.872 q 0.072,-3.312 -1.368,-5.832 -1.44,-2.52 -3.96,-3.96 -2.448,-1.44 -5.688,-1.44 -3.312,0 -5.832,1.44 -2.448,1.44 -3.888,4.032 -1.368,2.52 -1.368,5.976 v 1.44 q 0,3.456 1.584,6.12 1.584,2.664 4.464,4.104 2.88,1.44 6.624,1.44 3.24,0 5.832,-1.008 2.592,-1.008 4.608,-3.168 l 4.824,5.544 q -2.592,3.024 -6.552,4.68 -3.888,1.584 -8.928,1.584 z m 43.99199,0 q -5.904,0 -10.512,-2.52 -4.608,-2.592 -7.272,-7.056 -2.664,-4.464 -2.664,-10.152 0,-5.76 2.664,-10.152 2.664,-4.464 7.272,-6.984 4.608,-2.52 10.512,-2.52 5.976,0 10.584,2.52 4.68,2.52 7.272,6.912 2.664,4.392 2.664,10.224 0,5.688 -2.664,10.152 -2.592,4.464 -7.272,7.056 -4.608,2.52 -10.584,2.52 z m 0,-7.704 q 3.312,0 5.904,-1.44 2.592,-1.44 4.032,-4.176 1.512,-2.736 1.512,-6.408 0,-3.744 -1.512,-6.408 -1.44,-2.736 -4.032,-4.176 -2.592,-1.44 -5.832,-1.44 -3.312,0 -5.904,1.44 -2.52,1.44 -4.032,4.176 -1.512,2.664 -1.512,6.408 0,3.672 1.512,6.408 1.512,2.736 4.032,4.176 2.592,1.44 5.832,1.44 z" /><path d="m 652.60809,903.80684 q -5.904,0 -11.304,-1.656 -5.4,-1.728 -8.568,-4.392 l 3.24,-7.272 q 3.024,2.376 7.488,3.96 4.464,1.584 9.144,1.584 3.96,0 6.408,-0.864 2.448,-0.864 3.6,-2.304 1.152,-1.512 1.152,-3.384 0,-2.304 -1.656,-3.672 -1.656,-1.44 -4.32,-2.232 -2.592,-0.864 -5.832,-1.584 -3.168,-0.72 -6.408,-1.656 -3.168,-1.008 -5.832,-2.52 -2.592,-1.584 -4.248,-4.176 -1.656,-2.592 -1.656,-6.624 0,-4.104 2.16,-7.488 2.232,-3.456 6.696,-5.472 4.536,-2.088 11.448,-2.088 4.536,0 9,1.152 4.464,1.152 7.776,3.312 l -2.952,7.272 q -3.384,-2.016 -6.984,-2.952 -3.6,-1.008 -6.912,-1.008 -3.888,0 -6.336,0.936 -2.376,0.936 -3.528,2.448 -1.08,1.512 -1.08,3.456 0,2.304 1.584,3.744 1.656,1.368 4.248,2.16 2.664,0.792 5.904,1.584 3.24,0.72 6.408,1.656 3.24,0.936 5.832,2.448 2.664,1.512 4.248,4.104 1.656,2.592 1.656,6.552 0,4.032 -2.232,7.488 -2.16,3.384 -6.696,5.472 -4.536,2.016 -11.448,2.016 z m 46.87199,-0.216 q -6.408,0 -11.232,-2.52 -4.752,-2.592 -7.416,-7.056 -2.592,-4.464 -2.592,-10.152 0,-5.76 2.52,-10.152 2.592,-4.464 7.056,-6.984 4.536,-2.52 10.296,-2.52 5.616,0 10.008,2.448 4.392,2.448 6.912,6.912 2.52,4.464 2.52,10.512 0,0.576 -0.072,1.296 0,0.72 -0.072,1.368 h -32.04 v -5.976 h 27.288 l -3.528,1.872 q 0.072,-3.312 -1.368,-5.832 -1.44,-2.52 -3.96,-3.96 -2.448,-1.44 -5.688,-1.44 -3.312,0 -5.832,1.44 -2.448,1.44 -3.888,4.032 -1.368,2.52 -1.368,5.976 v 1.44 q 0,3.456 1.584,6.12 1.584,2.664 4.464,4.104 2.88,1.44 6.624,1.44 3.24,0 5.832,-1.008 2.592,-1.008 4.608,-3.168 l 4.824,5.544 q -2.592,3.024 -6.552,4.68 -3.888,1.584 -8.928,1.584 z m 26.71197,-0.504 v -38.448 h 8.568 v 10.584 l -1.008,-3.096 q 1.728,-3.888 5.4,-5.904 3.744,-2.016 9.288,-2.016 v 8.568 q -0.576,-0.144 -1.08,-0.144 -0.504,-0.072 -1.008,-0.072 -5.112,0 -8.136,3.024 -3.024,2.952 -3.024,8.856 v 18.648 z m 41.54397,0 -16.488,-38.448 h 9.36 l 14.184,33.912 h -4.608 l 14.688,-33.912 h 8.64 l -16.488,38.448 z m 48.38395,0.504 q -6.408,0 -11.232,-2.52 -4.752,-2.592 -7.416,-7.056 -2.592,-4.464 -2.592,-10.152 0,-5.76 2.52,-10.152 2.592,-4.464 7.056,-6.984 4.536,-2.52 10.296,-2.52 5.616,0 10.008,2.448 4.392,2.448 6.912,6.912 2.52,4.464 2.52,10.512 0,0.576 -0.072,1.296 0,0.72 -0.072,1.368 h -32.04 v -5.976 h 27.288 l -3.528,1.872 q 0.072,-3.312 -1.368,-5.832 -1.44,-2.52 -3.96,-3.96 -2.448,-1.44 -5.688,-1.44 -3.312,0 -5.832,1.44 -2.448,1.44 -3.888,4.032 -1.368,2.52 -1.368,5.976 v 1.44 q 0,3.456 1.584,6.12 1.584,2.664 4.464,4.104 2.88,1.44 6.624,1.44 3.24,0 5.832,-1.008 2.592,-1.008 4.608,-3.168 l 4.824,5.544 q -2.592,3.024 -6.552,4.68 -3.888,1.584 -8.928,1.584 z m 26.712,-0.504 v -38.448 h 8.568 v 10.584 l -1.008,-3.096 q 1.728,-3.888 5.4,-5.904 3.744,-2.016 9.288,-2.016 v 8.568 q -0.576,-0.144 -1.08,-0.144 -0.504,-0.072 -1.008,-0.072 -5.112,0 -8.136,3.024 -3.024,2.952 -3.024,8.856 v 18.648 z" /></g></g></svg>
+          <div id="build">Core-v—</div>
+        </div>
+        <div id="host"></div>
+        <div id="meters"></div>
+      </aside>
+
+      <main id="right">
+        <div id="channel-bar">
+          <span id="channel-name">COMPOSITION</span>
+          <span id="channel-hint">(TOUCH FOR TOGGLE THRU OUTPUTS)</span>
+          <span id="channel-mode"></span>
+        </div>
+
+        <div id="preview">
+          <!-- Both preview paths paint here: the decoded stream while it is
+               running, and the polled stills underneath it. -->
+          <canvas id="preview-canvas"></canvas>
+          <div class="empty" id="preview-empty">Waiting for the renderer.</div>
+        </div>
+
+        <div id="panels">
+          <section class="panel">
+            <h2>SHOW<small class="loaded" id="show-name">—</small></h2>
+            <h2>SYSTEM<small>TAP A COUNT TO CLEAR</small></h2>
+            <div class="row"><span>Renderer</span><b id="renderer">—</b></div>
+            <div class="row"><span>Decoders</span><b id="decoders">—</b></div>
+            <div class="row clearable" data-clear="DECODE_ERRORS">
+              <span>Decoder Errors</span><b id="decode-errors">—</b>
+            </div>
+            <div class="row clearable" data-clear="LATE_FRAMES">
+              <span>Late Frames</span><b id="late-frames">—</b>
+            </div>
+            <div class="row"><span>Last Frame</span><b id="frame-breakdown">—</b></div>
+            <div class="row"><span>Lighting</span><b id="dmx">—</b></div>
+          </section>
+
+          <section class="panel">
+            <!-- The name is its own element: setting an `h2`'s text would take
+                 the hint beside it away with it. -->
+            <h2><span id="detail-title">COMPOSITION</span><small>TAP A COUNT TO CLEAR</small></h2>
+            <div class="row" id="detail-1-row">
+              <span id="detail-1-name">Resolution</span><b id="detail-1">—</b>
+            </div>
+            <div class="row" id="detail-2-row">
+              <span id="detail-2-name">Estimated Framerate</span><b id="detail-2">—</b>
+            </div>
+            <div class="row" id="detail-3-row">
+              <span id="detail-3-name">Rendering Framerate</span><b id="detail-3">—</b>
+            </div>
+            <div class="row" id="detail-4-row">
+              <span id="detail-4-name">Framedrops</span><b id="detail-4">—</b>
+            </div>
+            <div class="row" id="detail-5-row">
+              <span id="detail-5-name">Display</span><b id="detail-5">—</b>
+            </div>
+            <div class="row" id="detail-6-row">
+              <span id="detail-6-name">Physical Connector</span><b id="detail-6">—</b>
+            </div>
+            <!--
+              Three rows, never one, and never the same reading twice. "Source"
+              is how many bits the clips being played decode at; "Composition"
+              is how many a channel carries through the compositor, which is the
+              stage that quantises; "Output" is how many leave the socket. This
+              machine is 10 / 8 / 8 with Main 10 playing, and an operator who
+              read "10-bit" alone would believe the wall was getting ten bits.
+            -->
+            <div class="row" id="detail-7-row">
+              <span id="detail-7-name">Source Decode</span><b id="detail-7">—</b>
+            </div>
+            <div class="row" id="detail-8-row">
+              <span id="detail-8-name">Composition</span><b id="detail-8">—</b>
+            </div>
+            <div class="row" id="detail-9-row">
+              <span id="detail-9-name">Output</span><b id="detail-9">—</b>
+            </div>
+          </section>
+        </div>
+
+        <!--
+          Two patterns, because they answer two questions. COMPOSITION puts the
+          pattern where the show goes, so the pieces still cut it up and a wall
+          showing the middle of it is mapped to the middle of the composition.
+          OUTPUTS puts a separate pattern on each wall, at that wall's own size
+          and rate with its own name on it, and skips the mapping entirely.
+        -->
+        <div id="buttons">
+          <button id="pattern-composition" type="button">TESTPATTERN<br />COMPOSITION</button>
+          <button id="pattern-outputs" type="button">TESTPATTERN<br />OUTPUTS</button>
+          <button id="restart" type="button">RESTART</button>
+          <button id="shutdown" type="button">SHUTDOWN</button>
+        </div>
+      </main>
+    </div>
+
+    <div id="holding">
+      <div>
+        <div class="what" id="holding-what">RESTART IN 6s…</div>
+        <div class="how">LEAVE BUTTON TO CANCEL</div>
+      </div>
+    </div>
+
+    <div id="fault"></div>
+
+    <script>
+      "use strict";
+
+      const API = "/api/v1";
+
+      /** How long a destructive button must be held before it does anything. */
+      const HOLD_SECONDS = 6;
+
+      /** Samples kept behind each number: one a second, a minute of history. */
+      const HISTORY = 60;
+
+      const $ = (id) => document.getElementById(id);
+
+      /** The size this is designed at. The panel only ever adds to it. */
+      const DESIGN_WIDTH = 1024;
+      const DESIGN_HEIGHT = 600;
+
+      /**
+       * Fits the design to the panel: no bars, no distortion, nothing squeezed.
+       *
+       * The scale is the smaller ratio, so the text is the size it was drawn at.
+       * The box is then the panel divided by that scale, which makes it at least
+       * the design size in both directions and larger in whichever one had room.
+       *
+       * A panel too small to report itself yet — which happens for a moment while
+       * a renderer is saying how big its connector is — is left alone rather than
+       * laid out for nothing.
+       */
+      function fit() {
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        if (width < 1 || height < 1) {
+          return;
+        }
+        const scale = Math.min(width / DESIGN_WIDTH, height / DESIGN_HEIGHT);
+        const style = document.documentElement.style;
+        style.setProperty("--design-width", `${Math.round(width / scale)}px`);
+        style.setProperty("--design-height", `${Math.round(height / scale)}px`);
+        style.setProperty("--fit", scale);
+      }
+
+      /*
+        The pointer follows the mouse, and goes away when the mouse does.
+
+        **Shown only once something has moved it.** A panel nobody has touched
+        should not have an arrow sitting in the corner of it, and a touchscreen
+        should never show one at all — a finger is its own pointer, and one left
+        behind where the last tap landed reads as something being wrong.
+      */
+      const POINTER_REST_MS = 2500;
+      let pointerRest = null;
+
+      function movePointer(event) {
+        const pointer = document.getElementById('pointer');
+        pointer.style.transform = `translate(${event.clientX}px, ${event.clientY}px)`;
+        pointer.classList.add('shown');
+
+        clearTimeout(pointerRest);
+        pointerRest = setTimeout(() => pointer.classList.remove('shown'), POINTER_REST_MS);
+      }
+
+      function hidePointer() {
+        clearTimeout(pointerRest);
+        document.getElementById('pointer').classList.remove('shown');
+      }
+
+      window.addEventListener('mousemove', movePointer);
+      // A finger arriving takes it away at once: the tap is where the finger is,
+      // and an arrow somewhere else is a second thing to look at.
+      window.addEventListener('touchstart', hidePointer, { passive: true });
+      window.addEventListener('pointerdown', (event) => {
+        if (event.pointerType === 'touch') {
+          hidePointer();
+        }
+      });
+
+      window.addEventListener("resize", fit);
+
+      /** Sets every button's label at the largest size that fits it. */
+      function fitButtons() {
+        for (const button of document.querySelectorAll("#buttons button")) {
+          fitText(button, 17);
+        }
+      }
+
+      window.addEventListener("resize", fitButtons);
+
+      // ---------------------------------------------------------------- format
+
+      function bytes(value, unit) {
+        const units = ["B", "KB", "MB", "GB", "TB"];
+        // Zero is zero in every unit, and `0.000GB` is a number that makes an
+        // axis harder to read rather than more precise.
+        if (!value) return { text: "0", unit: unit ?? "B" };
+        let size = value;
+        let index = 0;
+        if (unit !== undefined) {
+          index = units.indexOf(unit);
+          size = value / 1000 ** index;
+        } else {
+          while (size >= 1000 && index < units.length - 1) {
+            size /= 1000;
+            index += 1;
+          }
+        }
+        const digits = size >= 100 ? 0 : size >= 1 ? 1 : 3;
+        // `32.0GB` reads as a measurement; `32GB` reads as a capacity, which is
+        // what a total is.
+        return { text: size.toFixed(digits).replace(/\.0$/, ""), unit: units[index] };
+      }
+
+      /** The unit a total is best read in, so used and total share one. */
+      function unitFor(total) {
+        const units = ["B", "KB", "MB", "GB", "TB"];
+        let size = total;
+        let index = 0;
+        while (size >= 1000 && index < units.length - 1) {
+          size /= 1000;
+          index += 1;
+        }
+        return units[index];
+      }
+
+      /** `8.3/32GB`, the way the reference drawing reads. */
+      function pair(used, total) {
+        if (!total) return "—";
+        const unit = unitFor(total);
+        return `${bytes(used, unit).text}/${bytes(total, unit).text}${unit}`;
+      }
+
+      function duration(seconds) {
+        const days = Math.floor(seconds / 86400);
+        const hours = Math.floor((seconds % 86400) / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        if (days > 0) return `${days}d ${hours}h`;
+        if (hours > 0) return `${hours}h ${minutes}m`;
+        return `${minutes}m`;
+      }
+
+      function rate(frameRate) {
+        if (!frameRate || !frameRate.denominator) return "—";
+        return `${(frameRate.numerator / frameRate.denominator).toFixed(2)}fps`;
+      }
+
+      function hertz(frameRate) {
+        if (!frameRate || !frameRate.denominator) return "";
+        const value = frameRate.numerator / frameRate.denominator;
+        // 59.94 is a real rate an operator recognises; 60.00 is noise.
+        return `${Number.isInteger(value) ? value : value.toFixed(2)}Hz`;
+      }
+
+      // ---------------------------------------------------------------- meters
+
+      /*
+        Five numbers, each with a minute behind it. Percentages are drawn
+        against a fixed 100; byte meters against the total the machine reports,
+        so the axis says what full means rather than making the operator guess.
+
+        In pairs, and named in pairs: each processor above the memory it is
+        using, so a wall that has stopped moving is read downwards — is the
+        processor busy, and has it run out of room — rather than hunted for.
+        The disk comes last because it is the one number that is not about this
+        second.
+      */
+      const METERS = [
+        { id: "cpu", name: "CPU", kind: "percent" },
+        { id: "ram", name: "CPU MEM", kind: "bytes" },
+        { id: "gpu", name: "GPU", kind: "percent" },
+        { id: "vram", name: "GPU MEM", kind: "bytes" },
+        { id: "media", name: "MEDIA DISK", kind: "bytes" },
+      ];
+
+      const meters = new Map();
+
+      function buildMeters() {
+        const into = $("meters");
+        for (const spec of METERS) {
+          const row = document.createElement("div");
+          row.className = "meter";
+          row.innerHTML = `
+            <div class="name">${spec.name}
+              <span class="value absent" id="${spec.id}-value">—</span>
+              <span class="extra" id="${spec.id}-extra"></span>
+            </div>
+            <svg class="graph" id="${spec.id}-graph" viewBox="0 0 300 62"
+                 preserveAspectRatio="none"></svg>`;
+          into.append(row);
+          meters.set(spec.id, { spec, history: [], total: 0 });
+        }
+      }
+
+      /** Records one sample and redraws that meter. */
+      function sample(id, used, total) {
+        const meter = meters.get(id);
+        if (!meter) return;
+
+        const known = used !== null && used !== undefined;
+        meter.total = meter.spec.kind === "percent" ? 100 : total || 0;
+        meter.history.push(known ? used : null);
+        while (meter.history.length > HISTORY) meter.history.shift();
+
+        const value = $(`${id}-value`);
+        if (!known) {
+          value.textContent = "—";
+          value.classList.add("absent");
+        } else {
+          value.classList.remove("absent");
+          value.textContent =
+            meter.spec.kind === "percent" ? `${Math.round(used)}%` : pair(used, meter.total);
+        }
+
+        fitText(value, 15);
+        drawGraph(meter, $(`${id}-graph`));
+      }
+
+      /**
+       * Draws one meter's minute.
+       *
+       * Hand-drawn SVG rather than a charting library: the console is compiled
+       * into the server and served from it, so everything it needs has to be in
+       * this file, and a polyline is a polyline.
+       */
+      function drawGraph(meter, svg) {
+        const width = 300;
+        const height = 62;
+        const left = 44;
+        const top = 6;
+        const bottom = height - 10;
+        const ceiling = meter.total || 1;
+
+        const label = (value) =>
+          meter.spec.kind === "percent"
+            ? `${value}%`
+            : `${bytes(value, unitFor(ceiling)).text}${unitFor(ceiling)}`;
+
+        const y = (value) => bottom - (value / ceiling) * (bottom - top);
+        const step = (width - left) / (HISTORY - 1);
+
+        // The line is drawn where the samples are, so a console that has just
+        // started shows a minute filling up rather than a minute of zeroes.
+        const offset = HISTORY - meter.history.length;
+        const points = meter.history
+          .map((value, index) =>
+            value === null ? null : `${left + (offset + index) * step},${y(value)}`
+          )
+          .filter((point) => point !== null)
+          .join(" ");
+
+        const gridlines = [0, 0.5, 1]
+          .map((fraction) => {
+            const at = bottom - fraction * (bottom - top);
+            return `<line x1="${left}" y1="${at}" x2="${width}" y2="${at}"
+                      stroke="var(--grid)" stroke-width="1" />
+                    <text x="${left - 4}" y="${at + 3}" text-anchor="end"
+                      font-size="7" fill="var(--dim)">${label(ceiling * fraction)}</text>`;
+          })
+          .join("");
+
+        svg.innerHTML = `${gridlines}
+          <polyline points="${points}" fill="none" stroke="var(--accent)"
+            stroke-width="1.6" stroke-linejoin="round" vector-effect="non-scaling-stroke" />`;
+      }
+
+      // --------------------------------------------------------------- channel
+
+      /*
+        One preview at a time. Touching it moves to the next channel and wraps,
+        which is the whole of the interaction: a rack panel has one finger and
+        no room for a row of buttons.
+      */
+      let channels = [{ kind: "composition", name: "COMPOSITION" }];
+      let channel = 0;
+
+      function currentChannel() {
+        return channels[Math.min(channel, channels.length - 1)];
+      }
+
+      function nextChannel() {
+        channel = (channel + 1) % channels.length;
+        // Drop the picture at once: showing the last channel's frame under the
+        // new channel's name would be a lie for as long as it took to load.
+        clearPreview();
+        drawChannel();
+        tick(refreshPreview);
+      }
+
+      function clearPreview() {
+        $("preview").classList.remove("has-picture");
+        // Emptied as well as hidden: a canvas keeps whatever was last drawn on
+        // it, and the new channel's first picture would be one frame behind a
+        // flash of the old channel's last one.
+        const canvas = $("preview-canvas");
+        canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+      }
+
+      function drawChannel() {
+        const current = currentChannel();
+        $("channel-name").textContent = current.name;
+        $("channel-mode").textContent = current.mode ?? "";
+        // `1920x1080px 59.94Hz` is half again as long as `1920x1080px`, and on
+        // the panel's own font it did not fit — so the bar wrapped and pushed
+        // the preview, the panels and the buttons down and off the screen.
+        fitText($("channel-mode"), 15);
+        fitText($("channel-name"), 15);
+        $("channel-hint").style.visibility = channels.length > 1 ? "visible" : "hidden";
+        // The live stream follows the channel from here, because this is the
+        // one place that runs whenever which channel is on screen has been
+        // settled: a tap, the first draw, and every refresh that rebuilt the
+        // list. Pointing it at the channel it is already on costs a string
+        // comparison (see `syncStream`).
+        syncStream();
+      }
+
+      // ------------------------------------------------------------------ http
+
+      /*
+        No token, and nowhere to type one.
+
+        This page is served only to the machine it runs on, and requests from
+        the machine itself need no session. A 401 here means the
+        server was started with OVS_TRUST_LOOPBACK=0, which is a deployment that
+        has decided this screen should not work.
+      */
+      async function api(path, options = {}) {
+        const response = await fetch(API + path, options);
+        if (response.status === 401) {
+          fault("this server requires a session; the local screen is switched off");
+          throw new Error("no session");
+        }
+        if (!response.ok) throw new Error(`${path}: ${response.status}`);
+        return response;
+      }
+
+      function fault(message) {
+        const node = $("fault");
+        node.textContent = message;
+        node.classList.add("shown");
+        clearTimeout(fault.timer);
+        fault.timer = setTimeout(() => node.classList.remove("shown"), 6000);
+      }
+
+      /** Runs a refresh, and never lets one failure stop the next. */
+      async function tick(what) {
+        try {
+          await what();
+        } catch (error) {
+          console.warn(error);
+        }
+      }
+
+      // --------------------------------------------------------------- refresh
+
+      async function refreshStatus() {
+        const body = await (await api("/server/status")).json();
+        const t = body.telemetry;
+
+        $("build").textContent = `Core-v${t.version}`;
+        $("host").textContent = `${t.ip_address || "no address"} · up ${duration(t.uptime_s)}`;
+
+        sample("cpu", t.cpu_percent, 100);
+        sample("gpu", t.gpu_percent ?? null, 100);
+        sample("ram", t.ram_used_bytes || null, t.ram_total_bytes);
+        sample("vram", t.vram_used_bytes ?? null, t.vram_total_bytes ?? 0);
+        sample("media", t.disk_used_bytes, t.disk_total_bytes);
+
+        // Temperatures are not in the reference drawing but are asked for
+        // them, and a machine about to throttle is worth a small line.
+        $("cpu-extra").textContent =
+          t.cpu_temperature_c === null || t.cpu_temperature_c === undefined
+            ? ""
+            : `${t.cpu_temperature_c.toFixed(0)} °C`;
+        $("gpu-extra").textContent =
+          t.gpu_temperature_c === null || t.gpu_temperature_c === undefined
+            ? ""
+            : `${t.gpu_temperature_c.toFixed(0)} °C`;
+
+        // `current_show_name`, which is what the telemetry carries. This read
+        // `current_project_name` — a name from before a show was called a show —
+        // and therefore read `none` on every machine whatever was loaded.
+        $("show-name").textContent = t.current_show_name ?? "none";
+
+        const renderer = t.renderer.state;
+        const reason = t.renderer.reason ? ` — ${t.renderer.reason}` : "";
+        set("renderer", `${renderer}${reason}`, renderer === "running" ? "good" : "bad");
+        set("decoders", `${t.active_decoders} active`, "good");
+        set("decode-errors", `${t.decode_errors} Errors`, t.decode_errors ? "bad" : "good");
+        set("late-frames", `${t.late_frames ?? 0} Frames`, t.late_frames ? "bad" : "good");
+
+        // Where the last frame's time went, in the order it is spent. A wall
+        // running below its mode says a frame did not fit; this says what did
+        // not fit in it. Measured against the first output's mode, because a
+        // frame's budget is a refresh rate and the outputs may not share one —
+        // with several, the tightest is the one that matters and the first is
+        // the one an operator is looking at.
+        const frame = t.frame;
+        const output = t.outputs[0];
+        if (!frame) {
+          set("frame-breakdown", "—", "");
+        } else {
+          const total = frame.media_us + frame.playback_us + frame.compose_us;
+          const budget =
+            output && output.refresh && output.refresh.numerator
+              ? (1_000_000 * output.refresh.denominator) / output.refresh.numerator
+              : null;
+          const share = budget ? ` of ${(budget / 1000).toFixed(1)} ms` : "";
+          const parts = `${(frame.media_us / 1000).toFixed(1)} media, ${(
+            frame.playback_us / 1000
+          ).toFixed(1)} clips, ${(frame.compose_us / 1000).toFixed(1)} compose`;
+          set(
+            "frame-breakdown",
+            `${(total / 1000).toFixed(1)} ms${share} — ${parts}`,
+            budget && total > budget * 0.8 ? "bad" : "good",
+          );
+        }
+
+        const dmx = t.dmx;
+        if (!dmx) {
+          set("dmx", "not listening", "");
+        } else {
+          const live = dmx.universes.filter((universe) => universe.source).length;
+          set("dmx", `${live} of ${dmx.universes.length} universes`, live ? "good" : "");
+        }
+
+        // Which pattern is on, if either. Lit rather than described,
+        // because the operator pressing it is looking at the wall.
+        const pattern = t.test_pattern ?? "OFF";
+        $("pattern-composition").classList.toggle("on", pattern === "COMPOSITION");
+        $("pattern-outputs").classList.toggle("on", pattern === "OUTPUTS");
+
+        rebuildChannels(t, body);
+        drawDetail(t);
+      }
+
+      /*
+        Sets text at the largest size that fits its box, down to ten pixels.
+
+        Measured, not counted. How wide `0.373/8.6GB` is depends on the font the
+        machine happens to have — the reference panel and a development browser
+        choose different ones — and a character count that is right on one is
+        wrong on the other. Nothing on this page may be decided by a guess about
+        text width: a line that turns out too long wraps, and a wrap moves
+        everything under it (see `#right`).
+
+        Shrinking beats cutting, because every word here is worth reading: a
+        disk that says `1.23/12.34TB` a point smaller is better than one that
+        says `1.23/12.3…`. But only down to ten pixels — below that it is not
+        reading, it is squinting, and the ellipsis underneath takes over.
+      */
+      const MIN_FONT_PX = 10;
+
+      function fitText(element, largest) {
+        // Once per change of text. The measurement forces the browser to lay
+        // the page out, and doing that for a dozen unchanged readings every
+        // second would be work for nothing.
+        if (element.dataset.fitted === element.textContent) return;
+
+        let size = largest;
+        element.style.fontSize = `${size}px`;
+        while (size > MIN_FONT_PX && element.scrollWidth > element.clientWidth) {
+          size = Math.max(MIN_FONT_PX, size - 0.5);
+          element.style.fontSize = `${size}px`;
+        }
+        element.dataset.fitted = element.textContent;
+      }
+
+      function set(id, text, tone) {
+        const node = $(id);
+        node.textContent = text;
+        node.className = tone ?? "";
+        // Every one of these is a name or a number the machine chose — a
+        // project called something long, a panel with a long model name — so
+        // every one of them is fitted.
+        fitText(node, 12);
+      }
+
+      /** Keeps the channel list in step with what the renderer is driving. */
+      function rebuildChannels(t, body) {
+        const composition = {
+          kind: "composition",
+          name: "COMPOSITION",
+          mode: t.outputs.length
+            ? `${t.outputs[0].size.width}x${t.outputs[0].size.height}px`
+            : "",
+        };
+        /*
+          Named by position, never by what is plugged in. OUTPUT 1 is what a show
+          is patched against and what an operator says out loud; it does not
+          change when a monitor is swapped for a spare between shows, and a panel
+          model in 40px letters tells somebody standing at the rack nothing they
+          cannot see by looking at the wall. Which panel and which socket are on
+          the detail rows underneath, where tracing a cable is the job.
+        */
+        const outputs = t.outputs.map((output, index) => ({
+          kind: "output",
+          id: output.output_id,
+          name: `OUTPUT ${index + 1}`,
+          mode: `${output.size.width}x${output.size.height}px ${hertz(output.refresh)}`,
+          output,
+        }));
+
+        const before = currentChannel();
+        channels = [composition, ...outputs];
+        // Stay on the same thing across a refresh, so a list that grows by an
+        // output does not move the operator somewhere else mid-look.
+        const same = channels.findIndex(
+          (entry) => entry.kind === before.kind && entry.id === before.id
+        );
+        channel = same >= 0 ? same : 0;
+        drawChannel();
+      }
+
+      function drawDetail(t) {
+        const current = currentChannel();
+        $("detail-title").textContent = current.name;
+        fitText($("detail-title"), 13);
+
+        if (current.kind === "output") {
+          const output = t.outputs.find((entry) => entry.output_id === current.id) ?? current.output;
+          const drops = output.dropped_frames.since_reset;
+          detail(1, "Resolution", `${output.size.width}x${output.size.height}`, "");
+          detail(2, "Estimated Framerate", rate(output.refresh), "");
+          detail(3, "Rendering Framerate", `${output.actual_fps.toFixed(2)}fps`, tone(output));
+          detail(
+            4,
+            "Framedrops",
+            `${drops} Frames`,
+            drops ? "bad" : "good",
+            "DROPPED_FRAMES"
+          );
+          // What OUTPUT 1 is, for somebody at the back of the rack. A driver
+          // that does not name the panel gets a dash rather than a guess.
+          detail(5, "Display", output.display ?? "—", "");
+          detail(6, "Physical Connector", output.connector ?? "—", "");
+          detail(7, "Source Decode", sourceDepthText(t), "");
+          detail(8, "Composition", depthText(output.composition_depth), "");
+          detail(9, "Output", depthText(output.output_depth), "");
+          return;
+        }
+
+        const drops = t.outputs.reduce(
+          (total, output) => total + output.dropped_frames.since_reset,
+          0
+        );
+        const missing = t.missing_outputs ?? [];
+        detail(1, "Outputs", `${t.outputs.length} driven`, missing.length ? "bad" : "good");
+        detail(
+          2,
+          "Missing",
+          missing.length ? missing.map((entry) => entry.name).join(", ") : "none",
+          missing.length ? "bad" : "good"
+        );
+        const pattern = t.test_pattern ?? "OFF";
+        detail(
+          3,
+          "Test Pattern",
+          pattern === "OFF" ? "off" : pattern,
+          pattern === "OFF" ? "" : "bad"
+        );
+        detail(
+          4,
+          "Framedrops",
+          `${drops} Frames`,
+          drops ? "bad" : "good",
+          "DROPPED_FRAMES"
+        );
+        // The composition is not on a socket, so it has no output depth and
+        // does not borrow one. It does have a precision — the surfaces it is
+        // drawn into — and every output composes through the same kind, so the
+        // first one's answer is the composition's.
+        detail(5, "Source Decode", sourceDepthText(t), "");
+        detail(
+          6,
+          "Composition",
+          t.outputs.length ? depthText(t.outputs[0].composition_depth) : "—",
+          ""
+        );
+        // Three blank rows would read as three readings that failed.
+        detail(7, null, null);
+        detail(8, null, null);
+        detail(9, null, null);
+      }
+
+      /**
+       * How a bit depth reads, whichever of the two it is.
+       *
+       * The server sends `eight`, `ten` or — for a cable nothing is plugged
+       * into — `unknown`. A missing field is an older server, which is not the
+       * same as a known eight, so it reads as a dash rather than a number.
+       */
+      /**
+       * What the clips currently playing decode at.
+       *
+       * Per layer on the wire, because that is where it is a fact: two layers
+       * can be playing an eight-bit clip and a Main 10 clip at once. Summarised
+       * here as "10-bit (2 of 5)" rather than as one number, because one number
+       * would have to be either the deepest — which reads as a claim about the
+       * whole show — or the commonest, which reads as nothing.
+       */
+      function sourceDepthText(t) {
+        const heads = t.playheads ?? [];
+        if (!heads.length) return "—";
+        const ten = heads.filter((head) => head.decode_depth === "ten").length;
+        if (ten === 0) return "8-bit";
+        if (ten === heads.length) return "10-bit";
+        return `10-bit (${ten} of ${heads.length})`;
+      }
+
+      function depthText(depth) {
+        if (depth === "eight") return "8-bit";
+        if (depth === "ten") return "10-bit";
+        if (depth === "unknown") return "unknown";
+        return "—";
+      }
+
+      function detail(index, name, value, tone, clears) {
+        const row = $(`detail-${index}-row`);
+        // A row with nothing to say is not a row with a dash in it: this is read
+        // at arm's length, and a line that is not there is quieter than a line
+        // that is empty.
+        row.style.display = value === null ? "none" : "";
+        if (value === null) return;
+
+        // Which count this row holds, if it is one that can be put back to
+        // zero. Carried on the row so the one handler on the panel knows what a
+        // tap meant (see `#panels`).
+        row.dataset.clear = clears ?? "";
+        row.classList.toggle("clearable", Boolean(clears));
+
+        $(`detail-${index}-name`).textContent = name;
+        set(`detail-${index}`, value, tone);
+      }
+
+      /** An output that is not holding its rate is worth colouring. */
+      function tone(output) {
+        if (!output.active || !output.refresh.denominator) return "";
+        const wanted = output.refresh.numerator / output.refresh.denominator;
+        return Math.abs(output.actual_fps - wanted) > wanted * 0.02 ? "bad" : "good";
+      }
+
+      // --------------------------------------------------------------- preview
+
+      /*
+        Two ways to the same canvas.
+
+        The stream is the one an operator watches: H.264 pushed as the renderer
+        encodes it and decoded in the page, which is the difference between
+        seeing a clip land on a beat and seeing that it landed. The stills
+        polled over HTTP stay underneath it, because a machine with no encoder,
+        a browser with no WebCodecs and a stream that drops in the middle of a
+        show all have to leave this screen showing the wall: it is the screen an
+        operator looks at to decide whether a show is running.
+
+        Whichever of the two is painting, the box takes the picture's shape and
+        nothing else on the page can tell them apart.
+      */
+
+      /** The open player, and which surface it was opened for. */
+      let stream = null;
+      let streamSurface = null;
+
+      /** Whether the stream is painting. While it is, the poll stands down. */
+      let streaming = false;
+
+      /** What the stream endpoint calls the channel on screen. */
+      function surfaceOf(current) {
+        return current.kind === "composition" ? "composition" : current.id;
+      }
+
+      /*
+        Points the player at whatever channel is on screen.
+
+        One socket, ever: the old one is closed before the new one is opened, so
+        a console left on OUTPUT 3 for an evening is not also making the server
+        encode the composition for nobody. A player that has failed is left
+        alone — it is retrying on its own schedule, and reopening it every time
+        the status refreshes would be the hammering the backoff exists to
+        prevent.
+      */
+      function syncStream() {
+        const surface = surfaceOf(currentChannel());
+        if (stream && streamSurface === surface) return;
+
+        if (stream) stream.close();
+        streaming = false;
+        streamSurface = surface;
+
+        // Same host, same path, and the socket scheme that matches how the page
+        // was served.
+        const scheme = location.protocol === "https:" ? "wss" : "ws";
+        const url = `${scheme}://${location.host}${API}/preview/stream/${encodeURIComponent(
+          surface
+        )}`;
+
+        stream = streamPlayer({
+          url,
+          canvas: $("preview-canvas"),
+          onFrame(width, height) {
+            streaming = true;
+            showPicture(width, height);
+          },
+          onFailure(reason) {
+            // Nothing on screen. The poll below is already drawing, and an
+            // operator deciding whether a show is running is not helped by
+            // being told which of two preview paths it is being drawn by.
+            streaming = false;
+            console.warn(`preview stream: ${reason}`);
+          },
+        });
+      }
+
+      /*
+        A live preview of one surface, decoded in the page.
+
+        Nothing in here reads the page, the channel list or the API base. The
+        desktop client is an Electron app that will watch this same endpoint,
+        and it is meant to get this function rather than a second version of it
+        — so everything it needs arrives in the argument, and everything it has
+        to say goes out through `onFrame` and `onFailure`. Keep it that way.
+
+        The wire format is the server's (`stream_routes.rs`): sixteen bytes of
+        header and then one picture, H.264 in Annex-B form. The decoder is
+        configured with no `description`, which is what tells WebCodecs to
+        expect Annex-B with the parameter sets in front of every keyframe rather
+        than a description handed over once at the start.
+
+        The size comes from the decoded frame rather than from the header's
+        width and height: H.264 carries its own cropping, and what was drawn is
+        the honest answer to what shape the wall is.
+      */
+      function streamPlayer({ url, canvas, onFrame, onFailure }) {
+        /* Baseline, level 3.0 — what the server's encoder produces, and the
+           profile a machine with any hardware decoder at all can decode. */
+        const CONFIG = { codec: "avc1.42E01E", optimizeForLatency: true };
+
+        const HEADER_BYTES = 16;
+
+        /*
+          How long an open socket may go without a picture.
+
+          It covers the opening — a machine with no encoder, a socket that
+          connects to something that is not this server — and it keeps running
+          afterwards, because a stream that stops mid-show leaves the last frame
+          on the canvas and nothing on this screen may quietly go on showing a
+          wall that is no longer there. The renderer encodes every frame it
+          draws while somebody is watching, so three seconds of silence is a
+          stream that has stopped rather than a quiet passage.
+        */
+        const QUIET_MS = 3000;
+
+        /** The waits between attempts. A stream that has just been working is
+            usually back at once; one that has never worked is not, and a panel
+            reconnecting twice a second all evening helps nobody. */
+        const BACKOFF_MS = [1000, 2000, 5000];
+
+        /** The wait after the server has said this surface cannot be streamed.
+            That is a machine without an encoder, most often — something a
+            renderer restart can change and five seconds cannot, and subscribing
+            is what asks the renderer to encode, so asking every five seconds is
+            asking a machine running a show the same question all evening. */
+        const DECLINED_MS = 30000;
+
+        const context = canvas.getContext("2d");
+
+        let socket = null;
+        let decoder = null;
+        let waiting = null;
+        let retry = null;
+        let attempt = 0;
+        let sawKeyframe = false;
+        /* Whether an attempt is up. A socket that drops reports `error` and
+           then `close`, and that is one failure and one reconnection. */
+        let trying = false;
+        let done = false;
+
+        /** Lets go of the socket and the decoder, quietly. */
+        function teardown() {
+          clearTimeout(waiting);
+          waiting = null;
+          try {
+            if (socket) {
+              // Handlers first: closing a socket fires `close`, and that one is
+              // this teardown's own doing rather than a stream that has gone.
+              socket.onmessage = null;
+              socket.onerror = null;
+              socket.onclose = null;
+              socket.close();
+            }
+            // A decoder that has already errored is closed, and closing one
+            // twice throws.
+            if (decoder && decoder.state !== "closed") decoder.close();
+          } catch (error) {
+            // Whichever of them got there first, neither is this player's any
+            // more, and there is nothing to be done about it.
+          }
+          socket = null;
+          decoder = null;
+          sawKeyframe = false;
+        }
+
+        /** Hands the picture back to the caller, and tries again shortly. */
+        function fail(reason, wait) {
+          if (done || !trying) return;
+          trying = false;
+          teardown();
+          onFailure(reason);
+          retry = setTimeout(open, wait ?? BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)]);
+          attempt += 1;
+        }
+
+        /** One attempt: a decoder, and then a socket to feed it. */
+        async function open() {
+          if (done) return;
+          retry = null;
+          trying = true;
+
+          if (!window.VideoDecoder) {
+            // A browser without WebCodecs will not grow them while the page is
+            // open, so this is the end of the stream path rather than the first
+            // of an evening's attempts at it.
+            trying = false;
+            done = true;
+            onFailure("this browser cannot decode video");
+            return;
+          }
+
+          try {
+            const support = await VideoDecoder.isConfigSupported(CONFIG);
+            if (!support.supported) throw new Error("H.264 is not supported here");
+          } catch (error) {
+            fail(`no decoder for this stream: ${error.message}`);
+            return;
+          }
+
+          // Asking took a moment, and the operator may have moved to another
+          // channel while it was being asked.
+          if (done || !trying) return;
+
+          try {
+            decoder = new VideoDecoder({
+              output: paint,
+              error: (error) => fail(`the decoder stopped: ${error.message}`),
+            });
+            decoder.configure(CONFIG);
+          } catch (error) {
+            fail(`the decoder could not be started: ${error.message}`);
+            return;
+          }
+
+          // Nothing is ever sent up it. A watcher on the machine itself needs no
+          // session, and this page is served to nobody else; it
+          // is a watcher from the network that has to say who it is first.
+          try {
+            socket = new WebSocket(url);
+          } catch (error) {
+            // A URL the browser will not open at all — one with no host, or a
+            // scheme it will not mix with the page's — throws here instead of
+            // reporting it on the socket.
+            fail(`the preview stream could not be opened: ${error.message}`);
+            return;
+          }
+
+          socket.binaryType = "arraybuffer";
+          socket.onmessage = receive;
+          socket.onerror = () => fail("the preview stream could not be reached");
+          socket.onclose = () => fail("the preview stream closed");
+          expect();
+        }
+
+        /** Restarts the wait for the next picture. */
+        function expect() {
+          clearTimeout(waiting);
+          waiting = setTimeout(() => fail("the stream went quiet"), QUIET_MS);
+        }
+
+        /** One message: a picture, or the server saying there will not be one. */
+        function receive(event) {
+          if (typeof event.data === "string") {
+            // This surface cannot be streamed — no encoder on the machine, most
+            // often. The socket stays open after it says so, but nothing is
+            // coming down it.
+            let said = "the server declined the stream";
+            try {
+              said = JSON.parse(event.data).error ?? said;
+            } catch (error) {
+              // Not JSON, and not a picture either. The line above will do.
+            }
+            fail(said, DECLINED_MS);
+            return;
+          }
+
+          const bytes = new Uint8Array(event.data);
+          // A header with no picture behind it, or a version of the format this
+          // page does not know: nothing to draw, and nothing to fall back over.
+          if (bytes.length <= HEADER_BYTES) return;
+          const header = new DataView(event.data, 0, HEADER_BYTES);
+          if (header.getUint8(0) !== 1) return;
+
+          const keyframe = (header.getUint8(1) & 1) !== 0;
+          const timestamp = Number(header.getBigUint64(8, true));
+
+          // A stream is joined wherever the show happens to be, and everything
+          // before the first keyframe describes pictures this decoder has never
+          // seen. Handing it one is how a decoder ends up in `error`.
+          if (!keyframe && !sawKeyframe) return;
+          sawKeyframe = true;
+
+          try {
+            decoder.decode(
+              new EncodedVideoChunk({
+                type: keyframe ? "key" : "delta",
+                timestamp,
+                data: bytes.subarray(HEADER_BYTES),
+              })
+            );
+          } catch (error) {
+            fail(`the stream could not be decoded: ${error.message}`);
+          }
+        }
+
+        /** Draws one decoded picture, and lets go of it. */
+        function paint(frame) {
+          try {
+            // A picture decoded after the player was closed belongs to a
+            // channel nobody is looking at. It is still closed, below.
+            if (done) return;
+
+            const width = frame.displayWidth;
+            const height = frame.displayHeight;
+            // The canvas is sized in pixels by its attributes, not by the CSS
+            // that stretches it to the box: left at its default 300x150 every
+            // preview would be drawn small and scaled up by the browser.
+            if (canvas.width !== width || canvas.height !== height) {
+              canvas.width = width;
+              canvas.height = height;
+            }
+            context.drawImage(frame, 0, 0, width, height);
+
+            expect();
+            // A stream that has worked reconnects from the short wait again,
+            // however long ago that was.
+            attempt = 0;
+            onFrame(width, height);
+          } finally {
+            // A frame that is not closed holds one of the decoder's buffers,
+            // and a decoder with no buffers left stops within seconds.
+            frame.close();
+          }
+        }
+
+        open();
+
+        return {
+          /** Stops the player for good. Safe to call twice. */
+          close() {
+            done = true;
+            trying = false;
+            clearTimeout(retry);
+            retry = null;
+            teardown();
+          },
+        };
+      }
+
+      /*
+        One picture at a time, over HTTP.
+
+        The fallback, and the thing that fills the second or two at the start of
+        a channel while the stream is still waiting for a keyframe. It stands
+        down as soon as the stream paints, and comes back by itself when the
+        stream stops.
+      */
+      async function refreshPreview() {
+        // Both draw on the same canvas, and this one is always the older
+        // picture of the two.
+        if (streaming) return;
+
+        const current = currentChannel();
+        const path =
+          current.kind === "composition"
+            ? "/preview/composition"
+            : `/preview/${encodeURIComponent(current.id)}`;
+
+        let response;
+        try {
+          response = await api(path);
+        } catch (error) {
+          // 404 is the honest answer while the renderer has sent nothing, and
+          // is not a fault. The panel stays as it is.
+          clearPreview();
+          $("preview-empty").textContent = "Waiting for the renderer.";
+          return;
+        }
+
+        const url = URL.createObjectURL(await response.blob());
+        const picture = new Image();
+        picture.onload = () => {
+          URL.revokeObjectURL(url);
+          // The stream may have found its first keyframe while this was
+          // decoding, and it is the one with the newer picture.
+          if (!streaming) {
+            paintPicture(picture, picture.naturalWidth, picture.naturalHeight);
+          }
+        };
+        picture.onerror = () => URL.revokeObjectURL(url);
+        picture.src = url;
+      }
+
+      /** Puts a decoded still on the canvas the stream would be using. */
+      function paintPicture(picture, width, height) {
+        if (!width || !height) return;
+        const canvas = $("preview-canvas");
+        if (canvas.width !== width || canvas.height !== height) {
+          canvas.width = width;
+          canvas.height = height;
+        }
+        canvas.getContext("2d").drawImage(picture, 0, 0, width, height);
+        showPicture(width, height);
+      }
+
+      /*
+        The box takes the picture's shape once the picture is here to ask.
+
+        The renderer sends a preview in the surface's own proportions — a 4:3
+        wall arrives 4:3 — so this is the wall's shape, not a thumbnail's, and
+        it is read off the picture rather than off the telemetry so that the box
+        is never a shape the picture in it is not.
+      */
+      function showPicture(width, height) {
+        if (!width || !height) return;
+        $("preview").style.setProperty("--preview-aspect", `${width} / ${height}`);
+        $("preview").classList.add("has-picture");
+      }
+
+      // ----------------------------------------------------------- the buttons
+
+      $("preview").addEventListener("click", nextChannel);
+
+      /*
+        Each button turns its own pattern on, or turns it off again if it is
+        already on. Pressing the other one switches straight across: two
+        patterns at once would answer neither question, so the server takes one
+        mode rather than two switches.
+      */
+      function patternButton(id, mode) {
+        $(id).addEventListener("click", async () => {
+          const wanted = $(id).classList.contains("on") ? "OFF" : mode;
+          $("pattern-composition").classList.toggle("on", wanted === "COMPOSITION");
+          $("pattern-outputs").classList.toggle("on", wanted === "OUTPUTS");
+          try {
+            await api("/server/test-pattern", {
+              method: "PUT",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ mode: wanted }),
+            });
+          } catch (error) {
+            // The next status refresh says what the server actually thinks.
+            fault("the test pattern could not be switched");
+          }
+        });
+      }
+
+      patternButton("pattern-composition", "COMPOSITION");
+      patternButton("pattern-outputs", "OUTPUTS");
+
+      /*
+        Clears the readings, not the history.
+
+        Dropped frames, late frames and decoder errors all count from the last
+        time somebody pressed this. What an operator wants to know during a show
+        is whether anything has gone wrong *since they looked*; the lifetime
+        counts stay underneath, where the question "has this machine ever" is
+        answered.
+
+        No confirmation: clearing a counter costs nothing and un-clearing it is
+        waiting a second.
+      */
+      /*
+        Clears the readings, not the history.
+
+        Tapping a count clears that count and no other: an operator who has just
+        fixed a cable and cleared the dropped-frame reading has not decided that
+        the evening's decoder errors never happened. All three count from the
+        last time somebody tapped them, which is the only version of "has
+        anything gone wrong" worth asking during a show — the lifetime figures
+        stay underneath, where "has this machine ever" is answered.
+
+        No confirmation: clearing a count costs nothing, and un-clearing it is
+        waiting a second.
+      */
+      $("panels").addEventListener("click", async (event) => {
+        const row = event.target.closest(".clearable");
+        if (!row || !row.dataset.clear) return;
+
+        row.classList.add("cleared");
+        setTimeout(() => row.classList.remove("cleared"), 250);
+        try {
+          await api("/server/counters/reset", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ group: row.dataset.clear }),
+          });
+        } catch (error) {
+          fault("the counter could not be cleared");
+        }
+      });
+
+      /*
+        Hold to mean it.
+
+        A confirmation dialog on a touch panel in a rack is one tap away from a
+        dark venue; six seconds of deliberate pressure is not. Letting go is the
+        cancel, which needs no second target to hit.
+      */
+      function holdToRun(button, what, run) {
+        let timer = null;
+        let left = HOLD_SECONDS;
+
+        const show = () => {
+          $("holding-what").textContent = `${what} IN ${left}s…`;
+          $("holding").classList.add("shown");
+        };
+
+        const stop = () => {
+          if (timer === null) return;
+          clearInterval(timer);
+          timer = null;
+          left = HOLD_SECONDS;
+          button.classList.remove("holding");
+          $("holding").classList.remove("shown");
+        };
+
+        const start = (event) => {
+          event.preventDefault();
+          if (timer !== null) return;
+          left = HOLD_SECONDS;
+          button.classList.add("holding");
+          show();
+          timer = setInterval(() => {
+            left -= 1;
+            if (left > 0) {
+              show();
+              return;
+            }
+            stop();
+            $("holding-what").textContent = `${what}…`;
+            $("holding").classList.add("shown");
+            run();
+          }, 1000);
+        };
+
+        button.addEventListener("pointerdown", start);
+        for (const event of ["pointerup", "pointerleave", "pointercancel"]) {
+          button.addEventListener(event, stop);
+        }
+      }
+
+      holdToRun($("restart"), "RESTART", async () => {
+        await power("reboot");
+      });
+
+      holdToRun($("shutdown"), "SHUTDOWN", async () => {
+        await power("shutdown");
+      });
+
+      async function power(action) {
+        try {
+          const answer = await (
+            await api("/server/power", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ action }),
+            })
+          ).json();
+          if (!answer.accepted) {
+            // A server without permission to stop itself says so, rather than
+            // leaving an operator waiting for a machine that is not going to
+            // move (deploy/README.md).
+            $("holding").classList.remove("shown");
+            fault(answer.detail);
+          }
+        } catch (error) {
+          $("holding").classList.remove("shown");
+          fault(`the machine did not accept ${action}`);
+        }
+      }
+
+      // ---------------------------------------------------------------- start
+
+      fit();
+      fitButtons();
+      buildMeters();
+      drawChannel();
+      tick(refreshStatus);
+      tick(refreshPreview);
+
+      setInterval(() => tick(refreshStatus), 1000);
+      setInterval(() => tick(refreshPreview), 500);
+    </script>
+  </body>
+</html>

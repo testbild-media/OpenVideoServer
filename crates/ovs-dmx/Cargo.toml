@@ -1,0 +1,21 @@
+[package]
+name = "ovs-dmx"
+description = "Art-Net and sACN receive, and the mapping from DMX to parameters"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints.rust]
+missing_docs = "warn"
+
+[lints.clippy]
+todo = "warn"
+unwrap_used = "warn"
+
+[dependencies]
+ovs-types.workspace = true
+socket2 = "0.6"
+thiserror.workspace = true
+tracing = "0.1.44"

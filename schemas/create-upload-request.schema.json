@@ -1,0 +1,170 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CreateUploadRequest",
+  "description": "Asks the server to accept an upload.\n\nThe client has already probed, prepared and hashed the file, so the server can answer \"I already have that\" before a single byte crosses the network.",
+  "type": "object",
+  "required": [
+    "byte_size",
+    "dimensions",
+    "display_name",
+    "kind",
+    "original_filename",
+    "sha256"
+  ],
+  "properties": {
+    "byte_size": {
+      "description": "Size of the prepared file in bytes.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "codec": {
+      "description": "Codec name the client read.\n\nBelieved for nothing. It is here so a client that probed the file can say what it thought, and so a disagreement between the two readings is visible in the log rather than silent.",
+      "default": "",
+      "type": "string"
+    },
+    "container": {
+      "description": "Container format the client read.\n\nBelieved only as far as naming the stored object. What the server records is what its own probe found.",
+      "default": "",
+      "type": "string"
+    },
+    "dimensions": {
+      "description": "Pixel dimensions the client measured.\n\nThe client has already opened the file to prepare it, so it knows. The server checks what it can — for a still it decodes the file and compares — rather than taking this on trust, because a wrong size here is a wrong size in the library and in every show built on it.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/SizePx"
+        }
+      ]
+    },
+    "display_name": {
+      "description": "Name to show in the library.",
+      "type": "string"
+    },
+    "duration_ms": {
+      "description": "Duration in milliseconds. `None` for a still.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "folder": {
+      "description": "Where in the library the new item is filed.\n\nSlash-separated, empty for the root. What the operator had open when they dropped the files: a clip imported while standing in a folder belongs in that folder, and appearing in All media instead is a move somebody then has to make by hand (owner, 2026-09-23).\n\nMade, with every folder above it, if it is not there yet — an upload is not the place to lose somebody's work over a folder deleted in another window. Ignored when `media_item_id` names an item that already exists, because that item is already filed somewhere.",
+      "type": "string"
+    },
+    "frame_rate": {
+      "description": "Frame rate. `None` for a still.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/FrameRate"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "has_alpha": {
+      "description": "Whether the file carries an alpha channel.",
+      "default": false,
+      "type": "boolean"
+    },
+    "kind": {
+      "description": "Whether these bytes are a moving or a still image.\n\nDeclared rather than inferred, because it decides which checks the server runs: a still is decoded and measured, a video is probed. A declaration that disagrees with the file is refused.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/MediaKind"
+        }
+      ]
+    },
+    "media_item_id": {
+      "description": "The item these bytes belong to, when there already is one.\n\nSet after importing a package: the item exists, empty, waiting for its content, and the show already refers to it. Left out for an ordinary import, where the server creates the item.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/MediaItemId"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "original_filename": {
+      "description": "The file the operator picked, kept for their orientation only.",
+      "type": "string"
+    },
+    "sha256": {
+      "description": "SHA-256 of the prepared file, lowercase hex.",
+      "type": "string"
+    }
+  },
+  "definitions": {
+    "FrameRate": {
+      "description": "An exact frame rate expressed as a rational number of frames per second.\n\nRational rather than floating point so that 60000/1001 stays exact and the scheduler cannot accumulate drift.",
+      "type": "object",
+      "required": [
+        "denominator",
+        "numerator"
+      ],
+      "properties": {
+        "denominator": {
+          "description": "Denominator, for example `1001`.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "numerator": {
+          "description": "Numerator, for example `60000`.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      }
+    },
+    "MediaItemId": {
+      "description": "MediaItemId (ULID, 26 characters)",
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "MediaKind": {
+      "description": "The kind of thing a media item is.",
+      "oneOf": [
+        {
+          "description": "A moving image with a timeline.",
+          "type": "string",
+          "enum": [
+            "video"
+          ]
+        },
+        {
+          "description": "A still image.",
+          "type": "string",
+          "enum": [
+            "image"
+          ]
+        }
+      ]
+    },
+    "SizePx": {
+      "description": "A size in whole pixels.",
+      "type": "object",
+      "required": [
+        "height",
+        "width"
+      ],
+      "properties": {
+        "height": {
+          "description": "Height in pixels.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "width": {
+          "description": "Width in pixels.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      }
+    }
+  }
+}

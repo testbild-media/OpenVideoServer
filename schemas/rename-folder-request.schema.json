@@ -1,0 +1,20 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RenameFolderRequest",
+  "description": "Renames a folder, which moves everything filed under it.",
+  "type": "object",
+  "required": [
+    "from",
+    "to"
+  ],
+  "properties": {
+    "from": {
+      "description": "The path as it is now.",
+      "type": "string"
+    },
+    "to": {
+      "description": "The path it is to have. Moving a folder inside itself is refused.",
+      "type": "string"
+    }
+  }
+}

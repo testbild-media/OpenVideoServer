@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "UpdateAccountRequest",
+  "description": "Changes an account.\n\nEvery field is optional and an absent one means \"leave this alone\". The password is not here: it has its own request, because changing one is a different act with different authority behind it.",
+  "type": "object",
+  "properties": {
+    "role": {
+      "description": "A new role.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Role"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "username": {
+      "description": "A new login name.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "definitions": {
+    "Role": {
+      "description": "What an account is allowed to do.\n\nOrdered by authority, so `>=` is a meaningful test and [`Role::may_administer`] is the only place that decides what that means.",
+      "oneOf": [
+        {
+          "description": "Drives the show: everything Live Mode and the show editor can reach.\n\nThe default, because it is the safe half. An account created without a role said is an account nobody decided to trust with the machine.",
+          "type": "string",
+          "enum": [
+            "operator"
+          ]
+        },
+        {
+          "description": "Everything an operator may do, and the machine itself.\n\nAccounts, passwords other than their own, and the system settings — the Service Display's output among them. The first account a server has is this, because somebody has to be able to make the second.",
+          "type": "string",
+          "enum": [
+            "admin"
+          ]
+        }
+      ]
+    }
+  }
+}

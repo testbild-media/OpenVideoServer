@@ -1,0 +1,40 @@
+[package]
+name = "ovs-media"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Reading what a media file actually is, rather than what something said it was"
+
+[lints.rust]
+missing_docs = "deny"
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+missing_docs_in_private_items = "deny"
+# The cast from an FFmpeg dimension to a pixel count is checked against
+# MAX_MEDIA_SIDE before it happens, which is the reason this lint is off rather
+# than an exception being written at each site.
+cast_sign_loss = "allow"
+cast_possible_truncation = "allow"
+
+[dependencies]
+ovs-types.workspace = true
+thiserror.workspace = true
+
+# Only where the server actually runs. A Windows development machine builds the
+# rest of the workspace without FFmpeg and without this; what is measured is
+# measured on Debian. The same features the renderer links, and no
+# more: what is not linked cannot be a way in.
+[target.'cfg(unix)'.dependencies]
+ffmpeg-next = { version = "7.1.0", default-features = false, features = [
+    "codec",
+    "format",
+    # Scaling, because a thumbnail is a decoded frame in whatever the codec's
+    # own colour format is and what a library shows is RGBA at a size somebody
+    # chose.
+    "software-scaling",
+] }

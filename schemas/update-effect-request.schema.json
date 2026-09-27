@@ -1,0 +1,149 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "UpdateEffectRequest",
+  "description": "Changes the live values on one effect instance.\n\nA live value sits on top of what the show configured for that instance and is never written back to it: an operator can push an effect during a number and the show still opens tomorrow at the value it was built with . Editing what it opens with is a show endpoint; this is not a shortcut to one.\n\nOnly the keys sent are moved, for the same reason the fields of [`UpdateLayerRequest`] are optional: a client moving one control must not have to send the others, and one that sent a default for a control it was not thinking about would change something on stage.",
+  "type": "object",
+  "properties": {
+    "overrides": {
+      "description": "Live values to put on top of the configured ones, by parameter key.\n\nChecked against the effect's manifest exactly as a configured value is: a value of the wrong type, one outside its declared range, and one for a parameter the effect never declared are all refused, and a refused request changes nothing.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/definitions/ParameterValue"
+      }
+    },
+    "reset": {
+      "description": "Whether to drop the live values this instance already had, first.\n\nHow an operator puts an effect back the way the show was built. It needs its own field because \"no live value\" is an absence: there is no value a client could send that means \"stop overriding this\", and sending the configured value instead would only look the same until somebody edited the show.",
+      "default": false,
+      "type": "boolean"
+    }
+  },
+  "definitions": {
+    "ParameterValue": {
+      "description": "A typed parameter value for an effect or generator instance.",
+      "oneOf": [
+        {
+          "description": "A boolean switch.",
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "bool"
+              ]
+            },
+            "value": {
+              "type": "boolean"
+            }
+          }
+        },
+        {
+          "description": "A whole number.",
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "int"
+              ]
+            },
+            "value": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        },
+        {
+          "description": "A real number.",
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "float"
+              ]
+            },
+            "value": {
+              "type": "number",
+              "format": "double"
+            }
+          }
+        },
+        {
+          "description": "Free text.",
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "text"
+              ]
+            },
+            "value": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "description": "A colour as linear RGBA in `0.0..=1.0`.",
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "color"
+              ]
+            },
+            "value": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "maxItems": 4,
+              "minItems": 4
+            }
+          }
+        },
+        {
+          "description": "One of a fixed list of named choices, by its stable identifier.\n\nThe identifier, never the label and never the position in the list. A label is a thing that gets reworded and translated; a position is a thing that moves when somebody inserts a choice. A show saved last year has to open looking the way it was left, and the only value that survives both of those is a name nobody displays.",
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "choice"
+              ]
+            },
+            "value": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

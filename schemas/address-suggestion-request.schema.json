@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AddressSuggestionRequest",
+  "description": "What a patch editor asks when it is about to add a fixture.",
+  "type": "object",
+  "required": [
+    "footprint",
+    "universe"
+  ],
+  "properties": {
+    "footprint": {
+      "description": "How many channels the fixture takes.",
+      "type": "integer",
+      "format": "uint16",
+      "minimum": 0.0
+    },
+    "moving": {
+      "description": "The fixture being re-addressed, if this is a move rather than an add.\n\nA fixture does not collide with where it already is, so without this an editor could not suggest the address a fixture already has.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/FixtureInstanceId"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "universe": {
+      "description": "Which universe to look in.",
+      "type": "integer",
+      "format": "uint16",
+      "minimum": 0.0
+    }
+  },
+  "definitions": {
+    "FixtureInstanceId": {
+      "description": "FixtureInstanceId (ULID, 26 characters)",
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    }
+  }
+}

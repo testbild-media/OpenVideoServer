@@ -1,0 +1,156 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  # The renderer is realtime infrastructure; a warning here is a defect later.
+  RUSTFLAGS: -D warnings
+
+jobs:
+  rust:
+    # Debian is the production target, so the primary job runs on Linux even
+    # though development happens on Windows.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # `ovs-renderer` and `ovs-media` link FFmpeg under `cfg(unix)`, and the
+      # bindings need libclang for bindgen. None of it is
+      # compiled on the Windows job, so this is the only place the linkage is
+      # exercised — and until now the workflow was relying on whatever the
+      # runner image happened to carry, which is a dependency nobody declared.
+      - name: Install what the Unix build links against
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libavcodec-dev libavformat-dev libavutil-dev libswscale-dev \
+            libclang-dev
+
+      - name: Install the pinned toolchain
+        run: rustup show
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Lint
+        run: cargo clippy --all-targets --workspace -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+      # The golden schema test above already fails on drift. This runs the
+      # generator so a failure shows the actual diff rather than only the name
+      # of the file that changed.
+      - name: Show schema drift, if any
+        if: failure()
+        run: |
+          cargo run -p ovs-proto --bin ovs-schema-gen -- schemas
+          git --no-pager diff --stat schemas/
+          git --no-pager diff schemas/
+
+  typescript:
+    # The contract and the client that is built against it. Node 22 because the
+    # client's tests use `Response` and `URL` as the platform provides them.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Nothing here runs Electron, and downloading a hundred megabytes of it
+      # would only be a slower way to reach the same result.
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+
+      - name: Check the generated TypeScript matches the committed schemas
+        run: npm run schema:check
+
+      - name: Type-check the desktop client
+        run: npm run client:typecheck
+
+      # Electron is not installed here and is not needed: everything this runs
+      # is the client's own reasoning, with the socket, the clock and `fetch`
+      # handed in. The suite that needs a real server names one and is skipped
+      # when nothing does.
+      - name: Test the desktop client
+        run: npm run client:test
+
+  windows-build:
+    # Development happens on Windows, so it must keep compiling there.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo test --workspace
+
+  package:
+    # A server is installed from the `.deb`, so a break in the packaging is a
+    # break in the product. Found here rather than on a tag, when the only way
+    # out is another tag.
+    #
+    # In the same Debian container the release uses: `dpkg-shlibdeps` reads the
+    # binaries and asks the local dpkg which package owns each library, so this
+    # job proves what the release will actually produce rather than an Ubuntu
+    # flavoured approximation of it.
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    steps:
+      - name: Install what the job itself needs
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            git curl ca-certificates build-essential pkg-config \
+            dpkg-dev fakeroot \
+            nasm libopenh264-dev zlib1g-dev \
+            libclang-dev
+        # **No libav*-dev.** The package builds its own FFmpeg, so Debian's is
+        # not needed — and leaving it off makes this job a proof rather than a
+        # hope: anything that tried to link the system's FFmpeg fails here,
+        # instead of producing a package whose licence is wrong in a way only
+        # somebody reading `dpkg-deb -f` would ever notice.
+        #
+        # `nasm` because a build without an assembler decodes several times
+        # slower and `tools/build-ffmpeg.sh` refuses it; `libopenh264-dev` and
+        # `zlib1g-dev` are the two external libraries that build enables.
+
+      - uses: actions/checkout@v4
+
+      - name: Install the pinned toolchain
+        run: |
+          curl -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain none
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Resolve the toolchain
+        run: rustup show
+
+      - name: Build the package
+        run: ./tools/package.sh
+
+      # The maintainer scripts run as root on somebody else's machine, and a
+      # syntax error in one strands a half-unpacked install. Cheap to check.
+      - name: Check the maintainer scripts parse
+        run: |
+          for script in deploy/debian/postinst deploy/debian/prerm deploy/debian/postrm; do
+            sh -n "$script"
+          done
+          bash -n install.sh
+          bash -n tools/package.sh
+
+      # The installer picks the package and the Windows client out of a release
+      # with a pair of greps, and a grep that matches nothing looks exactly like
+      # a release that carries nothing: both leave the variable empty and the
+      # script carries on politely. Run under dash, which is what a pipe into
+      # `sh` gets on Debian.
+      - name: Check the installer picks the right assets out of a release
+        run: |
+          apt-get install -y --no-install-recommends dash
+          dash tools/test-release-assets.sh
+
+      - name: Say what came out
+        run: dpkg-deb --info target/package/*.deb

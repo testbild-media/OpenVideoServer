@@ -1,0 +1,1185 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OpenVideoServer — administration</title>
+    <!--
+      The alternative to the Service Display.
+
+      A rack unit with no screen is a legitimate server, and until this page
+      existed such a machine could only be administered from a client. Accounts
+      live here.
+
+      It uses the same API a client does, on the same origin, with the session
+      cookie the sign-in sets. There is no second API and no second kind of
+      credential: one sign-in, presented the way a browser can present it.
+
+      Nothing is loaded from anywhere else. A server in a rack has no reason to
+      have internet, and a page that went blank without one would fail on
+      exactly the night it is needed.
+    -->
+    <style>
+      :root {
+        --bg: #0b0c10;
+        --panel: #14161c;
+        --edge: #262a33;
+        --text: #e8e9ed;
+        --dim: #8f8f98;
+        --active: #ff7a1a;
+        --good: #35c46b;
+        --bad: #e5484d;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 32px 16px;
+        background: var(--bg);
+        color: var(--text);
+        font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+
+      main {
+        max-width: 760px;
+        margin: 0 auto;
+      }
+
+      h1 {
+        margin: 0 0 4px;
+        font-size: 22px;
+      }
+
+      .under {
+        margin: 0 0 24px;
+        color: var(--dim);
+        font-size: 13px;
+      }
+
+      section {
+        margin-bottom: 20px;
+        padding: 16px;
+        background: var(--panel);
+        border: 1px solid var(--edge);
+        border-radius: 8px;
+      }
+
+      h2 {
+        margin: 0 0 12px;
+        font-size: 13px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--dim);
+      }
+
+      label {
+        display: block;
+        margin-bottom: 4px;
+        color: var(--dim);
+        font-size: 13px;
+      }
+
+      input,
+      select {
+        width: 100%;
+        padding: 7px 9px;
+        background: #101013;
+        border: 1px solid var(--edge);
+        border-radius: 4px;
+        color: var(--text);
+        font: inherit;
+      }
+
+      button {
+        padding: 7px 14px;
+        background: #1b1e26;
+        border: 1px solid var(--edge);
+        border-radius: 4px;
+        color: var(--text);
+        font: inherit;
+        cursor: pointer;
+      }
+
+      button:hover:not(:disabled) {
+        border-color: var(--active);
+      }
+
+      button:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+
+      button.primary {
+        background: var(--active);
+        border-color: var(--active);
+        color: #06080c;
+        font-weight: 600;
+      }
+
+      button.danger:hover:not(:disabled) {
+        border-color: var(--bad);
+        color: var(--bad);
+      }
+
+      .row {
+        display: flex;
+        gap: 10px;
+        align-items: flex-end;
+        flex-wrap: wrap;
+      }
+
+      .row > div {
+        flex: 1;
+        min-width: 140px;
+      }
+
+      /* A row of buttons, which is not a row of fields. Fields share the width
+         between them and want a minimum; a button wants exactly its label, and
+         giving it a field's minimum is what left one of these on two lines with
+         a hand's width of nothing beside it. */
+      .buttons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .buttons button {
+        white-space: nowrap;
+      }
+
+      /* The foot of a section: what it can be told to do, parted from what it
+         says. Two buttons that turn a machine off should not read as another row
+         of the list above them.
+         Its own name rather than `.actions`, which is further down this sheet and
+         is what the account rows are built with — the same name here would have
+         put a rule across every one of those. */
+      .section-actions {
+        margin-top: 14px;
+        padding-top: 12px;
+        border-top: 1px solid var(--edge);
+        justify-content: flex-end;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      th {
+        text-align: left;
+        padding: 6px 8px;
+        color: var(--dim);
+        font-size: 12px;
+        font-weight: 600;
+        border-bottom: 1px solid var(--edge);
+      }
+
+      td {
+        padding: 8px;
+        border-bottom: 1px solid var(--edge);
+        vertical-align: middle;
+      }
+
+      tr:last-child td {
+        border-bottom: none;
+      }
+
+      .who {
+        color: var(--dim);
+        font-size: 12px;
+      }
+
+      .note {
+        margin: 10px 0 0;
+        color: var(--dim);
+        font-size: 13px;
+      }
+
+      .warn {
+        margin: 0 0 14px;
+        padding: 10px 12px;
+        border: 1px solid var(--edge);
+        border-left: 3px solid var(--active);
+        border-radius: 4px;
+        color: var(--dim);
+        font-size: 13px;
+      }
+
+      .said {
+        margin: 12px 0 0;
+        padding: 9px 11px;
+        border-radius: 4px;
+        font-size: 13px;
+      }
+
+      .said.bad {
+        border: 1px solid var(--bad);
+        color: var(--bad);
+      }
+
+      .said.good {
+        border: 1px solid var(--good);
+        color: var(--good);
+      }
+
+      .top {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 12px;
+        margin-bottom: 24px;
+      }
+
+      a {
+        color: var(--active);
+      }
+
+      .actions {
+        display: flex;
+        gap: 6px;
+        justify-content: flex-end;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="top">
+        <div>
+          <h1 id="title">Administration</h1>
+          <p class="under" id="subtitle">&nbsp;</p>
+        </div>
+        <div class="who" id="who"></div>
+      </div>
+
+      <!-- Signing in. Also first-run setup, which is the same form with a
+           different button, because on a server with no accounts there is
+           nothing to sign in to. -->
+      <section id="gate">
+        <h2 id="gate-title">Sign in</h2>
+        <p class="warn" id="gate-warn">
+          This server speaks plain HTTP, so what you type here crosses the
+          network unencrypted. Sign in only on a network you trust.
+        </p>
+        <div class="row">
+          <div>
+            <label for="username">Name</label>
+            <input id="username" autocomplete="username" />
+          </div>
+          <div>
+            <label for="password">Password</label>
+            <input id="password" type="password" autocomplete="current-password" />
+          </div>
+          <div style="flex: 0">
+            <button class="primary" id="gate-go">Sign in</button>
+          </div>
+        </div>
+        <p class="said bad" id="gate-said" hidden></p>
+      </section>
+
+      <div id="inside" hidden>
+        <section>
+          <h2>Accounts</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Role</th>
+                <th>Last signed in</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="accounts"></tbody>
+          </table>
+          <p class="note" id="accounts-note"></p>
+        </section>
+
+        <section>
+          <h2>Add an account</h2>
+          <div class="row">
+            <div>
+              <label for="new-name">Name</label>
+              <input id="new-name" autocomplete="off" />
+            </div>
+            <div>
+              <label for="new-password">Password</label>
+              <input id="new-password" type="password" autocomplete="new-password" />
+            </div>
+            <div style="flex: 0 0 150px">
+              <label for="new-role">Role</label>
+              <select id="new-role">
+                <option value="operator">Operator</option>
+                <option value="admin">Administrator</option>
+              </select>
+            </div>
+            <div style="flex: 0">
+              <button class="primary" id="new-go">Add</button>
+            </div>
+          </div>
+          <p class="note">
+            An operator drives the show. An administrator can also change
+            accounts and the machine itself.
+          </p>
+          <p class="said" id="new-said" hidden></p>
+        </section>
+
+        <section>
+          <h2>Your password</h2>
+          <div class="row">
+            <div>
+              <label for="own-current">Current</label>
+              <input id="own-current" type="password" autocomplete="current-password" />
+            </div>
+            <div>
+              <label for="own-new">New</label>
+              <input id="own-new" type="password" autocomplete="new-password" />
+            </div>
+            <div style="flex: 0">
+              <button id="own-go">Change</button>
+            </div>
+          </div>
+          <p class="note">
+            Changing it signs out every session of this account, including this
+            one.
+          </p>
+          <p class="said" id="own-said" hidden></p>
+        </section>
+
+        <section>
+          <h2>What it is putting out</h2>
+          <div class="buttons">
+            <button id="pattern-composition">Composition pattern</button>
+            <button id="pattern-outputs">Output patterns</button>
+          </div>
+          <div id="previews"></div>
+          <p class="note" id="preview-note"></p>
+          <p class="said" id="preview-said" hidden></p>
+        </section>
+
+        <section>
+          <h2>This machine&#8217;s settings</h2>
+          <div class="row">
+            <div>
+              <label for="sys-name">Name on the network</label>
+              <input id="sys-name" autocomplete="off" placeholder="" />
+            </div>
+            <div>
+              <label for="sys-display">The System screen is on</label>
+              <select id="sys-display">
+                <option value="">No local screen</option>
+              </select>
+            </div>
+            <div>
+              <label for="sys-mode">at</label>
+              <select id="sys-mode">
+                <option value="">The panel decides</option>
+              </select>
+            </div>
+            <div style="flex: 0">
+              <button class="primary" id="sys-go">Save</button>
+            </div>
+          </div>
+          <p class="warn" id="sys-warn" hidden></p>
+          <p class="said" id="sys-said" hidden></p>
+        </section>
+
+        <section>
+          <h2>This machine</h2>
+          <div id="machine"></div>
+          <p class="note"><a href="/">Back to the status page</a></p>
+          <div class="buttons section-actions">
+            <button class="danger" id="power-reboot">Restart</button>
+            <button class="danger" id="power-shutdown">Shut down</button>
+          </div>
+          <p class="said" id="power-said" hidden></p>
+        </section>
+      </div>
+    </main>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+
+      /** Who is signed in, once known. */
+      let me = null;
+
+      /** Calls the API, and never throws at the caller. */
+      async function api(path, options = {}) {
+        try {
+          const answer = await fetch(path, {
+            ...options,
+            headers: { 'content-type': 'application/json', ...(options.headers ?? {}) },
+          });
+          const text = await answer.text();
+          const body = text === '' ? null : JSON.parse(text);
+          if (!answer.ok) {
+            return {
+              ok: false,
+              status: answer.status,
+              message: (body && body.message) || `the server answered ${answer.status}`,
+            };
+          }
+          return { ok: true, body };
+        } catch {
+          return { ok: false, status: 0, message: 'this server is not answering' };
+        }
+      }
+
+      const say = (id, message, good) => {
+        const node = $(id);
+        node.textContent = message;
+        node.className = `said ${good ? 'good' : 'bad'}`;
+        node.hidden = message === '';
+      };
+
+      const when = (millis) =>
+        millis === null || millis === undefined
+          ? 'never'
+          : new Date(millis).toLocaleString();
+
+      /** Draws the gate, as sign-in or as first-run setup. */
+      async function drawGate() {
+        const status = await api('/status.json');
+        const needsSetup = status.ok && status.body && status.body.needs_setup === true;
+        if (status.ok && status.body) {
+          $('title').textContent = status.body.name;
+          $('subtitle').textContent = `OpenVideoServer ${status.body.version}`;
+          document.title = `${status.body.name} — administration`;
+        }
+        $('gate-title').textContent = needsSetup ? 'Set this server up' : 'Sign in';
+        $('gate-go').textContent = needsSetup ? 'Create the first account' : 'Sign in';
+        $('password').autocomplete = needsSetup ? 'new-password' : 'current-password';
+        return needsSetup;
+      }
+
+      /** Reads who this session is, and shows the rest of the page if it may. */
+      async function enter() {
+        const answer = await api('/api/v1/auth/me');
+        if (!answer.ok) {
+          me = null;
+          $('inside').hidden = true;
+          $('gate').hidden = false;
+          $('who').textContent = '';
+          // Nobody is looking any more, so nothing should still be asking for
+          // pictures once a second.
+          if (previewTimer !== null) {
+            clearInterval(previewTimer);
+            previewTimer = null;
+          }
+          await drawGate();
+          return false;
+        }
+
+        me = answer.body.account;
+        $('gate').hidden = true;
+        $('who').textContent = `${me.username} · ${me.role}`;
+
+        if (me.role !== 'admin') {
+          // An operator has a session and no business here. Said plainly rather
+          // than by a page of buttons the server would refuse.
+          $('inside').hidden = true;
+          $('gate').hidden = false;
+          $('gate-title').textContent = 'Not for this account';
+          $('gate-warn').hidden = true;
+          $('gate-go').hidden = true;
+          say(
+            'gate-said',
+            `Signed in as ${me.username}, who may drive the show but not change the machine. An administrator has to do this.`,
+            false,
+          );
+          return false;
+        }
+
+        $('inside').hidden = false;
+        await Promise.all([
+          drawAccounts(),
+          drawMachine(),
+          drawSystem(),
+          drawPreviews(),
+          readPattern(),
+        ]);
+        return true;
+      }
+
+      async function drawAccounts() {
+        const answer = await api('/api/v1/accounts');
+        const body = $('accounts');
+        body.replaceChildren();
+        if (!answer.ok) {
+          $('accounts-note').textContent = answer.message;
+          return;
+        }
+
+        for (const account of answer.body) {
+          const row = document.createElement('tr');
+
+          const name = document.createElement('td');
+          name.textContent = account.username;
+          if (me && account.account_id === me.account_id) {
+            const you = document.createElement('span');
+            you.className = 'who';
+            you.textContent = '  (you)';
+            name.append(you);
+          }
+
+          const role = document.createElement('td');
+          const picker = document.createElement('select');
+          for (const [value, label] of [
+            ['operator', 'Operator'],
+            ['admin', 'Administrator'],
+          ]) {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = label;
+            picker.append(option);
+          }
+          picker.value = account.role;
+          // The server refuses to be left with nobody who can administer it, so
+          // the control that would do it is not offered in the first place.
+          picker.disabled = account.last_administrator;
+          picker.title = account.last_administrator
+            ? 'The only account that can administer this server. Make another administrator first.'
+            : '';
+          picker.addEventListener('change', async () => {
+            const answer = await api(`/api/v1/accounts/${account.account_id}`, {
+              method: 'PUT',
+              body: JSON.stringify({ role: picker.value }),
+            });
+            if (!answer.ok) {
+              $('accounts-note').textContent = answer.message;
+            }
+            await drawAccounts();
+          });
+          role.append(picker);
+
+          const seen = document.createElement('td');
+          seen.textContent = when(account.last_login_at);
+
+          const actions = document.createElement('td');
+          const holder = document.createElement('div');
+          holder.className = 'actions';
+
+          const reset = document.createElement('button');
+          reset.textContent = 'Set password';
+          reset.addEventListener('click', async () => {
+            const password = prompt(`A new password for ${account.username}`);
+            if (password === null || password === '') {
+              return;
+            }
+            const answer = await api(
+              `/api/v1/accounts/${account.account_id}/password`,
+              { method: 'PUT', body: JSON.stringify({ password }) },
+            );
+            $('accounts-note').textContent = answer.ok
+              ? `${account.username} has a new password, and every session of theirs has ended.`
+              : answer.message;
+          });
+
+          const remove = document.createElement('button');
+          remove.className = 'danger';
+          remove.textContent = 'Remove';
+          remove.disabled =
+            account.last_administrator || (me !== null && account.account_id === me.account_id);
+          remove.title = remove.disabled
+            ? 'An account cannot remove itself, and the last administrator cannot be removed at all.'
+            : '';
+          remove.addEventListener('click', async () => {
+            if (!confirm(`Remove ${account.username}? This cannot be undone.`)) {
+              return;
+            }
+            const answer = await api(`/api/v1/accounts/${account.account_id}`, {
+              method: 'DELETE',
+            });
+            if (!answer.ok) {
+              $('accounts-note').textContent = answer.message;
+            }
+            await drawAccounts();
+          });
+
+          holder.append(reset, remove);
+          actions.append(holder);
+          row.append(name, role, seen, actions);
+          body.append(row);
+        }
+        $('accounts-note').textContent = '';
+      }
+
+      /** The connectors the renderer found, with what each is assigned to. */
+      let connectors = [];
+
+      /** The machine's own configuration, as the server last reported it. */
+      let systemConfig = null;
+
+      /** Refreshes the pictures while somebody is looking at them. */
+      let previewTimer = null;
+
+      /**
+       * Puts a fresh picture in every frame that is showing one.
+       *
+       * The query string is what makes the browser ask again: the responses say
+       * `no-store`, but an <img> whose src has not changed is not re-fetched at
+       * all, cache headers or none.
+       */
+      function refreshPictures() {
+        for (const image of document.querySelectorAll('#previews img')) {
+          image.src = `${image.dataset.source}?t=${Date.now()}`;
+        }
+      }
+
+      async function drawPreviews() {
+        const holder = $('previews');
+        const [status, list] = await Promise.all([
+          api('/api/v1/server/status'),
+          api('/api/v1/preview'),
+        ]);
+
+        holder.replaceChildren();
+
+        if (!status.ok) {
+          $('preview-note').textContent = status.message;
+          return;
+        }
+
+        if (!status.body.previews_enabled) {
+          // Off is a decision somebody made, not a fault. Said as one, with the
+          // way back rather than an apology.
+          const button = document.createElement('button');
+          button.textContent = 'Switch previews on';
+          button.addEventListener('click', async () => {
+            const answer = await api('/api/v1/preview/enabled', {
+              method: 'PUT',
+              body: JSON.stringify({ enabled: true }),
+            });
+            say('preview-said', answer.ok ? '' : answer.message, answer.ok);
+            if (answer.ok) await drawPreviews();
+          });
+          holder.append(button);
+          $('preview-note').textContent = 'Previews are switched off.';
+          return;
+        }
+
+        const surfaces = [
+          { source: '/api/v1/preview/composition', label: 'Composition' },
+          ...(list.ok ? list.body.outputs : []).map((output) => ({
+            source: `/api/v1/preview/${output.output_id}`,
+            label: output.name,
+          })),
+        ];
+
+        const grid = document.createElement('div');
+        grid.style.display = 'flex';
+        grid.style.flexWrap = 'wrap';
+        grid.style.gap = '12px';
+
+        for (const surface of surfaces) {
+          const frame = document.createElement('figure');
+          frame.style.margin = '0';
+          frame.style.flex = '1 1 260px';
+          frame.style.maxWidth = '360px';
+
+          const image = document.createElement('img');
+          image.dataset.source = surface.source;
+          image.src = `${surface.source}?t=${Date.now()}`;
+          image.alt = surface.label;
+          image.style.width = '100%';
+          image.style.display = 'block';
+          image.style.background = '#000';
+          image.style.border = '1px solid var(--line)';
+          image.style.aspectRatio = '16 / 9';
+          image.style.objectFit = 'contain';
+          // A 404 is the honest answer until the renderer has sent a picture,
+          // and a broken-image icon is not a way to say it.
+          image.addEventListener('error', () => {
+            image.style.visibility = 'hidden';
+            frame.dataset.empty = 'yes';
+          });
+          image.addEventListener('load', () => {
+            image.style.visibility = 'visible';
+            delete frame.dataset.empty;
+          });
+
+          const caption = document.createElement('figcaption');
+          caption.style.color = 'var(--dim)';
+          caption.style.fontSize = '13px';
+          caption.style.paddingTop = '4px';
+          caption.textContent = surface.label;
+
+          frame.append(image, caption);
+          grid.append(frame);
+        }
+
+        holder.append(grid);
+
+        $('preview-note').textContent = '';
+
+        if (previewTimer === null) {
+          previewTimer = setInterval(refreshPictures, 1000);
+        }
+      }
+
+      async function drawSystem() {
+        const [config, capabilities] = await Promise.all([
+          api('/api/v1/system/config'),
+          api('/api/v1/server/capabilities'),
+        ]);
+
+        if (!config.ok) {
+          say('sys-said', config.message, false);
+          return;
+        }
+
+        // Both lists. The first is what the renderer can drive — its own card —
+        // and the second is every socket on the other cards in the machine,
+        // which it cannot drive and which are therefore free for the System
+        // screen. A machine with one card has an empty second list and reads
+        // exactly as it did.
+        const drivable = (capabilities.ok && capabilities.body.connectors) || [];
+        const elsewhereCards =
+          (capabilities.ok && capabilities.body.connectors_elsewhere) || [];
+        connectors = [...drivable, ...elsewhereCards];
+        systemConfig = config.body;
+
+        // Rebuilt rather than patched: the renderer may have restarted since
+        // the page was opened, and a stale list offers sockets that are gone.
+        const select = $('sys-display');
+        select.replaceChildren();
+        const none = document.createElement('option');
+        none.value = '';
+        none.textContent = 'No local screen';
+        select.append(none);
+
+        const chosen = config.body.service_display;
+        let listed = false;
+        for (const found of connectors) {
+          const option = document.createElement('option');
+          option.value = `${found.gpu_pci_address}|${found.connector}`;
+          const model = found.model ? ` \u2014 ${found.model}` : '';
+          const cable = found.connected ? '' : ' (nothing plugged in)';
+          // **A socket does one job.** One the show has an output on cannot carry
+          // the System screen, and the server refuses it — so it is offered greyed
+          // with the reason rather than offered and failed on Save. Greyed rather
+          // than hidden: somebody looking for a monitor they know is there has to
+          // find it and read why, and the reason says what to do about it.
+          const taken = found.role === 'MEDIA_OUTPUT';
+          option.disabled = taken;
+          const why = taken
+            ? ' \u2014 used by the show'
+            : drivable.includes(found)
+              ? ''
+              : ' \u2014 not a show output';
+          option.textContent = `${found.connector}${model}${cable}${why}`;
+          if (
+            chosen &&
+            chosen.gpu_pci_address === found.gpu_pci_address &&
+            chosen.connector === found.connector
+          ) {
+            option.selected = true;
+            listed = true;
+          }
+          select.append(option);
+        }
+
+        // A connector the renderer cannot see is still offered, because it is
+        // what the file says and removing it from the list would silently
+        // change the machine the next time somebody pressed Save.
+        if (chosen && !listed) {
+          const option = document.createElement('option');
+          option.value = `${chosen.gpu_pci_address}|${chosen.connector}`;
+          option.textContent = `${chosen.connector} (not found by the renderer)`;
+          option.selected = true;
+          select.append(option);
+        }
+
+        fillModes();
+
+        $('sys-name').value = config.body.name ?? '';
+        $('sys-name').placeholder = config.body.host_name;
+
+        const warnings = [];
+        if (!config.body.writable) {
+          warnings.push(
+            `This server cannot write ${config.body.path}, so Save will fail. Its systemd unit needs a writable /etc/openvideoserver, or edit the file on the machine.`,
+          );
+        }
+        if (chosen && !chosen.present) {
+          warnings.push(
+            `The file names ${chosen.connector} on ${chosen.gpu_pci_address}, which the renderer does not report. It only ever reports the card it renders with, so a System screen on a second card in this machine reads like this and is right. Otherwise: the renderer is not running, or the name is wrong \u2014 \`ovs-renderer --displays\` prints the names it would use.`,
+          );
+        }
+        const assignedElsewhere = connectors.filter(
+          (found) =>
+            found.role === 'SERVICE_DISPLAY' &&
+            !(
+              chosen &&
+              found.gpu_pci_address === chosen.gpu_pci_address &&
+              found.connector === chosen.connector
+            ),
+        );
+        for (const found of assignedElsewhere) {
+          warnings.push(
+            `${found.connector} is assigned SERVICE_DISPLAY in the client, which disagrees with this file. The file wins, because it is read before the renderer starts.`,
+          );
+        }
+
+        $('sys-warn').hidden = warnings.length === 0;
+        $('sys-warn').textContent = warnings.join(' ');
+
+        $('sys-go').disabled = !config.body.writable;
+      }
+
+      async function drawMachine() {
+        const status = await api('/status.json');
+        const holder = $('machine');
+        holder.replaceChildren();
+        if (!status.ok) {
+          holder.textContent = status.message;
+          return;
+        }
+        const list = document.createElement('dl');
+        list.style.display = 'grid';
+        list.style.gridTemplateColumns = 'max-content 1fr';
+        list.style.gap = '6px 16px';
+        list.style.margin = '0';
+        for (const [label, value] of [
+          ['Name', status.body.name],
+          ['Version', status.body.version],
+          ['Renderer', (status.body.renderer && status.body.renderer.state) ?? 'unknown'],
+        ]) {
+          const key = document.createElement('dt');
+          key.style.color = 'var(--dim)';
+          key.style.fontSize = '13px';
+          key.textContent = label;
+          const val = document.createElement('dd');
+          val.style.margin = '0';
+          val.textContent = value;
+          list.append(key, val);
+        }
+        holder.append(list);
+      }
+
+      $('gate-go').addEventListener('click', async () => {
+        const username = $('username').value.trim();
+        const password = $('password').value;
+        if (username === '' || password === '') {
+          say('gate-said', 'A name and a password are both needed.', false);
+          return;
+        }
+
+        const needsSetup = await drawGate();
+        if (needsSetup) {
+          const made = await api('/api/v1/auth/setup', {
+            method: 'POST',
+            body: JSON.stringify({ username, password }),
+          });
+          if (!made.ok) {
+            say('gate-said', made.message, false);
+            return;
+          }
+        }
+
+        const answer = await api('/api/v1/auth/login', {
+          method: 'POST',
+          body: JSON.stringify({ username, password }),
+        });
+        if (!answer.ok) {
+          say('gate-said', answer.message, false);
+          return;
+        }
+        say('gate-said', '', true);
+        $('password').value = '';
+        await enter();
+      });
+
+      /*
+        The modes the chosen panel offers, as the renderer reports them.
+
+        Rebuilt whenever the socket changes, because they are that socket's: a
+        list left over from the panel before it would offer modes this one has
+        not got, and the server would take the mode and the renderer would fail
+        to set it — in a log nobody is reading, on a screen that is now black.
+
+        "The panel decides" is first and is the ordinary answer. It is also a
+        deliberate one: somebody who has tried a mode and did not like it picks
+        it to go back.
+      */
+      function fillModes() {
+        const select = $('sys-mode');
+        const picked = $('sys-display').value;
+        const chosen = (systemConfig && systemConfig.service_display) || null;
+
+        select.replaceChildren();
+        const auto = document.createElement('option');
+        auto.value = '';
+        auto.textContent = 'The panel decides';
+        select.append(auto);
+
+        const found = connectors.find(
+          (candidate) => `${candidate.gpu_pci_address}|${candidate.connector}` === picked,
+        );
+        select.disabled = picked === '';
+
+        for (const mode of (found && found.modes) || []) {
+          const option = document.createElement('option');
+          option.value = modeValue(mode);
+          option.textContent = modeLabel(mode);
+          if (
+            chosen &&
+            chosen.mode &&
+            `${chosen.gpu_pci_address}|${chosen.connector}` === picked &&
+            modeValue(chosen.mode) === option.value
+          ) {
+            option.selected = true;
+          }
+          select.append(option);
+        }
+
+        // A mode the file names that this panel does not offer. Kept, for the
+        // same reason a connector the renderer cannot see is kept: dropping it
+        // would silently change the machine the next time somebody pressed Save.
+        if (
+          chosen &&
+          chosen.mode &&
+          `${chosen.gpu_pci_address}|${chosen.connector}` === picked &&
+          !select.querySelector('option[selected]')
+        ) {
+          const option = document.createElement('option');
+          option.value = modeValue(chosen.mode);
+          option.textContent = `${modeLabel(chosen.mode)} (not offered by this panel)`;
+          option.selected = true;
+          select.append(option);
+        }
+      }
+
+      /** A mode as one string, so a `<select>` can carry it. */
+      function modeValue(mode) {
+        return `${mode.size.width}x${mode.size.height}@${mode.refresh_millihertz}`;
+      }
+
+      /*
+        A mode as somebody reads it off a monitor: `1920x1080 59.94Hz`.
+
+        Whole rates lose their decimals and broadcast rates keep two, which is
+        how they are written everywhere else in this building. What this does
+        *not* do is turn the rate into a fraction: 59.94 is 60000/1001 and not
+        59940/1000, two different rates that round to the same three decimals,
+        and the one place that knows which is which is on the server. This page
+        hands back the entry it was given.
+      */
+      function modeLabel(mode) {
+        const rate = mode.refresh_millihertz / 1000;
+        const written = Number.isInteger(rate) ? `${rate}` : rate.toFixed(2);
+        return `${mode.size.width}x${mode.size.height} ${written}Hz`;
+      }
+
+      /** The mode picked, back as the server's shape, or null for "the panel decides". */
+      function pickedMode() {
+        const value = $('sys-mode').value;
+        if (value === '') {
+          return null;
+        }
+        const [size, millihertz] = value.split('@');
+        const [width, height] = size.split('x').map(Number);
+        return {
+          size: { width, height },
+          refresh_millihertz: Number(millihertz),
+        };
+      }
+
+      // The modes belong to the socket, so changing the socket changes them.
+      $('sys-display').addEventListener('change', fillModes);
+
+      $('sys-go').addEventListener('click', async () => {
+        const name = $('sys-name').value.trim();
+        const picked = $('sys-display').value;
+
+        let service_display = null;
+        if (picked !== '') {
+          const [gpu_pci_address, connector] = picked.split('|');
+          service_display = { gpu_pci_address, connector, mode: pickedMode() };
+        }
+
+        const answer = await api('/api/v1/system/config', {
+          method: 'PUT',
+          body: JSON.stringify({
+            name: name === '' ? null : name,
+            service_display,
+          }),
+        });
+
+        if (!answer.ok) {
+          say('sys-said', answer.message, false);
+          return;
+        }
+
+        say(
+          'sys-said',
+          'Written. The renderer follows it within a second; there is nothing to restart.',
+          true,
+        );
+        await drawSystem();
+      });
+
+      $('new-go').addEventListener('click', async () => {
+        const username = $('new-name').value.trim();
+        const password = $('new-password').value;
+        if (username === '' || password === '') {
+          say('new-said', 'A name and a password are both needed.', false);
+          return;
+        }
+        const answer = await api('/api/v1/accounts', {
+          method: 'POST',
+          body: JSON.stringify({ username, password, role: $('new-role').value }),
+        });
+        if (!answer.ok) {
+          say('new-said', answer.message, false);
+          return;
+        }
+        say('new-said', `${username} can sign in now.`, true);
+        $('new-name').value = '';
+        $('new-password').value = '';
+        await drawAccounts();
+      });
+
+      $('own-go').addEventListener('click', async () => {
+        if (me === null) {
+          return;
+        }
+        const current = $('own-current').value;
+        const password = $('own-new').value;
+        if (current === '' || password === '') {
+          say('own-said', 'Both the current password and the new one are needed.', false);
+          return;
+        }
+        const answer = await api(`/api/v1/accounts/${me.account_id}/password`, {
+          method: 'PUT',
+          body: JSON.stringify({ current, password }),
+        });
+        if (!answer.ok) {
+          say('own-said', answer.message, false);
+          return;
+        }
+        $('own-current').value = '';
+        $('own-new').value = '';
+        say('own-said', 'Changed. Every session has ended, including this one.', true);
+        setTimeout(() => void enter(), 1200);
+      });
+
+      for (const id of ['username', 'password']) {
+        $(id).addEventListener('keydown', (event) => {
+          if (event.key === 'Enter') {
+            $('gate-go').click();
+          }
+        });
+      }
+
+      // --- the two test patterns ---------------------------------------------
+      //
+      // `COMPOSITION` puts the pattern where the show is, so the pieces cut it up
+      // and each wall shows its own region: it answers "is my mapping sensible".
+      // `OUTPUTS` draws one per output at that output's own mode, bypassing the
+      // mapping entirely: it answers "is this the wall I think it is, and is it
+      // running at the rate I set". They are different questions and neither
+      // substitutes for the other, which is why there are two buttons.
+      //
+      // `PIECES` is deliberately not here. It highlights the one piece an
+      // operator is dragging and means nothing without a selection to highlight.
+      const PATTERNS = { 'pattern-composition': 'COMPOSITION', 'pattern-outputs': 'OUTPUTS' };
+
+      /** What the walls are showing, so a reload does not lose track of it. */
+      let pattern = 'OFF';
+
+      function drawPatterns() {
+        for (const [id, mode] of Object.entries(PATTERNS)) {
+          const button = $(id);
+          const on = pattern === mode;
+          button.classList.toggle('primary', on);
+          button.setAttribute('aria-pressed', String(on));
+        }
+      }
+
+      /** Reads the mode from the page every client can see, and mirrors it. */
+      async function readPattern() {
+        try {
+          const answer = await fetch('/status.json');
+          const status = await answer.json();
+          pattern = typeof status.test_pattern === 'string' ? status.test_pattern : 'OFF';
+        } catch {
+          // Leave it where it was: a reading that failed is not an answer.
+        }
+        drawPatterns();
+      }
+
+      for (const [id, mode] of Object.entries(PATTERNS)) {
+        $(id).addEventListener('click', async () => {
+          const wanted = pattern === mode ? 'OFF' : mode;
+          const answer = await api('/api/v1/server/test-pattern', {
+            method: 'PUT',
+            body: JSON.stringify({ mode: wanted, highlighted: null }),
+          });
+          if (!answer.ok) {
+            say('preview-said', answer.message, false);
+            return;
+          }
+          pattern = wanted;
+          say('preview-said', '', true);
+          drawPatterns();
+        });
+      }
+
+      // --- restart and shut down ---------------------------------------------
+      //
+      // Two presses. Both of these end the show, and the endpoint deliberately
+      // does not ask — "the console confirms before calling this", because the
+      // person who can confirm is the one standing in front of the machine.
+      // Any other press disarms: somebody who reached past it has decided not to
+      // answer the question.
+      let arming = null;
+
+      function drawPower() {
+        $('power-reboot').textContent = arming === 'reboot' ? 'Restart \u2014 press again' : 'Restart';
+        $('power-shutdown').textContent =
+          arming === 'shutdown' ? 'Shut down \u2014 press again' : 'Shut down';
+      }
+
+      for (const [id, action] of [
+        ['power-reboot', 'reboot'],
+        ['power-shutdown', 'shutdown'],
+      ]) {
+        $(id).addEventListener('click', async () => {
+          if (arming !== action) {
+            arming = action;
+            drawPower();
+            return;
+          }
+          arming = null;
+          drawPower();
+
+          const answer = await api('/api/v1/server/power', {
+            method: 'POST',
+            body: JSON.stringify({ action }),
+          });
+          if (!answer.ok) {
+            say('power-said', answer.message, false);
+            return;
+          }
+          // The machine may go before it answers, so a reply that arrives is
+          // worth reading: it carries why it was refused when it was.
+          say(
+            'power-said',
+            answer.body && answer.body.accepted === false
+              ? answer.body.detail
+              : action === 'reboot'
+                ? 'Restarting. This page will stop answering.'
+                : 'Shutting down. This page will stop answering.',
+            answer.body ? answer.body.accepted !== false : true,
+          );
+        });
+      }
+
+      void enter();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,108 @@
+[Unit]
+Description=OpenVideoServer System screen (drawn off-screen, shown by the renderer)
+Documentation=https://github.com/testbild-media/OpenVideoServer
+# Only the page needs the core; the show does not need the page. If this unit
+# never starts, or dies and keeps dying, the outputs carry on (house rule §17).
+#
+# `After=` orders the start and says nothing about readiness: `ovsd` is listening
+# a moment after it is exec'd, and this would otherwise load its page into a
+# connection that is refused. The program handles that itself — a load that fails
+# is loaded again a second later, for as long as it takes — so this ordering is a
+# preference and not something anything depends on.
+After=ovsd.service
+Wants=ovsd.service
+# Do not give up. A console that has exhausted its restart budget is a screen
+# that stays black until somebody drives to the venue.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+
+# **This process asks the graphics stack for nothing.**
+#
+# It used to be `cage` — a kiosk compositor — running chromium, and that is why
+# everything below is so much smaller than it was. A compositor takes a *card*,
+# and every connector on it: wlroots is given `WLR_DRM_DEVICES` and there is no
+# variable for a connector, which was established by reading the ones the linked
+# wlroots actually knows. So the System screen spread itself across every panel
+# the card had, and the renderer could not have the card at all — on a machine
+# with one GPU the two could never coexist (owner, 2026-09-25).
+#
+# The owner's rule is that a socket does one job and the card stays flexible:
+# "Das System Display KANN und DARF KEINE ganze Karte nehmen. Es darf sich nur
+# den Ausgang nehmen."
+#
+# So this lays the page out, paints it into memory, and hands the pixels to the
+# renderer over a Unix socket. The renderer — which owns the card already — puts
+# them on one connector like any other output, and every other connector stays a
+# wall's to have. No seat, no `seatd`, no `XDG_RUNTIME_DIR`, no Wayland socket,
+# and no `video` group: there is no device in this picture at all.
+ExecStart=/usr/bin/ovs-console \
+    --url=http://127.0.0.1:7420/console \
+    --socket=/run/ovs-console/console.sock
+
+User=ovs-console
+Group=ovs-console
+
+# **Where the renderer finds the pictures.**
+#
+# `RuntimeDirectory=` makes it, owned by the user and group above, and the
+# program sets the socket itself to 0660. Connecting to a Unix socket needs
+# *write* permission — which is easy to get wrong while thinking of it as reading
+# pictures — so the renderer is in this unit's group, granted in
+# `ovs-renderer.service` and in the package's `postinst`. 0750 here so that is
+# the only account outside this one that can even reach the directory.
+RuntimeDirectory=ovs-console
+RuntimeDirectoryMode=0750
+
+# **Chromium's framework, and where its own files are.**
+#
+# `libcef.so` is 1.4 GB and is not a system library: it is installed beside the
+# rest of this product rather than into `/usr/lib`, so nothing else on the
+# machine can pick it up by accident and an uninstall takes it with it.
+#
+# `CEF_PATH` is what the program reads to find `icudtl.dat`, the `.pak` files and
+# the locales; `LD_LIBRARY_PATH` is what the loader reads to find the library
+# itself. Both, because they answer different questions.
+Environment=CEF_PATH=/usr/lib/openvideoserver/cef
+Environment=LD_LIBRARY_PATH=/usr/lib/openvideoserver/cef
+
+# A cache of its own, in this unit's state directory. The default is shared, and
+# CEF warns that two processes using it fight over a singleton lock — which on a
+# machine running this beside a development copy is two browsers arguing in
+# somebody's home directory rather than drawing.
+StateDirectory=ovs-console
+StateDirectoryMode=0750
+Environment=OVS_CONSOLE_CACHE=/var/lib/ovs-console/cache
+# And a home, because chromium wants one whether or not it is asked to. The
+# account has `/nonexistent` and `ProtectHome=yes` hides the rest, so without
+# this every start logs a failure to create an NSS certificate database for a
+# browser that only ever opens 127.0.0.1. Harmless, and the sort of harmless
+# line somebody reads at two in the morning while looking for a real one.
+Environment=HOME=/var/lib/ovs-console
+
+Restart=always
+RestartSec=5s
+
+# Hardening.
+#
+# More than the kiosk could have: that unit needed devices and a seat, and taking
+# them away was how it stopped being a kiosk. This one needs a loopback socket
+# and a directory, so it can be shut in much further.
+#
+# **`RestrictNamespaces` is still deliberately absent, and so is `PrivateDevices`.**
+# A browser sandboxes its own renderer processes with user and PID namespaces;
+# taking those away does not harden this unit, it makes chromium refuse to start,
+# which is a black screen in a rack. And `PrivateDevices=yes` on the *renderer*
+# is what once hid `/dev/dri` and cost an evening — an untested hardening line
+# that stops a service is worth less than the attack it prevents.
+NoNewPrivileges=yes
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+RestrictRealtime=yes
+
+[Install]
+WantedBy=multi-user.target

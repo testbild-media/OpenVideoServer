@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ApiError",
+  "description": "An error returned by any endpoint.\n\nA single shape for every failure, so a client has one thing to handle rather than one per endpoint.",
+  "type": "object",
+  "required": [
+    "code",
+    "message"
+  ],
+  "properties": {
+    "code": {
+      "description": "Short machine-readable code, for example `show_not_found`.",
+      "type": "string"
+    },
+    "details": {
+      "description": "Field-level problems, when the request failed validation.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/ValidationError"
+      }
+    },
+    "message": {
+      "description": "Human-readable description, suitable for showing an operator.",
+      "type": "string"
+    }
+  },
+  "definitions": {
+    "ValidationError": {
+      "description": "A single validation problem, located by a dotted path into the model.",
+      "type": "object",
+      "required": [
+        "message",
+        "path"
+      ],
+      "properties": {
+        "message": {
+          "description": "Human-readable description of what is wrong.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Dotted path to the offending value, for example `layers[2].slots[0].index`.",
+          "type": "string"
+        }
+      }
+    }
+  }
+}

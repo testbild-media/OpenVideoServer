@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AddressSuggestionResponse",
+  "description": "Where a fixture fits.",
+  "type": "object",
+  "required": [
+    "universe"
+  ],
+  "properties": {
+    "start_address": {
+      "description": "The lowest address it fits at, or `None` when there is no room.\n\nNo room is a real answer: a universe has 512 channels and a show can want more than that.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint16",
+      "minimum": 0.0
+    },
+    "universe": {
+      "description": "The universe that was asked about.",
+      "type": "integer",
+      "format": "uint16",
+      "minimum": 0.0
+    }
+  }
+}

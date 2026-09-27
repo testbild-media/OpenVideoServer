@@ -1,0 +1,211 @@
+name: Release
+
+# Publishes the Windows client and the package `install.sh` downloads.
+#
+# Tag a commit `v0.2.0` and push the tag. Two jobs run, in this order:
+#
+#   windows-client  builds FFmpeg, then the client, then an installer
+#   package         puts that installer in the `.deb` and builds the `.deb`
+#
+# **The order is the point.** `tools/package.sh` puts whatever is in
+# `dist/client` into `/usr/share/openvideoserver/client`, which is where
+# `crates/ovs-core/src/server/downloads.rs` looks when somebody opens the
+# server's download page. The evening that page exists for is the one where
+# somebody needs the client on a second laptop and the venue's wifi is a
+# captive portal — so the installer has to be inside the package, not beside
+# it. Build the package first and it ships with nothing to offer.
+#
+# What comes out is a `.deb`, the `.sha256` beside it, and the Windows
+# installer — which is exactly what the installer script looks for:
+#
+#   https://api.github.com/repos/<owner>/<repo>/releases/latest
+#     -> browser_download_url ending openvideoserver_<version>_<arch>.deb
+#     -> the same name with .sha256 appended
+#
+# Change either half of that shape and the installer stops finding it.
+#
+# # What it publishes is not a GPL build
+#
+# The package carries the FFmpeg `tools/build-ffmpeg.sh --profile server`
+# makes, rather than depending on Debian's, which is GPL-2.0-or-later. NOTICE
+# says what that means for anybody redistributing it. `tools/package.sh`
+# refuses to build a package whose binaries reach the system's FFmpeg, so this
+# cannot quietly stop being true — but it is written here because this is the
+# file somebody opens on the way to a first public tag.
+
+on:
+  push:
+    tags: ['v*']
+  # Buildable by hand, so the packaging can be proved before a tag exists.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows-client:
+    # Windows, because this produces a Windows installer and because the
+    # `client` FFmpeg profile is the Windows one: MediaFoundation, QuickSync
+    # and AMF are in its configure line and none of them cross-compiles from
+    # the Debian container the package is built in.
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # **FFmpeg is built here rather than taken from npm.** `ffmpeg-static`
+      # declares GPL-3.0-or-later and its binary reports `--enable-gpl
+      # --enable-version3`, measured on 2026-09-27 by running this
+      # repository's own licence check over it. Publishing that inside an
+      # Apache-2.0 client is a licence breach; NOTICE has always said the
+      # client's FFmpeg is the one `tools/build-ffmpeg.sh` makes, and this is
+      # what makes that true rather than aspirational.
+      #
+      # MSYS2 because FFmpeg's build system is autotools and this repository's
+      # build script is POSIX shell. `--profile client` configures it
+      # `--disable-gpl --disable-nonfree --disable-version3` and checks the
+      # finished binary rather than its own command line.
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          # `nasm` because a build without an assembler decodes several times
+          # slower and the script refuses it. Snappy is what HAP needs, and HAP
+          # is the whole reason it is worth having. The header-only packages
+          # are the hardware encoders the client prefers over software.
+          install: >-
+            base-devel
+            git
+            curl
+            diffutils
+            make
+            tar
+            xz
+            nasm
+            pkgconf
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-snappy
+            mingw-w64-x86_64-ffnvcodec-headers
+            mingw-w64-x86_64-amf-headers
+
+      - name: Build the FFmpeg that may be shipped
+        shell: msys2 {0}
+        run: ./tools/build-ffmpeg.sh --profile client
+
+      # Separately from the build that produced it, because what matters is
+      # what came out: the check reads `ffmpeg -version` and fails on
+      # `--enable-gpl`, `--enable-version3` or `--enable-nonfree`, on a missing
+      # licence text, and on any decoder an operator's files need being absent.
+      - name: Check it is one that may be shipped
+        shell: msys2 {0}
+        run: ./tools/build-ffmpeg.sh --check clients/desktop/vendor/ffmpeg
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm ci
+
+      # `--release` refuses to fall back to the npm FFmpeg. Belt and braces
+      # with the check above: that one proves the vendored build is clean, and
+      # this one proves the vendored build is the one that got packaged.
+      - name: Build the installer
+        run: npm run client:dist:win
+
+      - name: Say what came out
+        shell: bash
+        run: ls -l build/client/*.exe
+
+      - name: Keep the installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-client
+          path: build/client/*.exe
+          if-no-files-found: error
+
+  package:
+    needs: windows-client
+    runs-on: ubuntu-latest
+
+    # **Debian, not the Ubuntu runner.** `dpkg-shlibdeps` reads the binaries and
+    # asks the local dpkg which package owns each library, so a package built on
+    # Ubuntu 24.04 declares `libavcodec60` and one built on Debian trixie
+    # declares `libavcodec61`. Built on the runner, the published package would
+    # be uninstallable on the operating system it is for, and the error would
+    # arrive at the person running the installer rather than here.
+    container: debian:trixie
+
+    steps:
+      # Before the checkout, because the container has neither git nor curl and
+      # `actions/checkout` wants git.
+      - name: Install what the job itself needs
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            git curl ca-certificates build-essential pkg-config \
+            dpkg-dev fakeroot \
+            nasm libopenh264-dev zlib1g-dev \
+            libclang-dev
+        # **No libav*-dev.** The package builds its own FFmpeg, so Debian's is
+        # not needed — and leaving it off makes this job a proof rather than a
+        # hope: anything that tried to link the system's FFmpeg fails here,
+        # instead of producing a package whose licence is wrong in a way only
+        # somebody reading `dpkg-deb -f` would ever notice.
+        #
+        # `nasm` because a build without an assembler decodes several times
+        # slower and `tools/build-ffmpeg.sh` refuses it; `libopenh264-dev` and
+        # `zlib1g-dev` are the two external libraries that build enables.
+
+      - uses: actions/checkout@v4
+
+      # Into `dist/client`, which is the one place `tools/package.sh` looks.
+      - name: Take the Windows installer from the job before
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-client
+          path: dist/client
+
+      - name: Say what the package will carry
+        run: ls -l dist/client/
+
+      - name: Install the pinned toolchain
+        run: |
+          curl -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain none
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      # `rustup show` reads rust-toolchain.toml and installs what it names, so
+      # the release is built with the same compiler as everything else.
+      - name: Resolve the toolchain
+        run: rustup show
+
+      - name: Build the package
+        run: ./tools/package.sh
+
+      - name: Say what came out
+        run: |
+          ls -l target/package/
+          dpkg-deb --info target/package/*.deb
+
+      # Kept whether or not this was a tag, so a `workflow_dispatch` run is
+      # useful on its own.
+      - name: Keep the package
+        uses: actions/upload-artifact@v4
+        with:
+          name: debian-package
+          path: |
+            target/package/*.deb
+            target/package/*.sha256
+
+      - name: Publish it
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          # The Windows installer goes up beside the package as well as inside
+          # it. Inside is for the evening with no internet; beside is for
+          # everybody who has not installed a server yet and has nothing to
+          # download it from.
+          files: |
+            target/package/*.deb
+            target/package/*.sha256
+            dist/client/*.exe
+          generate_release_notes: true

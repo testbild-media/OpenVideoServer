@@ -1,0 +1,32 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AddEffectResponse",
+  "description": "Result of adding or removing an effect.",
+  "type": "object",
+  "required": [
+    "effect_instance_id",
+    "updated_at"
+  ],
+  "properties": {
+    "effect_instance_id": {
+      "description": "The instance added, or the one removed.\n\nThe identity is the server's: it lives in the same document as the fixture patch that may point at it, so a client that invented one would be naming something the stored show does not have.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/EffectInstanceId"
+        }
+      ]
+    },
+    "updated_at": {
+      "description": "When the server recorded the edit.",
+      "type": "integer",
+      "format": "int64"
+    }
+  },
+  "definitions": {
+    "EffectInstanceId": {
+      "description": "EffectInstanceId (ULID, 26 characters)",
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    }
+  }
+}

@@ -1,0 +1,4625 @@
+/* Dark, because this is read in a dark room next to a lighting desk, and
+   high-contrast, because it is read at a glance while something else is
+   happening. Nothing here animates except the beat strip: a moving interface
+   next to a moving wall is one distraction too many, and the one exception is
+   the thing the drawing asks to move, because a metronome that only moved once
+   a second would be no metronome at all. */
+
+/* --- the product's own colours ---
+
+   OpenVideoServer is orange on dark grey. The mark is #ff9900 and #545454, the
+   Service Display has been wearing the matching greys since it was built, and
+   this window was wearing a blue that belongs to no part of the product
+   (owner, 2026-09-23). The greys below are the Service Display's own, so the
+   two screens in a rack look like two screens of one thing.
+
+   Five colours carry meaning and they have to stay apart at a glance in a dark
+   room: what is on air, what is selected, what is waiting, what is wrong, and
+   where the beat is. Orange is the brand and therefore selection — the thing
+   an operator's eye should go to — so the beat keeps a warmer orange of its
+   own and 'waiting for a boundary' keeps the violet it has always had, which is
+   the one signal no other colour here could be confused with. */
+
+:root {
+  --bg: #17171a;
+  --panel: #202024;
+  --edge: #3a3a42;
+  --text: #f0f0f2;
+  --dim: #8f8f98;
+  /* The mark's own orange. Selection, the current tab, the thing being
+     pointed at. */
+  --accent: #ff9900;
+  --live: #57d38c;
+  --waiting: #ffb020;
+  --bad: #ef5f5f;
+  /* Selected, which is the brand's orange and not a blue from nowhere. */
+  --active: #ff9900;
+  /* Waiting on a grid boundary. Kept violet on purpose: it is the one state
+     that must not be mistaken for either on-air or selected. */
+  --pending: #7a5cff;
+  /* The beat. Warmer than the accent so a strip of them beside an orange
+     selection still reads as a different thing. */
+  --beat: #ffb733;
+  /* The mark's grey, for a rule or a disabled edge that should feel like part
+     of the logo rather than part of the chrome. */
+  --mark: #545454;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* `hidden` has to mean hidden.
+
+   Every mode in this page is a grid or a flex container selected by id, and an
+   author rule that sets `display` beats the user agent's own
+   `[hidden] { display: none }` whatever its specificity — origin is sorted
+   before specificity, and the user agent's origin loses. Without this, LIVE,
+   EDIT, PATCH and MEDIA are all drawn, on top of each other. */
+
+[hidden] {
+  display: none !important;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  /* The Service Display's own stack, in its own order, so the two screens set
+     text identically on the machine they are both read on. */
+  font: 13px/1.4 'Segoe UI', system-ui, -apple-system, sans-serif;
+  user-select: none;
+  overflow: hidden;
+}
+
+body {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+}
+
+/* --- the top bar --- */
+
+/* Three columns, and the middle one is the only one allowed to be squeezed.
+   The outer two hold fixed labels and status, which are as wide as their own
+   words; the middle holds the show's name, which is whatever somebody
+   called it. `minmax(0, auto)` is what lets it be cut off instead of pushing
+   the bar wider than the window. */
+
+#bar {
+  display: grid;
+  /* Modes, the show's name, what went wrong, and the server's state. The third
+     is empty almost always and takes no room when it is. */
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--edge);
+}
+
+#modes {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* A floor rather than a width, for the reason `.mode` gives. */
+
+#tap {
+  min-width: 64px;
+  height: 40px;
+  padding: 0 12px;
+  white-space: nowrap;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+/* The one master clock. Typed, tapped or reset, and empty rather
+   than zero until the server has sent a tempo. */
+
+/* The clock, on the master row rather than in the title bar: TAP, the tempo
+   with a step either side of it, SYNC, and the beat lamps. One line, because
+   it is one thing. */
+
+#clock {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#clock-tempo {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+/* − and +, one BPM at a time. They exist because a number field's own spinner
+   arrows are four pixels tall and this is read in a dark room with one hand
+   (owner, 2026-09-23); the field itself is a text input for the same reason,
+   so those arrows are not drawn at all. */
+
+.bpm-step {
+  min-width: 24px;
+  height: 30px;
+  padding: 0;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* The beat strip. `beats_per_bar` marks under the tempo, the beat
+   the server reports lit, and the phase running through it.
+
+   It is a prediction. Telemetry samples the clock about once a second, and
+   between samples the strip runs on at the `beats_per_second` the server sent
+   and is put right by the next one — which is what a beat strip is. A strip that
+   only moved when telemetry arrived would stutter; one that never corrected
+   would drift away from the show. Nothing is drawn at all until a sample has
+   arrived, because no show open means no clock, which is not a beat at
+   zero. */
+
+#beat-strip {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 30px;
+}
+
+/* Nothing has said what the beat is. `line-height` is left alone: it was 7px,
+   which is shorter than the em dash drawn in it, so the one character on this
+   strip was the one thing on the screen hanging out of its own line. */
+
+#beat-strip.unknown {
+  color: var(--dim);
+  font-size: 10px;
+}
+
+/* One lamp a beat, with its number in it. Wide enough to read a digit at
+   arm's length, which is the whole point of numbering them. */
+
+/* The em dash that stands in for a beat nobody has sent. It has no rule of its
+   own beyond this: it is a character in a lamp-sized strip, so it is allowed to
+   sit in the line rather than making the strip as wide as a dash. */
+
+.beat-none {
+  align-self: center;
+  color: var(--dim);
+  font-size: 10px;
+}
+
+.beat {
+  position: relative;
+  width: 26px;
+  height: 100%;
+  overflow: hidden;
+  background: #32323a;
+  border-radius: 4px;
+}
+
+.beat-number {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--dim);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.beat.on .beat-number {
+  color: #06080c;
+}
+
+/* The phase, and the only thing a frame writes: the mark that is lit is filled
+   from its left edge as the beat runs through it. A transform rather than a
+   width, because a transform does not ask the page to lay itself out again
+   sixty times a second on a machine that is also running a show. */
+
+.beat-fill {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--beat);
+  border-radius: inherit;
+  transform: scaleX(0);
+  transform-origin: left center;
+}
+
+.beat.on {
+  background: var(--beat);
+}
+
+/* A bar with more beats than there is room for marks: one bar, and the beat in
+   figures beside it. */
+
+.beat-count {
+  color: var(--dim);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+#bpm {
+  width: 78px;
+  padding: 2px 4px;
+  background: #101013;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  user-select: text;
+}
+
+#bpm-unit {
+  color: var(--dim);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+#phase-reset {
+  height: 40px;
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+/* One tap is not an interval, and the server says whether this one changed
+   anything (`TapTempoResponse.changed`). */
+
+#tap-note {
+  min-width: 56px;
+  color: var(--waiting);
+  font-size: 11px;
+}
+
+#identity {
+  min-width: 0;
+  text-align: center;
+}
+
+/* The show's name and the server's address are both whatever somebody
+   typed. Cut off with an ellipsis rather than allowed to push the mode
+   buttons off one side of the bar and the renderer's state off the other;
+   the whole of each is in the title. */
+
+#identity strong,
+#server {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#identity strong {
+  display: block;
+  font-size: 15px;
+}
+
+#server {
+  color: var(--dim);
+  font-size: 11px;
+}
+
+#health {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+
+.pill {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #2a2a30;
+  color: var(--dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.pill.live,
+.pill.running {
+  background: rgba(61, 220, 132, 0.15);
+  color: var(--live);
+}
+
+/* A disc that is nearly full reads like anything else that is nearly out of
+   time: amber, not an alarm. */
+
+.pill.warn,
+.pill.connecting,
+.pill.waiting,
+.pill.starting,
+.pill.degraded {
+  background: rgba(255, 176, 32, 0.15);
+  color: var(--waiting);
+}
+
+.pill.refused,
+.pill.faulted,
+.pill.unreachable {
+  background: rgba(255, 92, 92, 0.15);
+  color: var(--bad);
+}
+
+/* --- live ---
+   Three bands, as the Live Mode reference has them: the global area, the
+   dominant layer × slot matrix, and the preview/work area under it. The matrix
+   gets whatever is left over and scrolls, because it is the thing that must
+   stay visible. */
+
+/* Four bands: the bank bar, the matrix, the master row, and the preview and
+   work area. The matrix is the one that takes what is left, because it is the
+   dominant element of this screen. */
+
+#live {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  gap: 10px;
+  padding: 12px;
+  min-height: 0;
+}
+
+/* The slot banks, on their own line above the matrix because they decide what
+   the matrix is showing, with the global DMX switch at the far end. */
+
+#banks-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* The two that are not banks, together at the far end. */
+
+#banks-bar-end {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The one switch that takes the show off the console. Red when DMX is off,
+   because that is the state somebody needs to see from across a room — a show
+   is normally being driven from the desk, and this window saying otherwise is
+   the exception that has to announce itself. */
+
+.dmx-switch {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.dmx-lamp {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--dim);
+}
+
+.dmx-switch.on .dmx-lamp {
+  background: var(--live);
+}
+
+.dmx-switch.off {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+
+.dmx-switch.off .dmx-lamp {
+  background: var(--bad);
+}
+
+/* The master row: one line under the layers, above the preview. Everything
+   that is one per show and nothing that is not (owner, 2026-09-23). It was a
+   tall band at the top with the clock in the title bar, which was two places
+   to look and a great deal of room for four numbers. */
+
+#master-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 6px 12px;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+}
+
+.master-control {
+  width: 170px;
+  /* A range input carries a few pixels of its own beyond `width: 100%` on
+     some platforms, and this row is measured to the pixel. */
+  overflow: hidden;
+}
+
+/* The name on the left and its value on the right. The name is a fixed
+   label and the value is a number, but the row is 170px wide and both are
+   drawn at whatever the operating system's font gives them, so the name is
+   cut off rather than pushing the number out of the control. */
+
+.master-control label > :first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.master-control label {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--dim);
+  margin-bottom: 2px;
+}
+
+.master-control input[type='range'] {
+  width: 100%;
+  accent-color: var(--active);
+}
+
+.master-ends {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--dim);
+}
+
+/* What the server itself says, beside a fader that has been moved and not
+   confirmed. Empty the rest of the time: the fader is the answer then. */
+
+.master-reported {
+  display: block;
+  min-height: 13px;
+  font-size: 10px;
+  color: var(--pending);
+  font-variant-numeric: tabular-nums;
+}
+
+#freeze {
+  margin-left: auto;
+  height: 30px;
+  padding: 0 14px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+#freeze.on {
+  background: var(--bad);
+  border-color: var(--bad);
+  color: #06080c;
+}
+
+#banks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.bank {
+  min-width: 62px;
+  font-variant-numeric: tabular-nums;
+}
+
+.bank.on {
+  background: var(--waiting);
+  border-color: var(--waiting);
+  color: #06080c;
+  font-weight: 700;
+}
+
+#matrix {
+  overflow-y: auto;
+  /* **The gutter is there whether or not it is scrolling.** A pad's size is
+     solved from this box's width, so a scrollbar arriving with the fifth layer
+     took fifteen pixels off it and moved every pad on every row -- on a desk
+     where an operator reaches for a pad by where it is. The fifteen pixels are
+     spent either way now, and adding a layer moves nothing. */
+  scrollbar-gutter: stable;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* One row per layer: its live state on the left, its slots across the rest.
+
+   **The slots set the height.** The status column used to carry a name, a clip
+   name, a playback mode, a rate and four transport buttons stacked under each
+   other, and the row was twice as tall as the pads it was labelling (owner,
+   2026-09-23). What is left fits beside them on one line. */
+
+.layer {
+  display: grid;
+  /* The left half takes what its four blocks need — which grows with the tile,
+     because the picture in it is one — and the pads take the rest. It was a
+     flat 320px, which is either too little for the picture or too much for the
+     pads, depending on the window. */
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  gap: 10px;
+  padding: 4px 6px;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+}
+
+.layer.disabled {
+  opacity: 0.45;
+}
+
+.layer.selected {
+  border-color: var(--active);
+}
+
+.layer-status {
+  display: flex;
+  align-items: start;
+  min-width: 0;
+}
+
+/* Where the layer sits in the composite, with its name under it, as a block
+   the height of the row (owner, 2026-09-23). Pressing it selects the layer,
+   which is what the OPTIONS tab then talks about.
+
+   A block rather than a character, because on a desk of eight rows the name is
+   how a row is found, and the number alone answers a different question. The
+   number takes the height it can and the name sits under it on one line: a
+   name that does not fit is cut with an ellipsis rather than wrapped, so the
+   block is the same height whatever it is called. */
+
+.layer-name {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 1px;
+  height: var(--line-height);
+  min-width: 0;
+  padding: 2px 6px;
+  background: #101013;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  text-align: center;
+}
+
+.layer-name-number {
+  font-size: clamp(13px, calc(var(--line-height) * 0.36), 30px);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  /* Room for the glyph rather than exactly its size. An inline box is as tall
+     as the font's own ascent and descent — about 1.28em in this one — so any
+     line height under that leaves the digit hanging out of its line box, which
+     the audit reports as text drawn outside its box, because it is. */
+  line-height: 1.32;
+}
+
+.layer-name-text {
+  overflow: hidden;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.layer.selected .layer-name {
+  background: var(--active);
+  border-color: var(--active);
+  color: #06080c;
+}
+
+/* Out of the composite, in the gap the owner drew it in: upright, because a
+   row has no width to spare for a word lying down. */
+
+.layer-mute {
+  height: var(--line-height);
+  width: 20px;
+  min-width: 20px;
+  padding: 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  transform: rotate(180deg);
+}
+
+.layer-mute.on {
+  background: var(--bad);
+  border-color: var(--bad);
+  color: #06080c;
+}
+
+/* Name, picture, controls, mute — the owner's drawing, left to right, and all
+   of it on the row's top edge so the pictures line up across the whole row.
+
+   **Narrow on purpose.** Every pixel the left half gives up is a pixel of
+   height for the whole line, because the pictures are sixteen by nine and
+   fourteen of them share the width. The name gives way first: a name can be cut
+   and a fader cannot. */
+
+.status-body {
+  display: grid;
+  /* The controls are one fixed width now — the bar, the blend mode under it and
+     the three route buttons under that all come to exactly that (owner,
+     2026-09-23) — and it is narrower than it was, which is what the bar with
+     its name inside bought. */
+  grid-template-columns: minmax(56px, 104px) auto 112px auto;
+  gap: 6px;
+  align-items: start;
+  width: 100%;
+  min-width: 0;
+}
+
+/* A/B/M side by side rather than stacked: they are under the blend mode, and
+   three buttons in a column would be taller than the row.
+
+   Three equal shares of the same width the bar and the blend mode have, so the
+   column reads as one block rather than three things of three lengths. */
+
+.routes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 2px;
+}
+
+.route {
+  min-width: 0;
+  height: 100%;
+  font-weight: 700;
+  font-size: 10px;
+  padding: 0;
+}
+
+.route.on {
+  background: var(--active);
+  border-color: var(--active);
+  color: #06080c;
+}
+
+/* What the layer is showing, which is the question the whole screen exists to
+   answer at a glance — and a picture answers it faster than a caption does.
+   The clip's name, its slot number and what its end does are all in the title
+   now, for somebody who wants the detail and can hover for it. */
+
+.showing {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* **One number sets every height in the matrix**, and everything on a row
+   starts and ends on the same two lines (owner, 2026-09-23): "Es sollte alles
+   in einer Flucht sein, heißt, alles was links ist kleiner, Slots etwas
+   höher/breiter damit alles auf einer Ebene/Linie ist."
+
+   `--tile-height` is a slot pad's picture. A pad is that and its caption, and
+   **everything else on the row is exactly that tall**: the name block, the
+   layer's own picture, the MUTE. So the layer's picture is a little larger than
+   a pad's, by the height of a caption — which is the drawing — and their top
+   and bottom edges are the same two lines.
+
+   It was a preview as tall as the whole row for a day, standing a head above
+   the pads beside it, which is what that instruction is about.
+
+   The number is the lower of what the row's share of the matrix allows and what
+   the width allows, and **a pad is still never wider than the layer's picture**
+   — it is the same picture less a caption.
+
+   The value here is what a page starts with, before a row has been measured. */
+
+#matrix {
+  --tile-height: 46px;
+  --tile-width: calc(var(--tile-height) * 16 / 9);
+  /* The opacity bar, the blend mode and the route buttons are one height
+     (owner, 2026-09-23). They were 17, 20 and 18: three controls in a column
+     of three different heights, which reads as three mistakes rather than one
+     block.
+
+     It is a floor rather than a fixed size. The three share the layer's height
+     between them, so on a window dragged larger they grow with the pictures
+     instead of staying small with widening gaps between them — "wenn ich das
+     fenster größere ziehe passen alle 3 Höhen nicht von dem Layer". */
+  --control-height: 19px;
+  /* The line of text under a pad's picture. Named because the layer's own
+     picture is a whole pad tall — picture and caption together — which is what
+     puts the top and the bottom of everything on the row on one line. */
+  --pad-caption: 26px;
+  --line-height: calc(var(--tile-height) + var(--pad-caption));
+}
+
+.showing-picture {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 16 / 9;
+  height: var(--line-height);
+  background: #06080c;
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+/* An effect is being carried over this layer's picture, which is where an
+   effect for the whole layer lands. The same colour a pad uses for the same
+   thing. */
+
+.showing-picture.drop-target {
+  border-color: var(--waiting);
+  box-shadow: inset 0 0 0 2px var(--waiting);
+}
+
+.showing-picture.black {
+  background: #000;
+}
+
+.showing-picture img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+/* Where the clip on this layer has got to (`LayerPlayhead`), under what it is.
+
+   Blue rather than the beat's orange, because they are two different clocks: the
+   strip in the top bar is where the show's beat is, and this is where one
+   layer's clip is. Drawn only on a layer the server reported a playhead for —
+   `hidden` on the rest, because an empty track would say there is a clip sitting
+   at its beginning, and a generator or a black layer has no clip at all.
+
+   Like the beat strip, this is a prediction between telemetry samples, so the
+   position is a transform rather than a width: a bar that animated its width
+   would ask the page to lay seven rows of controls out again sixty times a
+   second on a machine that is also running a show. */
+
+.playhead {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.playhead-track {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 4px;
+  overflow: hidden;
+  background: #32323a;
+  border-radius: 3px;
+}
+
+.playhead-fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--active);
+  border-radius: inherit;
+  transform: scaleX(0);
+  transform-origin: left center;
+}
+
+/* A clip the server reports at a speed of zero, which is one that has played
+   out and frozen. It is dimmed rather than left looking live, because a bar that
+   simply stood still reads as a client that has stopped hearing. */
+
+.playhead.held .playhead-fill {
+  background: var(--dim);
+}
+
+.playhead-time {
+  color: var(--dim);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* The opacity and the blend mode, side by side. The transport went with the
+   caption: next, previous and BLK are three buttons for things the pads
+   already do, and re-selecting the playing clip is the retrigger (owner,
+   2026-09-23). */
+
+/* Opacity on one line and the blend mode under it (owner, 2026-09-23). Side
+   by side the two shared one narrow column, and a select offering “Difference”
+   in seventy-two pixels showed about four letters of it. Stacked, each gets the
+   whole width the status block has. */
+
+/* The three controls share the line's height, a third each. Spread with gaps
+   between them they stayed one size while the pictures grew, which is the
+   window-dragged-larger case the owner reported; sharing it, the column is as
+   tall as the picture beside it at every size and reads as one block. */
+
+.layer-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  height: var(--line-height);
+  gap: 2px;
+  min-width: 0;
+}
+
+.layer-controls > * {
+  flex: 1 1 0;
+  min-height: var(--control-height);
+}
+
+/* The opacity fader: a bar with its own name written in it, rather than a
+   label, a track and a number side by side (owner, 2026-09-23). Three things on
+   one line cost three times the width of one, and width in this column is
+   height for every picture on the row.
+
+   Two faces of the same text, one over the other. The lower is light on the
+   track; the upper is dark on the orange and clipped to how far the value has
+   gone, so the caption reads at every setting — including nought, where a
+   single dark caption would be dark text on a dark bar.
+
+   The `input[type=range]` is still there, transparent and over the whole bar.
+   It is what makes this draggable, focusable and arrow-key-able, and what a
+   screen reader finds; the faces are only what it looks like, and take no
+   pointer. */
+
+.layer-opacity {
+  position: relative;
+  display: block;
+  background: #101013;
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  overflow: hidden;
+  cursor: ew-resize;
+}
+
+.layer-opacity:focus-within {
+  border-color: var(--active);
+}
+
+.layer-opacity-face {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 0 5px;
+  color: var(--dim);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.layer-opacity-face.on {
+  background: var(--active);
+  color: #06080c;
+  clip-path: inset(0 calc(100% - var(--fill, 0%)) 0 0);
+}
+
+.layer-opacity-caption {
+  overflow: hidden;
+  text-overflow: clip;
+}
+
+.layer-opacity-value {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The track itself draws nothing: the faces under it are the bar. A thumb of
+   two pixels rather than none, because a range with no thumb at all stops
+   answering the pointer in Chromium. */
+
+.layer-opacity input[type='range'] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  cursor: inherit;
+}
+
+.layer-opacity input[type='range']::-webkit-slider-runnable-track {
+  height: 100%;
+  background: transparent;
+}
+
+.layer-opacity input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 2px;
+  height: 100%;
+  background: transparent;
+}
+
+/* A `select` is as wide as its widest option, and one of these offers
+   “Lighten”, “Multiply” and “Difference”. `min-width: 0` so the row can still
+   shrink; the blend mode takes the full width because it is now on a line of
+   its own and the whole point of moving it there was being able to read it. */
+
+.layer-blend {
+  min-width: 0;
+  padding: 0 4px;
+  background: #101013;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+  font-size: 10px;
+}
+
+.layer-blend {
+  width: 100%;
+}
+
+/* Thirteen pads at the tile width, and the room left over stays room. `1fr`
+   is what let them stretch; `minmax(0, …)` still lets them shrink when the
+   window is too narrow for thirteen, which is the case a fixed width would
+   break instead. */
+
+.slots {
+  display: grid;
+  /* Twelve, not thirteen: the Black pad has gone and an empty one does its job
+     (owner, 2026-09-23). */
+  grid-template-columns: repeat(12, minmax(0, var(--tile-width)));
+  justify-content: start;
+  /* On the top edge, with everything else. A pad is a picture of the same
+     height as the layer's own with a caption under it, so aligning the tops
+     aligns the pictures — which is the line the owner means. */
+  align-items: start;
+  gap: 4px;
+}
+
+/* `min-width: 0` for the reason `.pad-label` gives: a button's own minimum
+   width is its content's, so the grid could not shrink it however narrow the
+   column was told to be. */
+
+.pad {
+  display: flex;
+  flex-direction: column;
+  /* A `button` is centred by its user-agent stylesheet, and in a column that
+     makes every child as wide as its own content — so the picture, which has no
+     content until a thumbnail arrives, was nought pixels wide. It was invisible
+     rather than wrong while the whole pad lit up; now that the picture is what
+     lights, it has to be the pad's width. */
+  align-items: stretch;
+  gap: 2px;
+  min-width: 0;
+  /* The picture, plus the line of text under it. */
+  height: var(--line-height);
+  padding: 3px;
+  overflow: hidden;
+  font-size: 10px;
+}
+
+.pad-picture {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  background: #06080c;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.pad-picture.black {
+  background: #000;
+}
+
+.pad-picture img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.pad-generator {
+  padding: 0 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dim);
+  font-size: 10px;
+}
+
+/* `min-width: 0` is what makes the ellipsis above work at all. A flex item's
+   minimum width is its content's, so a clip called “Nachtfahrt durch die
+   Innenstadt” made the pad two hundred pixels wider than its column and
+   pushed the whole bank off the screen — the text was never too wide for
+   its box, the box was too wide for the matrix. */
+
+.pad-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.pad.empty {
+  opacity: 0.3;
+}
+
+.pad.empty .pad-picture {
+  background: transparent;
+  border: 1px dashed var(--edge);
+}
+
+/* **The two halves of a pad say two different things** (owner, 2026-09-23).
+
+   The picture lights when the slot is *actually on stage*. The name lights when
+   the slot is the one OPTIONS is about — and exactly one name is lit anywhere
+   in the matrix, because the panel has one subject. They are usually the same
+   pad, since playing a slot chooses it, and they part company as soon as an
+   operator looks at a slot without playing it.
+
+   It used to be the whole pad for on stage and an underline on the name for a
+   link, which said neither of these. */
+
+.pad.active .pad-picture {
+  background: var(--active);
+  box-shadow: inset 0 0 0 2px var(--active);
+}
+
+.pad.active .pad-label {
+  color: var(--active);
+  font-weight: 700;
+}
+
+.pad.chosen .pad-label {
+  margin: 0 -1px -1px;
+  padding: 0 3px;
+  background: var(--active);
+  border-radius: 2px;
+  color: #06080c;
+  font-weight: 700;
+}
+
+/* The layer's own picture, when it is the subject instead. The whole row is
+   already outlined; this is what says the panel is about the layer rather than
+   about one of its slots, in the same colour a chosen name uses. */
+
+.layer.selected .showing-picture {
+  border-color: var(--active);
+}
+
+/* This client asked for this pad and the server has not said anything yet.
+   Dashed, because the difference between a pad that is on and one nobody has
+   answered about is the difference between a show and a client talking to
+   nothing. */
+
+.pad.asked {
+  border-style: dashed;
+  border-color: var(--pending);
+}
+
+.pad.refused {
+  border-color: var(--bad);
+}
+
+/* A pad the pointer is carrying a clip over. Not the active colour and not
+   the pending one: this is neither of those states, and reusing one of them
+   would be the screen saying something about the show that is not true. */
+
+.pad.drop-target {
+  border-color: var(--waiting);
+  box-shadow: inset 0 0 0 2px var(--waiting);
+}
+
+/* A pad asking whether to replace what is in it. The picture underneath is
+   left alone on purpose: what is at risk is the thing the operator can see. */
+
+.pad.confirming {
+  border-color: var(--bad);
+  box-shadow: inset 0 0 0 2px var(--bad);
+}
+
+.pad.confirming .pad-label {
+  color: var(--bad);
+  font-weight: 700;
+}
+
+/* An empty pad is still a drop target, so it is not disabled any more and
+   has to say for itself that pressing it does nothing. */
+
+.pad.empty {
+  cursor: default;
+}
+
+/* --- a control that has been moved and not confirmed ---
+   The three states a live control can be in besides "this is what the server
+   says". None of them is a colour used for anything else on the screen. */
+
+.pending:not(.pad) {
+  border-color: var(--pending);
+  box-shadow: 0 0 0 1px var(--pending);
+}
+
+.refused:not(.pad) {
+  border-color: var(--bad);
+  box-shadow: 0 0 0 1px var(--bad);
+}
+
+.unknown {
+  opacity: 0.55;
+}
+
+/* A live value that is not the one the show opens on. Marked rather than
+   coloured over, so the value itself is still read first. */
+
+span.differs::after {
+  content: ' •';
+  color: var(--waiting);
+}
+
+select.differs,
+input.differs {
+  border-color: var(--waiting);
+}
+
+/* A button has no room for a marker beside its label, so it is outlined
+   instead. The A/B/M buttons are the ones this is for: a layer on a bus the
+   show does not open it on. */
+
+button.differs {
+  outline: 1px dashed var(--waiting);
+  outline-offset: 1px;
+}
+
+button {
+  background: #2a2a30;
+  color: var(--text);
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: #4a4a54;
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+button.on {
+  background: var(--waiting);
+  border-color: var(--waiting);
+  color: #06080c;
+}
+
+/* What is on screen while reconnecting is the last thing the server said. */
+
+body.stale #matrix,
+body.stale #master-row {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+h1 {
+  font-size: 18px;
+  margin: 0 0 12px;
+}
+
+h2 {
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin: 0 0 10px;
+}
+
+/* --- the preview/work area ---
+   The lower band of the reference drawing, in the four parts the drawing has:
+   the preview/stream box, the COMPOSITION/SLICES rail lettered up its edge, the
+   BROWSER/GENERATOR/OPTIONS/EFFECTS rail, and the contextual work panel those
+   open. The preview is whatever the renderer is drawing — the composition, or
+   any output the server says it is driving.
+
+   The rails carry their labels sideways, as the drawing letters them. That is
+   not decoration: four tabs down the edge of a panel cost the band no height,
+   and the matrix above is the thing that must not be squeezed. */
+
+/* **The preview is as wide as the picture in it, and not one pixel wider.**
+
+   This took three goes (owner, 2026-09-23, twice). `1fr` gave the panel a
+   share of the window and letterboxed the picture inside it. `auto` with a
+   flexed frame was worse: the frame's width came from a height that came
+   from the flex line that came from the column, so the browser resolved the
+   circle by making the column enormous and left no room for the work panel
+   at all.
+
+   The circle is broken by giving the picture a **definite height** derived
+   from the row, rather than one derived from the layout. With a real length
+   in `height` and an `aspect-ratio`, `width: auto` is arithmetic, `auto`
+   column sizing is arithmetic, and the third column gets everything else.
+
+   `--preview-chrome` is what the panel puts above and below the picture: its
+   own padding and borders, the head, and the one-line note. It is written
+   out rather than measured, and it is written out for the case where the
+   note is showing — so the note can never push the picture out of the row,
+   and when there is no note the panel is simply a little shorter than the
+   space it has. */
+
+#work {
+  --work-height: max(30vh, 210px);
+  /* The head and the one line under the picture. It was 82px: a head with a
+     row of buttons in it, a line of size and encoder, and a block of piece
+     notes, all of which have gone (owner, 2026-09-23) — and every pixel of it
+     is a pixel of picture, twice over, because the picture is sixteen by nine
+     and grows in both directions. */
+  --preview-chrome: 38px;
+  --preview-picture: max(90px, calc(var(--work-height) - var(--preview-chrome)));
+
+  display: grid;
+  /* The preview at whatever width its height gives it, the rail that chooses
+     what it shows, and the work panel taking the rest. */
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 8px;
+  height: var(--work-height);
+}
+
+#work > section,
+#work > .tab-rail {
+  min-height: 0;
+}
+
+#preview-panel,
+#work-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 10px 12px;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+}
+
+/* The work panel is a rail, its body, and a second rail: OPTIONS on the left
+   and the four browsers on the right (owner, 2026-09-23). Two different jobs —
+   editing what is selected, and finding a thing to drag onto a pad — so they
+   sit on opposite edges of the thing they act on. */
+
+#work-panel {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 6px;
+  min-width: 0;
+}
+
+#work-body {
+  overflow: hidden;
+}
+
+#work-tool {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* One rail: tabs stacked down it, and the four of the work panel's rail in two
+   rows of two, which is the arrangement the drawing uses to fit them into the
+   band's height. Row by row, so they read BROWSER, GENERATOR / OPTIONS, EFFECTS
+   as the drawing letters them. */
+
+.tab-rail {
+  display: grid;
+  grid-template-rows: 1fr 1fr;
+  gap: 4px;
+  align-content: stretch;
+}
+
+/* OPTIONS alone, the full height of the panel. */
+
+#work-tabs .tab {
+  grid-row: 1 / span 2;
+}
+
+/* And the four browsers as a two-by-two, which is the arrangement that fits
+   them into the band's height. */
+
+#browser-tabs {
+  grid-template-columns: auto auto;
+}
+
+/* The preview's own rail is one column: COMPOSITION above PIECES, as it was
+   before (owner, 2026-09-23). Side by side they were two tall bars where one
+   belongs, and the list grows downwards when the server reports outputs. */
+
+#preview-surfaces {
+  grid-auto-flow: row;
+  grid-template-columns: auto;
+  grid-template-rows: none;
+  grid-auto-rows: 1fr;
+}
+
+/* Bottom to top, as the drawing letters them: `vertical-rl` turned the other
+   way up, because `sideways-lr` — which would say this directly — is not one
+   Chromium implements. */
+
+.tab {
+  writing-mode: vertical-rl;
+  rotate: 180deg;
+  text-orientation: mixed;
+  padding: 10px 5px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: var(--text);
+}
+
+/* The chosen tab is the brand's orange, like every other chosen thing on this
+   screen (owner, 2026-09-23). It was a slightly lighter grey on grey, which is
+   the one thing a selection must not be. */
+
+.tab.on {
+  background: var(--active);
+  border-color: var(--active);
+  color: #06080c;
+  font-weight: 700;
+}
+
+/* What a tab is, said on the tab and again at the head of what it opened. A
+   live screen whose tabs are named after configuration has to answer the
+   question "does this write to my show?" before it is asked. */
+
+.tab-kind {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--edge);
+  color: var(--dim);
+}
+
+.tab-kind.live {
+  color: var(--active);
+  border-color: var(--active);
+}
+
+.tab-says {
+  color: var(--dim);
+  font-size: 11px;
+  margin: 0 0 8px;
+}
+
+/* Capped, and scrolling past the cap: the picture above it is what the
+   operator is judging, and a list of overlaps must not push it out of the
+   band. */
+
+#preview-subject {
+  margin: 4px 0 0;
+  max-height: 76px;
+  overflow-y: auto;
+}
+
+#preview-subject p {
+  margin: 0 0 3px;
+}
+
+/* The slices drawn over the preview picture. Outlines only: the picture under
+   them is the thing being judged, and a filled rectangle would be this client
+   painting over the wall it is meant to be showing. */
+
+#slice-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  /* So the stage below can be sized against this box in both axes, which
+     is the whole of the fix. */
+  container-type: size;
+}
+
+/* The outlines have to land on the *picture*, and the picture is letterboxed
+   inside this frame whenever the two aspects disagree.
+
+   This used to be `width: 100%` with `aspect-ratio` and a `max-height` cap,
+   which is right only when the frame is taller than the picture. When the
+   frame is *wider* — which it is for a 16:9 wall in a panel that is not —
+   the width stayed at the frame's and the height was clamped, so every piece
+   was drawn wider than it is. The owner reported it as pieces that do not
+   match the preview (2026-09-23); it was this.
+
+   `min()` against both of the container's axes is `object-fit: contain`
+   written out: take the frame's width, or the width that the frame's height
+   allows at this aspect, whichever is smaller. `--aspect` is the surface's
+   own width over its height, set with the stage. */
+
+.slice-stage {
+  position: relative;
+  aspect-ratio: var(--aspect);
+  width: min(100cqw, calc(100cqh * var(--aspect)));
+}
+
+.slice-outline {
+  position: absolute;
+  border: 1px solid var(--active);
+  pointer-events: auto;
+}
+
+.slice-outline.off {
+  border-style: dashed;
+  opacity: 0.55;
+}
+
+.slice-outline > span {
+  position: absolute;
+  top: 1px;
+  left: 3px;
+  font-size: 9px;
+  color: var(--text);
+  text-shadow: 0 0 3px #000;
+  white-space: nowrap;
+  overflow: hidden;
+  max-width: 100%;
+}
+
+/* The tools themselves: one row per thing, a name, what it is set to, and —
+   where there is one — the way into EDIT at exactly that thing. */
+
+.work-row {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--edge);
+}
+
+.work-row-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Whatever the server calls a piece, an effect or a generator. */
+
+.work-row-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.work-row-where {
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.work-row-note {
+  color: var(--dim);
+  font-size: 11px;
+  margin: 2px 0 0;
+}
+
+.work-parameters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1px 10px;
+  margin: 4px 0 0;
+  font-size: 11px;
+}
+
+.work-parameter-value {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* A value the show never set is the module's published default. Dimmed
+   rather than hidden: it is what the effect is doing, and an operator reading
+   a look needs to see all of it. */
+
+.work-parameter.default,
+.work-parameter-value.default {
+  color: var(--dim);
+}
+
+/* On air is the one thing in these lists that is live state, so it is the one
+   thing in them coloured like the matrix. */
+
+
+/* --- BROWSER ---
+   Icons rather than rows: a picture, the name under it, and a search over the
+   lot (owner, 2026-09-23). What each item is and where tonight's show uses
+   it are in the tile's title, for a hover, rather than printed under every
+   one of them.
+
+   `auto-fill` with a floor rather than a fixed column count, because this
+   panel is one third of a window whose width the operator chooses. */
+
+/* On the title line, so it takes no row of its own, and dressed like every
+   other field on the screen rather than in the browser's own white (owner,
+   2026-09-23). A search box is where somebody types a clip's name; it does not
+   need to be the brightest thing in the band. */
+
+.browser-search {
+  flex: 0 1 220px;
+  min-width: 0;
+  padding: 3px 8px;
+  background: #101013;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  user-select: text;
+}
+
+.browser-search::placeholder {
+  color: var(--dim);
+}
+
+.browser-search:focus {
+  border-color: var(--active);
+  outline: none;
+}
+
+/* Chromium draws its own clear button on a search field, in its own colour. */
+
+.browser-search::-webkit-search-cancel-button {
+  filter: invert(1) opacity(0.5);
+}
+
+.browser-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 6px;
+}
+
+/* A heading spans the grid rather than taking a cell, so the groups read as
+   groups instead of as a tile with a word in it. */
+
+.browser-heading {
+  grid-column: 1 / -1;
+  margin: 4px 0 0;
+  color: var(--dim);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.browser-heading:first-child {
+  margin-top: 0;
+}
+
+.browser-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  /* As `.media-card`: a grid item's minimum width is its content's, so one
+     long unbroken name would push the tile past its column. */
+  min-width: 0;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  /* The whole tile is the handle. A drag that only started on the picture
+     would miss every item whose picture the server has not sent. */
+  cursor: grab;
+}
+
+.browser-tile:active {
+  cursor: grabbing;
+}
+
+.browser-tile.on-air-tile {
+  border-color: var(--active);
+}
+
+.browser-tile-picture {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 16 / 9;
+  background: #06080c;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.browser-tile-picture img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+/* Two lines and then an ellipsis. A clip's name is whatever the file was
+   called, and one of them is always long enough to push the grid apart. */
+
+/* A generator, an effect and a network sender have no picture. What a generator
+   looks like is whatever the renderer draws it as; a sender's picture would mean
+   receiving the stream here, and a still frame of a live source is a picture of
+   a moment that has already passed. So the tile carries its name on a plain
+   field rather than an approximation of something nobody has rendered. */
+
+.generator-tile .browser-tile-picture,
+.ndi-tile .browser-tile-picture {
+  background: #101016;
+  border: 1px dashed var(--edge);
+}
+
+.tile-mark {
+  padding: 0 4px;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dim);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.browser-tile-name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  line-height: 1.25;
+}
+.on-air {
+  color: var(--active);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+
+/* OPTIONS has room the matrix row does not, so its controls are laid out for
+   reading rather than for the width of a status column: A/B/M across instead
+   of down, and the rate on one line. */
+
+.option-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* The fader fills the row. It used to be `input[type='range']` here, which was
+   the control itself; the input is inside the bar now and absolutely positioned
+   over it, so the bar is what a width reaches. A menu and a text box take the
+   same room, because a panel of controls that each stop somewhere different
+   reads as a panel that was never laid out. */
+
+.option-control > .fader-bar,
+.option-control > .option-colour,
+.option-control > select,
+.option-control > textarea {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.option-routes {
+  display: flex;
+  gap: 3px;
+}
+
+.work-thumb {
+  width: 48px;
+  height: 27px;
+  object-fit: cover;
+  border: 1px solid var(--edge);
+  border-radius: 2px;
+  background: #000;
+}
+
+/* The row of buttons that used to sit in the preview's head had its own rule
+   here, later in the file than the rail's and therefore winning: the rail came
+   out as a flex row, which is why COMPOSITION and PIECES stood side by side.
+   The buttons are gone; so is it. */
+
+.surface {
+  font-size: 11px;
+}
+
+.surface.on {
+  background: var(--active);
+  border-color: var(--active);
+  color: #06080c;
+}
+
+/* Flex rather than grid, which is not a preference: a grid item cannot resolve
+   `max-height: 100%` against a height it derives itself, and a 4:3 wall was
+   drawn taller than the box with its top and bottom cut off.
+
+   `aspect-ratio` on the frame is what stops the black bars: the panel around it
+   is `auto`-width, so the frame asks for the width its height allows at the
+   composition's own shape and gets it. 16:9 because that is what a composition
+   is on this product; a wall of another shape still letterboxes inside it, and
+   the overlay follows the picture either way. */
+
+#preview-frame {
+  position: relative;
+  /* Neither grows nor shrinks: its size is the one thing on this screen
+     that is arithmetic rather than negotiation. See `#work`. */
+  flex: 0 0 auto;
+  /* Not stretched. A column flex container stretches its items across, which
+     would give the frame the panel's width and take the aspect ratio back out
+     of the arithmetic — the exact thing this is here to avoid. */
+  align-self: center;
+  height: var(--preview-picture);
+  width: auto;
+  aspect-ratio: 16 / 9;
+  min-height: 0;
+  background: #000;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+/* One line per thing the server said about the selected layer, with what the
+   show opens on beside the ones that are live. */
+
+/* No rule between one row and the next (owner, 2026-09-23). A column of five
+   controls is read as a column without being fenced into five; the lines were
+   doing the work the gap already does, in a colour that draws the eye. */
+
+.live-fact {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  gap: 4px 8px;
+  padding: 3px 0;
+}
+
+.live-fact-label {
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.live-fact-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.live-fact-show {
+  grid-column: 2;
+  color: var(--dim);
+  font-size: 10px;
+}
+
+/* What the server said when it refused, under the control that caused it, in
+   the server's own words. Empty and taking no room the rest of the time: a line
+   that was always there would be a line nobody reads when it fills. */
+
+.live-fact-refusal,
+.work-row-note.refusal {
+  grid-column: 2;
+  color: var(--bad);
+  font-size: 10px;
+  margin: 0;
+}
+
+.live-fact-refusal:empty,
+.work-row-note.refusal:empty {
+  display: none;
+}
+
+/* A colour is four linear channels and gets four fields, not a swatch: the
+   model stores linear RGBA and a swatch would be an sRGB conversion this client
+   has no business making on the operator's behalf. */
+
+/* A colour is a swatch and an alpha fader beside it (owner, 2026-09-27). The
+   swatch keeps its size and the fader takes what is left, so the alpha on every
+   row of the panel starts and ends at the same two places. */
+
+.option-colour {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.option-colour .fader-bar {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* The swatch. Wider than it is tall because it is a sample of a colour rather
+   than a button, and a picker the size of a checkbox is a picker nobody can see
+   the colour in. */
+
+.option-colour input[type='color'] {
+  flex: 0 0 auto;
+  width: 46px;
+  min-width: 0;
+  height: 22px;
+  padding: 1px;
+  background: none;
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+/* Both previews are sized in pixels by the picture itself and fitted to the
+   panel here, so a wall that is not 16:9 is letterboxed rather than cropped or
+   stretched. An operator judging a frame has to be looking at its real shape. */
+
+#preview,
+#preview-canvas {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+#preview-note {
+  color: var(--dim);
+  font-size: 11px;
+  margin: 8px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A line with nothing in it still takes a line. There is usually nothing to
+   say here, so the picture gets the room instead. */
+
+#preview-note:empty {
+  display: none;
+}
+
+/* --- edit/setup ---
+   The same panels, the same pads and the same pills as Live Mode: an operator
+   moving between the two is looking at one application. What is different is
+   that nothing here is live, so nothing here is coloured like the active slot
+   or the running renderer. */
+
+#modes {
+  display: flex;
+  gap: 2px;
+  margin-right: 6px;
+}
+
+/* **As wide as the word in it, and no narrower.** This was `width: 52px`,
+   which is four characters at this size and letter-spacing: LIVE fitted,
+   MEDIA was tight and SETTINGS ran out of the button (owner, 2026-09-23).
+   A fixed width on a box that holds a word is the whole bug, so the width is
+   a floor now and the padding decides the rest. */
+
+.mode {
+  min-width: 52px;
+  height: 40px;
+  padding: 0 12px;
+  white-space: nowrap;
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+.mode.on {
+  background: var(--active);
+  border-color: var(--active);
+  color: #06080c;
+}
+
+/* --- Settings, and its tabs ---
+
+   One mode with four sections rather than three modes beside LIVE (owner,
+   2026-09-23). The tab strip is the width of the window and the pane under it
+   fills what is left; every pane scrolls on its own, so moving between them
+   does not move anybody back to the top of where they were. */
+
+#settings {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 0;
+}
+
+/* --- the DMX tab, laid out like a lighting desk ---
+   Fixtures down the left, universes as tabs along the top, and the universe
+   being worked on underneath as its five hundred and twelve channels. Drag a
+   fixture onto a channel to patch it there (owner, 2026-09-23). */
+
+#patch-fixtures {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 40vh;
+  overflow: auto;
+}
+
+.patch-fixture-tile {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  padding: 5px 8px;
+  background: #101013;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  font-size: 12px;
+  /* The whole tile is the handle, so a fixture whose name is short is no
+     harder to pick up than one whose name is long. */
+  cursor: grab;
+}
+
+.patch-fixture-tile:active {
+  cursor: grabbing;
+}
+
+/* Already patched: still listed, so somebody looking for a layer finds it and
+   is told where it is rather than wondering why it is missing. */
+
+.patch-fixture-tile.patched {
+  cursor: pointer;
+  opacity: 0.75;
+}
+
+.patch-fixture-tile.selected {
+  border-color: var(--active);
+  opacity: 1;
+}
+
+.patch-fixture-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.patch-fixture-size {
+  flex: 0 0 auto;
+  color: var(--dim);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.patch-fixtures-heading {
+  margin: 8px 0 2px;
+  color: var(--dim);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+#patch-universe-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+
+#patch-universe-tabs .settings-tab {
+  min-width: 34px;
+  padding: 4px 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+#patch-universe-tabs .settings-tab.empty:not(.on) {
+  color: var(--dim);
+  opacity: 0.6;
+}
+
+/* Five hundred and twelve cells. Sixteen across is how a desk draws them and
+   how an address is read: the row is the hundred, the column the digit. */
+
+/* Three times as many across, so a universe is a third the width it was
+   (owner, 2026-09-23). Forty-eight is still a round number to count along —
+   the row is the fifty, the column the rest — and 512 channels at 16 across
+   was a column of thirty-two rows nobody could see the end of.
+
+   A block's name is drawn over it rather than in its first cell, so it is one
+   grid with an overlay on top: see `.channel-holder`. */
+
+#patch-channels-grid {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(48, minmax(0, 1fr));
+  gap: 1px;
+}
+
+.channel-cell {
+  min-height: 16px;
+  font-size: 7px;
+}
+
+/* One name per fixture, centred over the channels it holds, in a layer of its
+   own above the grid (owner, 2026-09-23). In the first cell it sat at the left
+   edge of a block and ran over its neighbours, which reads as though it
+   belonged to whichever cell it happened to end on. */
+
+.channel-names {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.channel-name {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: 9px;
+  text-shadow: 0 1px 2px #06080c;
+}
+
+/* A cell is a column: the channel number, then the name if this is where the
+   block starts. Centred, always (owner, 2026-09-23) — a grid of numbers is
+   read as a grid, and one ragged column of left-aligned digits is harder to
+   count along than a centred one. */
+
+.channel-cell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  min-width: 0;
+  min-height: 26px;
+  padding: 1px;
+  background: #0c0c10;
+  border: 1px solid #1c1c22;
+  border-radius: 2px;
+  overflow: hidden;
+  font-size: 9px;
+}
+
+.channel-number {
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A colour of its own per fixture, from its identity (owner, 2026-09-23). Two
+   blocks that meet are two colours, which is what makes a boundary visible at
+   a glance; the hue comes from the fixture rather than from where it sits, so
+   moving one does not repaint the universe. */
+
+.channel-cell.held {
+  background: hsl(var(--fixture-hue, 210) 32% 22%);
+  border-color: hsl(var(--fixture-hue, 210) 38% 36%);
+  cursor: grab;
+}
+
+.channel-cell.held:active {
+  cursor: grabbing;
+}
+
+.channel-cell.held .channel-number {
+  color: hsl(var(--fixture-hue, 210) 30% 72%);
+}
+
+.channel-cell.held.selected {
+  border-color: var(--active);
+  box-shadow: inset 0 0 0 1px var(--active);
+}
+
+.channel-cell.held.off {
+  opacity: 0.5;
+}
+
+/* Top right of the universe, beside what it says about itself. */
+
+#patch-delete {
+  margin-left: auto;
+}
+
+/* Where a fixture would land if it were let go now, and whether it fits. The
+   whole footprint, not the cell under the pointer: a twelve-channel fixture
+   dropped at 505 does not fit, and that should be visible before letting go. */
+
+.channel-cell.landing {
+  background: #2a3b22;
+  border-color: var(--live);
+}
+
+.channel-cell.landing-wrong {
+  background: #3b2222;
+  border-color: var(--bad);
+}
+
+/* What reaches this show, above everything that says where it goes. Two
+   switches rather than one: a venue's house desk may speak sACN while a
+   visiting console brings Art-Net (owner, 2026-09-23). */
+
+#dmx-protocols {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  grid-column: 1 / -1;
+  padding: 10px 16px 0;
+}
+
+#settings-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 16px 0;
+  border-bottom: 1px solid var(--edge);
+}
+
+/* Hard right, away from the tabs (owner, 2026-09-23). They are not a fifth tab
+   and reading along the row should not run into them.
+
+   There is no word beside them either: a disabled Save says "nothing to save"
+   more plainly than a label that says it, and an enabled one says the
+   opposite. */
+
+#settings-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+  padding-bottom: 8px;
+}
+
+.settings-tab {
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  color: var(--dim);
+  cursor: pointer;
+  font: 600 12px/1 inherit;
+  letter-spacing: 0.06em;
+  padding: 9px 18px;
+  text-transform: uppercase;
+}
+
+.settings-tab:hover {
+  color: var(--text);
+}
+
+.settings-tab.on {
+  background: var(--panel);
+  border-color: var(--edge);
+  color: var(--accent);
+}
+
+.settings-pane {
+  display: grid;
+  gap: 16px;
+  min-height: 0;
+  padding: 16px;
+}
+
+/* The Layers pane is one column: its panels stack down `#edit-main`.
+   A rule of its own, and it stays that way — this selector spent two commits
+   glued to whichever rule had most recently been pasted underneath it, because
+   a comment between two selectors is legal CSS and joins them. */
+
+/* The list, then whichever layer is chosen. A rule of its own, and it stays
+   that way — this selector spent two commits glued to whichever rule had most
+   recently been pasted underneath it, because a comment between two selectors
+   is legal CSS and joins them. */
+
+#settings-layers {
+  grid-template-columns: 300px minmax(0, 1fr);
+}
+
+#layers-side {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+#layers-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+#layer-list {
+  min-width: 0;
+  overflow-y: auto;
+}
+
+/* The show list, what is inside the one you clicked, and the document that
+   is open (owner, 2026-09-23).
+
+   The first two are the same width: the list holds names that are sentences
+   and the middle holds a picture, and both were being squeezed by a fixed
+   column (owner, 2026-09-23). The document keeps a column of its own, because
+   a form of labelled numbers does not get better with more width. */
+
+#settings-show {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 340px;
+}
+
+#show-side,
+#show-main,
+#show-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Folders down the left, what is filed in the open one to the right — the same
+   shape the library has, because it is the same idea. */
+
+#show-body {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  gap: 12px;
+  min-height: 0;
+  margin-bottom: 10px;
+}
+
+#show-folders {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-right: 8px;
+  overflow: auto;
+  border-right: 1px solid var(--edge);
+}
+
+/* The list fills its column and scrolls inside itself, rather than being a
+   small box at the top of a tall empty space. */
+
+#shows-panel,
+#show-preview {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+#show-body {
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+#show-list {
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.show-line.peeking .show {
+  border-color: var(--active);
+}
+
+/* A grid rather than a flex row, so every row's buttons line up with every
+   other row's: with two different labels — LOAD and ON AIR — a flex row put
+   each one wherever its own text ended (owner, 2026-09-23). One column fewer
+   since Edit went, which was the same press as LOAD. */
+
+#show-list .show-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 68px;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+/* Both of the last column's occupants, so a row with a label and a row with a
+   lamp are the same shape. */
+
+#show-list .show-load,
+#show-list .show-live {
+  align-self: center;
+  justify-self: stretch;
+  text-align: center;
+  padding: 4px 6px;
+}
+
+/* What one show holds, without opening it: each output at its own shape,
+   with the pieces that land on it drawn to scale. "Two walls side by side" and
+   "one wall in four strips" read the same as numbers and not at all the same
+   as rectangles. */
+
+#show-preview-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  gap: 14px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.preview-output {
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  padding: 8px;
+  background: #101013;
+}
+
+.preview-output-name {
+  font-size: 12px;
+}
+
+.preview-output-said {
+  margin-bottom: 6px;
+  color: var(--dim);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* No `max-height` here, and that is the point. A box with `aspect-ratio` and
+   `width: 100%` takes its height from its width; capping the height with
+   `max-height` does not narrow it, it just squashes it — which is how a
+   1920x1080 wall came to be drawn at about 5:2 (owner, 2026-09-23). The height
+   budget is applied as a `max-width` instead, worked out per output from its
+   own shape, so the box shrinks and the ratio survives. */
+
+.preview-stage {
+  margin-bottom: 0;
+}
+
+/* What there is, the viewer, and the controls for what is selected (owner,
+   2026-09-23). The middle takes what the two sides leave, because it holds the
+   picture and the sides hold lists and numbers. */
+
+#settings-mapping {
+  grid-template-columns: 320px minmax(0, 1fr) 300px;
+}
+
+#mapping-side,
+#mapping-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* The face tabs sit above the viewer rather than above the whole tab: they
+   decide what the viewer shows and what the right-hand panel is about. */
+
+#mapping-main > #mapping-faces {
+  padding: 0 0 8px;
+}
+
+/* The viewer takes what is left of the column and keeps it. Its own rule, and
+   it stays that way — a comment between two selectors is legal CSS and joins
+   them, which has caught this file twice. */
+
+#mapping-viewer {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* **The canvas scrolls, so the column does not have to.** It used to be the
+   other way round: the box had no height of its own, so zooming grew it past
+   the bottom of the column, the column scrolled, and reaching the canvas's own
+   horizontal bar took the face tabs and the zoom buttons off the top of the
+   screen (owner, 2026-09-25).
+
+   The column keeps its own `overflow-y: auto` from the rule it shares with the
+   other panes. It is no longer reached, because the box below takes what is
+   left and keeps it — and leaving it reachable is right for a window too short
+   for the tabs, where scrolling to them beats clipping them. */
+
+#composition-stage {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* Fitted means fitted both ways. The canvas carries its own aspect ratio, so
+   bounding its height is all it takes for the browser to shrink the width to
+   match — which is how a portrait wall fits without anything here guessing how
+   tall a window is. Scoped to this box: `.stage` is also the live preview. */
+
+#composition-stage .stage {
+  max-height: 100%;
+}
+
+#piece-none {
+  margin: 0;
+}
+
+/* The switch row spans both columns above the two panels, so what reaches the
+   show is read before anything that says where it goes. */
+
+#settings-dmx {
+  grid-template-columns: 320px 1fr;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+#edit-side,
+#edit-main,
+#mapping-main {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.settings-pane section {
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  padding: 12px;
+  flex: 0 0 auto;
+}
+
+/* One line, always. A head that wrapped would make its panel taller than the
+   row it was measured for, and the picture under it would be pushed out. */
+
+.panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.panel-head h2,
+.panel-head > :first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panel-head h2 {
+  margin-bottom: 10px;
+}
+
+/* Fields. A label above its control, and the control the full width of the
+   panel, because the names are long and the panels are narrow. */
+
+.field {
+  margin-bottom: 10px;
+}
+
+.field > label {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--dim);
+  margin-bottom: 4px;
+}
+
+.field input[type='text'],
+.field input[type='number'],
+.field select,
+.field textarea {
+  width: 100%;
+  padding: 5px 8px;
+  background: #101013;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+  user-select: text;
+}
+
+/* `margin: 0` is not decoration. A range input carries a two-pixel margin of
+   its own in Chromium, so `width: 100%` plus that margin is four pixels wider
+   than the box it is in — invisible until a column is exactly as wide as the
+   field, and then it is the whole panel that scrolls. */
+
+.field input[type='range'] {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--active);
+}
+
+.field.wrong input,
+.field.wrong select,
+.field.wrong textarea {
+  border-color: var(--bad);
+}
+
+.field .why {
+  display: block;
+  color: var(--bad);
+  font-size: 11px;
+  margin-top: 4px;
+}
+
+/* A row of small controls: transform axes, colour channels, chain buttons. */
+
+.row {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.row .field {
+  flex: 1 1 60px;
+  min-width: 60px;
+  margin-bottom: 0;
+}
+
+.inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.hint {
+  color: var(--dim);
+  font-size: 11px;
+  margin: 0 0 10px;
+}
+
+/* Shows. */
+
+#show-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.show {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  background: #101013;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  text-align: left;
+  width: 100%;
+}
+
+.show.editing {
+  border-color: var(--active);
+}
+
+/* One show: the document on the left, and — for one that is not already
+   running — the press that hands it the show on the right. They are separate
+   because they are different things: editing a document changes nothing on the
+   wall, and LOAD is the one action in the client that takes what is on the wall
+   away (owner, 2026-09-23). */
+
+.show-line {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  min-width: 0;
+}
+
+.show-line .show {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.show-line.editing .show {
+  border-color: var(--active);
+}
+
+.show-line .what {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.show-line .when {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dim);
+  font-size: 10px;
+}
+
+/* In the Show tab's narrow column the name and the date go one above the
+   other: side by side they left about fifty pixels for a show called
+   "Nachtfahrt durch die Innenstadt", which the overflow audit caught. */
+
+#show-list .show {
+  flex-direction: column;
+  /* Stretch, not flex-start: a column flex item sized to its own content is
+     exactly as wide as the longest show name, which is the overflow this was
+     meant to fix. Stretched, each line takes the button's width and the
+     ellipsis on the name has something to work against. */
+  align-items: stretch;
+  justify-content: center;
+  gap: 1px;
+}
+
+.show-load {
+  flex: 0 0 auto;
+  align-self: center;
+  padding: 4px 10px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.show-load.arming {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+
+.show-live {
+  flex: 0 0 auto;
+  align-self: center;
+  padding: 0 8px;
+  color: var(--active);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.show .what {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.show .when {
+  color: var(--dim);
+  font-size: 11px;
+}
+
+#new-show-form {
+  display: flex;
+  gap: 6px;
+}
+
+#new-show-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 5px 8px;
+  background: #101013;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+  user-select: text;
+}
+
+#document-actions {
+  display: flex;
+  gap: 6px;
+  margin: 10px 0 0;
+}
+
+#document-actions button {
+  flex: 1 1 0;
+}
+
+#document-note {
+  color: var(--waiting);
+  font-size: 11px;
+  margin: 10px 0 0;
+}
+
+#document-errors {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  color: var(--bad);
+  font-size: 11px;
+}
+
+#document-errors li {
+  margin-bottom: 4px;
+}
+
+#document-errors code {
+  color: var(--dim);
+}
+
+/* Layers. A row per layer, in composite order with the top of the stack first,
+   which is how the Live Mode matrix reads. */
+
+#layer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.layer-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  background: #101013;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+}
+
+.layer-row.selected {
+  border-color: var(--active);
+}
+
+/* Something in here will stop the document being saved, and the field it is
+   about may be several panels away. */
+
+.layer-row.wrong {
+  border-color: var(--bad);
+}
+
+.layer-row.off .layer-row-name {
+  opacity: 0.45;
+}
+
+.layer-row-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: none;
+  border: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+}
+
+.layer-row .order {
+  color: var(--dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.stack {
+  display: flex;
+  gap: 2px;
+}
+
+.stack button {
+  min-width: 24px;
+  padding: 2px 0;
+}
+
+/* The Layers tab's Save, which it did not have: making a layer is a document
+   edit and the only Save for it was on another tab (owner, 2026-09-23). */
+
+#layers-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* How many beats one pass of a clip takes. Only on screen while the clip is
+   locked to the beat, because free run has no number. */
+
+.option-beats {
+  width: 5em;
+  padding: 2px 4px;
+  background: #101013;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* What the sync and the rate together are asking of the decoder.
+
+   It sits under the controls that decide it and says nothing at all when a clip
+   is running at its own rate, which is the ordinary case. When it does speak it
+   is because somebody has asked for a multiple of the clip's own speed, and past
+   what a card can decode that is a wall that stops rather than a clip that plays
+   fast — the fault of 2026-09-23, which had no words anywhere until now. */
+
+.option-control .speed-steps {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The same box the selects on the rows above and below have, so the panel is
+   one line of controls rather than three sizes. The owner has said this twice:
+   "Die sollten alle Einheitlich groß sein."
+
+   Three classes deep on purpose. `.speed-steps .speed-step` is two, sits later
+   in this file, and would otherwise win on order alone — the trap that once put
+   COMPOSITION and PIECES side by side for a fortnight. */
+
+.option-control .speed-steps .speed-step {
+  padding: 0 2px;
+  font-size: 10px;
+}
+
+/* And one height for every control in this column.
+
+   Measured before touching it, the panel had three: selects at 18, the beat
+   count at 21 and the new pads at 16 — which is the thing the owner has now
+   objected to twice, most recently as "Die sollten alle Einheitlich groß sein."
+
+   Its own number rather than the matrix's `--control-height`, which does not
+   reach here and should not: that one is a *floor* the layer strip's three
+   controls grow above when the window is dragged larger, and this one is a
+   height a panel of rows wants to be the same. They agree at nineteen today and
+   are answers to different questions. */
+
+.option-control select,
+.option-control input[type='number'],
+.option-control .speed-steps .speed-step {
+  height: var(--option-control-height);
+}
+
+.option-rate {
+  margin: 0;
+  padding: 0 2px;
+  color: var(--dim);
+  font-size: 11px;
+  line-height: 1.32;
+}
+
+.option-rate.strained {
+  color: var(--bad);
+}
+
+/* Mapping: composition → pieces → outputs.
+
+   A surface is a box with the surface's own aspect ratio, and every rectangle
+   on it is placed as a percentage, so the picture stays honest at any size and
+   a wall that is not 16:9 is drawn as the shape it is. Nothing animates here
+   either: a rectangle follows the pointer and stops. */
+
+/* Width first and the height from the ratio, never the other way round: a
+   `max-height` here would clamp the height without narrowing the box, and a
+   stage drawn at the wrong ratio is a mapping an operator cannot judge. A tall
+   wall is capped by its width instead, which the panel sets in pixels because
+   only it knows the shape of the surface. */
+
+/* Zoomed in, the canvas is bigger than its box in both directions and the box
+   scrolls; fitted, it is inside the box and nothing scrolls. The box scrolls
+   either way now — see above — so this only has to take the height bound off,
+   because a zoomed canvas is meant to be taller than what it is looked at
+   through. */
+
+#composition-stage.zoomed .stage {
+  max-height: none;
+}
+
+#stage-zoom button {
+  padding: 2px 8px;
+  min-width: 34px;
+}
+
+.stage {
+  position: relative;
+  width: 100%;
+  margin: 0 auto 10px;
+  background: #0a0a0d;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  overflow: hidden;
+  touch-action: none;
+}
+
+/* --- where a snap caught ---
+   Magenta because nothing else on this canvas is (owner, 2026-09-23): orange is
+   selection, violet is waiting for a grid, red is refused. A line means two
+   edges met on one axis; a dot means a corner met a corner, which is the
+   stronger of the two and is drawn as the stronger mark.
+
+   It takes no pointer: it appears under the hand that is dragging. */
+
+.snap-marks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.snap-line {
+  position: absolute;
+  background: #ff00c8;
+  box-shadow: 0 0 4px #ff00c8;
+}
+
+.snap-line.vertical {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+}
+
+.snap-line.horizontal {
+  left: 0;
+  right: 0;
+  height: 1px;
+}
+
+.snap-corner {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  margin: -5px 0 0 -5px;
+  background: #ff00c8;
+  border: 1px solid #06080c;
+  border-radius: 50%;
+  box-shadow: 0 0 6px #ff00c8;
+}
+
+.stage-caption {
+  color: var(--dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  margin: 0 0 6px;
+}
+
+.stage-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+/* --- the mapping canvas's backdrop ---
+   A photograph of the wall, or a plan of it, to line rectangles up against.
+   Stretched to the surface rather than fitted inside it: it describes the same
+   thing the rectangles do, so the two have to be in the same coordinates
+   (owner, 2026-09-23). Never a pointer target — it is behind the work. */
+
+.stage-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* --- Mapping's two faces ---
+   Input Selection and Output Transformation, with the backdrop controls for
+   whichever one is showing. */
+
+#mapping-faces {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 16px 0;
+}
+
+/* What a live mapping is doing, and the way back from it, pushed right. */
+
+#mapping-live {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--dim);
+}
+
+/* The backdrop controls follow it rather than claiming the space themselves. */
+
+#mapping-backdrop-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 16px;
+  font-size: 11px;
+  color: var(--dim);
+}
+
+#mapping-backdrop-strength {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+#mapping-backdrop-opacity {
+  width: 110px;
+  accent-color: var(--active);
+}
+
+#mapping-backdrop-value {
+  width: 34px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.stage-rect {
+  position: absolute;
+  border: 1px solid var(--active);
+  background: rgba(74, 158, 255, 0.14);
+  cursor: move;
+  min-width: 2px;
+  min-height: 2px;
+}
+
+/* Every member of the selection, and then the one the panel is about. Several
+   can be moved and scaled together; only one has numbers on the right and only
+   one carries the handles (owner, 2026-09-23). */
+
+.stage-rect.selected {
+  border-color: var(--waiting);
+  background: rgba(255, 176, 32, 0.12);
+  z-index: 2;
+}
+
+.stage-rect.leading {
+  background: rgba(255, 176, 32, 0.22);
+  box-shadow: inset 0 0 0 1px var(--waiting);
+  z-index: 3;
+}
+
+/* A piece that is switched off is still in the mapping and still has a place;
+   it is simply not drawn, and the wall is what says so. */
+
+.stage-rect.off {
+  border-style: dashed;
+  background: none;
+  opacity: 0.5;
+}
+
+.stage-rect.dragging {
+  border-color: var(--text);
+}
+
+.stage-label {
+  position: absolute;
+  top: 1px;
+  left: 3px;
+  right: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  pointer-events: none;
+}
+
+/* Eight handles. Only on the selected rectangle, because a stage full of grips
+   is unreadable and the one being worked on is the one that needs them. */
+
+.grip {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  background: var(--waiting);
+  border: 1px solid #06080c;
+  display: none;
+}
+
+.stage-rect.leading .grip {
+  display: block;
+}
+
+.grip-nw { top: -5px; left: -5px; cursor: nwse-resize; }
+.grip-n { top: -5px; left: calc(50% - 4px); cursor: ns-resize; }
+.grip-ne { top: -5px; right: -5px; cursor: nesw-resize; }
+.grip-e { top: calc(50% - 4px); right: -5px; cursor: ew-resize; }
+.grip-se { bottom: -5px; right: -5px; cursor: nwse-resize; }
+.grip-s { bottom: -5px; left: calc(50% - 4px); cursor: ns-resize; }
+.grip-sw { bottom: -5px; left: -5px; cursor: nesw-resize; }
+.grip-w { top: calc(50% - 4px); left: -5px; cursor: ew-resize; }
+
+/* The outputs list. One line per thing, an output and the pieces under it,
+   with the controls once above rather than four on every row. */
+
+.list-controls {
+  /* What adds on the left, what acts on the selection on the right. Both are
+     about the list; anything that is not belongs elsewhere. */
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+/* On, and saying so: the show is not on the walls while this is lit. */
+#mapping-test-pieces.on {
+  background: var(--active);
+  border-color: var(--active);
+  color: #000;
+}
+
+.list-controls .inline {
+  display: flex;
+  gap: 4px;
+}
+
+.list-controls button {
+  padding: 3px 8px;
+}
+
+#output-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  background: #101013;
+  overflow: hidden;
+}
+
+/* An output is a heading: what it is called, and under that what it is. The
+   second line is a button, because changing a wall's mode is the same question
+   as choosing one when it was made. */
+
+.row-output {
+  padding: 5px 8px;
+  border-left: 2px solid transparent;
+  background: #17171b;
+}
+
+.row-output-head {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+}
+
+.row-output .row-name-field {
+  min-width: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  user-select: text;
+}
+
+.row-output .row-name-field:focus {
+  outline: 1px solid var(--edge);
+  outline-offset: 2px;
+}
+
+.row-says {
+  display: block;
+  margin-left: 22px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--dim);
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  text-align: left;
+  cursor: pointer;
+}
+
+.row-says:hover {
+  color: var(--text);
+}
+
+/* A piece is one line under its output: is it drawn, what it is, what it is
+   called. Its numbers are the panel on the right. */
+
+.row-piece {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+  padding: 3px 8px 3px 16px;
+  border-left: 2px solid transparent;
+}
+
+.row-icon {
+  /* A fixed box, so an output icon and a piece icon sit in one column, and
+     tall enough for the glyph: at line-height 1 the rectangle drew two pixels
+     outside its own box. */
+  display: inline-block;
+  width: 12px;
+  text-align: center;
+  color: var(--dim);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.row-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: none;
+  border: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+}
+
+.row-piece:hover,
+.row-output:hover {
+  background: #1c1c21;
+}
+
+/* Everything in the selection is marked; the one the panel is about is marked
+   more, because a panel of numbers is about one rectangle even when several
+   are being moved together. */
+
+.row-piece.selected {
+  border-left-color: #7a5a1c;
+  background: #1f1c16;
+}
+
+.row-piece.leading,
+.row-output.selected {
+  border-left-color: var(--active);
+  background: var(--active);
+  color: #000;
+}
+
+.row-piece.leading .row-name,
+.row-output.selected .row-name-field,
+.row-piece.leading .row-icon,
+.row-output.selected .row-icon,
+.row-output.selected .row-says {
+  color: #000;
+}
+
+.row-piece.wrong,
+.row-output.wrong {
+  border-left-color: var(--bad);
+}
+
+.row-piece.off .row-name,
+.row-output.off .row-name-field {
+  opacity: 0.45;
+}
+
+/* Choosing a socket and a mode: asked when a wall is built, and not again. */
+
+.chooser {
+  min-width: 380px;
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  background: #101013;
+  color: var(--text);
+  padding: 16px;
+}
+
+.chooser::backdrop {
+  background: rgb(0 0 0 / 60%);
+}
+
+.chooser h2 {
+  margin: 0 0 12px;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.chooser-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+/* Effect chains. One block per effect, in chain order, with its parameters
+   drawn from what the catalogue declares about them. */
+
+.chain {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.effect {
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  padding: 8px;
+  background: #101013;
+}
+
+.effect.off {
+  opacity: 0.55;
+}
+
+.effect-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.effect-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.effect-version {
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.add-effect {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.add-effect select {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 5px 8px;
+  background: #101013;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+}
+
+.empty-note {
+  color: var(--dim);
+  font-size: 11px;
+  margin: 0;
+}
+
+/* --- connecting --- */
+
+#connect {
+  display: grid;
+  place-items: center;
+  padding: 40px;
+}
+
+/* The servers this client found, above the box somebody would otherwise type
+   an address into. A list that is empty is hidden outright rather than shown
+   saying "none": on a network that filters multicast it would be a permanent
+   apology for a feature that is not the way in anyway. */
+
+#found {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+#found-label {
+  margin: 0;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+#found-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* What the panel says while it has nothing to list. Dim, because it is a state
+   and not a fault: a network that filters multicast is ordinary and the address
+   box below is the way in either way. */
+
+#found-note {
+  margin: 0;
+  color: var(--dim);
+  font-size: 11px;
+  line-height: 1.32;
+}
+
+.found-server {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  background: #101013;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.found-server:hover {
+  border-color: var(--active);
+}
+
+.found-server-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The address, beside the name and never instead of it. Anything on the segment
+   can announce a name, so the name is a claim and the address is the thing an
+   operator can check. */
+
+.found-server-address {
+  color: var(--dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.found-server-setup {
+  color: var(--active);
+  font-size: 11px;
+}
+
+#connect-form {
+  width: 320px;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  padding: 24px;
+}
+
+#connect-form label {
+  display: block;
+  font-size: 11px;
+  color: var(--dim);
+  margin: 12px 0 4px;
+}
+
+#connect-form input {
+  width: 100%;
+  padding: 8px;
+  background: #101013;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+  user-select: text;
+}
+
+#connect-button {
+  width: 100%;
+  margin-top: 20px;
+  padding: 10px;
+  background: var(--active);
+  border-color: var(--active);
+  color: #06080c;
+  font-weight: 600;
+}
+
+#connect-note {
+  color: var(--waiting);
+  font-size: 11px;
+  min-height: 15px;
+  margin: 12px 0 0;
+}
+
+/* --- faults --- */
+
+/* What went wrong, in the bar rather than under the window (owner,
+   2026-09-23). The old one was a band at the foot that grew when something
+   failed and shrank when it passed, and every one of those moved the whole
+   screen under the operator's hands — a pad they were reaching for is not in
+   the same place a tenth of a second later.
+
+   Here it takes room from the show's name, which can be cut, and from
+   nothing else. `hidden` when there is nothing to say, so it is not a gap
+   either. */
+
+#faults {
+  max-width: 40vw;
+  padding: 4px 10px;
+  overflow: hidden;
+  background: rgba(255, 92, 92, 0.12);
+  border: 1px solid var(--bad);
+  border-radius: 4px;
+  color: var(--bad);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Three small buttons where there was one: they are all things done to the
+   list rather than to the open show. */
+
+#show-list-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* --- the DMX patch ---
+   The same two columns as EDIT, the same panels and the same fields: it is the
+   same document, and a page that looked like a different application would be
+   saying it was one. What is new is the universe bar, because five hundred and
+   twelve channels is the one thing on this page that cannot be read as a list. */
+
+#patch-side,
+#patch-main {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.patch-show-name {
+  margin: 0 0 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+#patch-actions {
+  display: flex;
+  gap: 6px;
+  margin: 10px 0;
+}
+
+#patch-actions button {
+  flex: 1 1 0;
+}
+
+#patch-document-note {
+  color: var(--waiting);
+  font-size: 11px;
+  margin: 0;
+}
+
+#patch-errors {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  color: var(--bad);
+  font-size: 11px;
+}
+
+#patch-errors li {
+  margin-bottom: 4px;
+}
+
+#patch-errors code,
+#patch-advisories code {
+  color: var(--dim);
+}
+
+/* One row per patched fixture: the same shape as a layer row and a piece row,
+   because they are the same kind of list. */
+
+#patch-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fixture-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  background: #101013;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+}
+
+.fixture-row.selected {
+  border-color: var(--active);
+}
+
+.fixture-row.wrong {
+  border-color: var(--bad);
+}
+
+.fixture-row.off .fixture-row-name {
+  opacity: 0.45;
+}
+
+.fixture-row-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: none;
+  border: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+}
+
+.fixture-row .address {
+  color: var(--text);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* A number that is read rather than typed: the fixture's own range, and what it
+   drives. The same size as a field's control so a panel of both lines up. */
+
+.reading {
+  display: block;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* What the server will not take, said on the fixture as well as in the list.
+   Red rather than amber: an overlap is a refused save, not advice. */
+
+.collision {
+  color: var(--bad);
+  font-size: 11px;
+  margin: 0 0 6px;
+}
+
+#patch-advisories {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  color: var(--waiting);
+  font-size: 11px;
+}
+
+#patch-advisories li {
+  margin-bottom: 4px;
+}
+
+/* The channel list somebody programmes a desk from: the absolute address of
+   every channel, what it is called, and what it controls. */
+
+table.channels {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  margin-top: 10px;
+  user-select: text;
+}
+
+table.channels th {
+  text-align: left;
+  color: var(--dim);
+  font-weight: 500;
+  border-bottom: 1px solid var(--edge);
+  padding: 4px 6px;
+}
+
+table.channels td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--edge);
+}
+
+table.channels .dmx {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  width: 64px;
+}
+
+table.channels .control {
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+/* One universe, drawn as its channels. Two blocks in the same place is the
+   whole point of the picture. */
+
+.universe {
+  margin-bottom: 12px;
+}
+
+.universe-bar {
+  position: relative;
+  height: 34px;
+  background: #101013;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.universe-block {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 2px;
+  background: rgba(74, 158, 255, 0.28);
+  border: 1px solid var(--active);
+  border-radius: 2px;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.universe-block.selected {
+  background: rgba(74, 158, 255, 0.5);
+}
+
+/* Parked: it holds no channels, and the picture has to say so rather than
+   showing an address nothing is at. */
+.universe-block.off {
+  background: transparent;
+  border-style: dashed;
+  border-color: var(--dim);
+  opacity: 0.7;
+}
+
+.universe-block.wrong {
+  background: rgba(255, 92, 92, 0.35);
+  border-color: var(--bad);
+}
+
+/* A fixture's name over its channels. Cut off at the block it is drawn on:
+   a long name would otherwise run across the fixtures either side of it and
+   label the wrong channels. */
+
+.universe-label {
+  display: block;
+  padding: 2px 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 10px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* --- media --- */
+
+/* The library and the import queue side by side, because an operator dropping
+   files watches both: the queue to see where a file has got to, the library to
+   see it arrive. */
+
+/* The library first and widest, and one column beside it holding the import
+   queue with the selected clip's properties under it (owner, 2026-09-23).
+   Import used to be a column of its own down the left, which spent a third of
+   the screen on a panel that is empty except while files are arriving. */
+
+#media {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 16px;
+  padding: 16px;
+  min-height: 0;
+}
+
+#media > section,
+#media-side > section {
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  padding: 12px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* The import queue takes what it needs and the properties take the rest, so a
+   panel with nothing in it is a heading rather than half the column. */
+
+#media-side {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 16px;
+  min-height: 0;
+}
+
+#media-side > #ingest-panel {
+  max-height: 55vh;
+}
+
+#ingest-into {
+  margin: 6px 0 0;
+}
+
+#ingest-drop {
+  border: 1px dashed var(--edge);
+  border-radius: 6px;
+  padding: 16px;
+  text-align: center;
+  color: var(--dim);
+}
+
+#ingest-drop.over {
+  border-color: var(--active);
+  color: var(--text);
+}
+
+#ingest-drop p {
+  margin: 0 0 6px;
+}
+
+#ingest-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.ingest-row {
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  padding: 8px;
+}
+
+.ingest-row.ready {
+  border-color: var(--live);
+}
+
+.ingest-row.stopped,
+.ingest-row.undeclared {
+  border-color: var(--waiting);
+}
+
+.ingest-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.ingest-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ingest-size,
+.ingest-stage {
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.ingest-stage {
+  flex: 0 1 auto;
+  text-align: right;
+}
+
+/* A bar rather than a percentage: what an operator wants off this at a glance
+   is whether it is moving, and how much is left. */
+
+.ingest-bar {
+  height: 4px;
+  margin-top: 6px;
+  background: #101013;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.ingest-bar-fill {
+  height: 100%;
+  background: var(--active);
+}
+
+.ingest-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.ingest-hand {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--edge);
+}
+
+.ingest-hand .field {
+  margin-bottom: 8px;
+}
+
+.ingest-hand .field-label {
+  display: block;
+  font-size: 11px;
+  color: var(--dim);
+  margin-bottom: 4px;
+}
+
+.ingest-hand input[type='number'],
+.ingest-hand select {
+  width: 100%;
+  padding: 5px 8px;
+  background: #101013;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+  user-select: text;
+}
+
+.ingest-hand input[type='checkbox'] {
+  width: auto;
+}
+
+button.small {
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
+button.quiet {
+  color: var(--dim);
+}
+
+button.danger {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+
+/* --- the library's own structure ---
+   Folders down the left, what is in the open one to the right. A folder is a
+   name an item is filed under and never a path on any filesystem: organising
+   media must not move the real files (owner, 2026-09-23).
+
+   Folders nest as deep as somebody wants, so the indent is a custom property
+   multiplied out rather than a rule per level. */
+
+#library-body {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 12px;
+  min-height: 0;
+}
+
+#library-folders {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-right: 8px;
+  overflow: auto;
+  border-right: 1px solid var(--edge);
+}
+
+#library-content {
+  min-width: 0;
+  overflow: auto;
+}
+
+.folder-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px;
+  padding-left: calc(4px + var(--depth, 0) * 12px);
+  border: 1px solid transparent;
+  border-radius: 3px;
+  font-size: 12px;
+}
+
+.folder-row.selected {
+  background: #26262c;
+  border-color: var(--edge);
+}
+
+/* A clip is being carried over this folder. The same colour a pad uses when
+   something is about to land on it. */
+
+.folder-row.drop-target {
+  border-color: var(--waiting);
+  box-shadow: inset 0 0 0 1px var(--waiting);
+}
+
+.folder-twist {
+  width: 14px;
+  flex: 0 0 auto;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--dim);
+  cursor: pointer;
+  font: inherit;
+}
+
+.folder-twist:disabled {
+  cursor: default;
+  opacity: 0;
+}
+
+.folder-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-row.selected .folder-name {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.folder-count {
+  flex: 0 0 auto;
+  color: var(--dim);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Only on the row under the pointer, so a column of buttons does not compete
+   with the names for attention. */
+
+.folder-act {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  background: none;
+  border: none;
+  color: var(--dim);
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  visibility: hidden;
+}
+
+.folder-row:hover .folder-act,
+.folder-row:focus-within .folder-act {
+  visibility: visible;
+}
+
+.folder-act:hover {
+  color: var(--text);
+}
+
+.folder-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.media-rename {
+  display: flex;
+  min-width: 0;
+}
+
+.media-rename-box {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+}
+
+/* The library itself: a grid of pictures, because that is how an operator
+   recognises a clip. An item with no picture shows its name in the same space,
+   which is what every entry was before thumbnails existed. */
+
+#library-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+#library-note {
+  color: var(--dim);
+  font-size: 12px;
+  margin: 0 0 10px;
+}
+
+/* The panel is a column now, because the tree beside the grid has to be able
+   to scroll on its own. */
+
+#library-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* `min-width: 0` is the whole of the fix for names overflowing their tile
+   (owner, 2026-09-23). A grid item's minimum width is `auto`, which is the
+   width of its content, so one long unbroken filename pushed the card wider
+   than the column it was in and the grid apart with it — the ellipsis on
+   `.media-name` below never got a chance to apply, because nothing was ever
+   too narrow. */
+
+.media-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 6px;
+  text-align: left;
+  background: #101013;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+}
+
+.media-card.selected {
+  border-color: var(--active);
+}
+
+.media-picture {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 16 / 9;
+  background: #06080c;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.media-picture img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* The name standing in for a picture the server has not sent. Broken anywhere
+   rather than overflowing, because a filename has no spaces to break at, and
+   clamped to three lines so a long one cannot push the card's shape around. */
+
+.media-picture-name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  padding: 6px;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  color: var(--dim);
+  font-size: 11px;
+  text-align: center;
+}
+
+.media-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.media-line {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.media-state {
+  align-self: flex-start;
+  padding: 1px 6px;
+  border-radius: 10px;
+  border: 1px solid var(--edge);
+  font-size: 10px;
+  color: var(--dim);
+}
+
+.media-state.ready {
+  border-color: var(--live);
+  color: var(--live);
+}
+
+.media-state.failed {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+
+.media-state.importing,
+.media-state.processing,
+.media-state.uploading,
+.media-state.verifying {
+  border-color: var(--waiting);
+  color: var(--waiting);
+}
+
+.media-fact {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--edge);
+}
+
+.media-fact-label {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--dim);
+}
+
+/* The filename an item was imported from is whatever the file was called,
+   and some of them are very long. Cut off rather than widening the panel;
+   the whole of it is in the title. */
+
+.media-fact-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.media-failure {
+  color: var(--bad);
+  font-size: 12px;
+}
+
+.media-usage {
+  font-size: 12px;
+}
+
+.media-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.media-blocked {
+  font-size: 11px;
+  color: var(--waiting);
+}
+
+/* The master speed: six buttons, one per step of the ladder the DMX channel
+   has. Not a fader — a fader across this range is a control an operator can
+   move away from 1x and never quite put back (owner, 2026-09-23). */
+/* What OPTIONS is about, over its controls. Named rather than inferred from
+   the matrix: an operator who chose slot 7 and then looked away has to be able
+   to see that slot 7 is what these controls are for. */
+
+.options-subject {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--edge);
+}
+
+.options-subject-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text);
+}
+
+/* Where a slot's source sits: five small numbers on one line, committed
+   together because a transform is one placement. */
+
+.option-transform {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+}
+
+.option-number {
+  min-width: 0;
+  width: 100%;
+  padding: 2px 4px;
+  background: #06080c;
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  color: var(--text);
+  font: inherit;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* A folded effect. The marker is the browser's own, turned to the accent so it
+   reads as a control rather than as punctuation. */
+
+details.work-row > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+details.work-row > summary::-webkit-details-marker {
+  display: none;
+}
+
+details.work-row > summary::before {
+  content: '\25b8';
+  margin-right: 6px;
+  color: var(--dim);
+}
+
+details.work-row[open] > summary::before {
+  content: '\25be';
+  color: var(--accent);
+}
+
+/* A pad's name is a second thing to press: it opens the slot in OPTIONS while
+   the picture above it plays the slot. Underlined on hover so it reads as a
+   control and not as a caption. */
+
+/* The name is a state to read, not a link to press (owner, 2026-09-23). It
+   still answers a press — the only way to set a slot up without putting it on
+   stage — but it no longer advertises itself as one, and it never underlines:
+   the underline was the thing the owner was objecting to. */
+
+.pad:not(.empty):not(.black) .pad-label {
+  cursor: pointer;
+}
+
+.speed-steps {
+  display: flex;
+  gap: 2px;
+}
+
+.speed-steps .speed-step {
+  flex: 1;
+  padding: 4px 2px;
+  font-size: 11px;
+}
+
+/* The brand's orange, like every other chosen control. `--on` was never
+   defined anywhere, so this fell through to a blue nobody picked (owner,
+   2026-09-23). */
+
+.speed-steps .speed-step.on {
+  background: var(--active);
+  border-color: var(--active);
+  color: #06080c;
+}
+
+.speed-steps .speed-step.unknown {
+  opacity: 0.5;
+}
+
+/* OPTIONS in two columns (owner, 2026-09-23): what the thing *is* on the left —
+   the layer's or the slot's own settings, and its transform — and what is being
+   done *to* it on the right, which is the chain and every parameter in it.
+
+   Two lists that grow at different rates. Stacked, the second was always below
+   the fold: a chain of six effects pushed the thing they are on off the top of
+   a band that is thirty per cent of the window. Each column scrolls on its own,
+   so a long chain never moves the settings and vice versa. */
+
+.options-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.options-column {
+  /* How tall a control in this column is. Every row reads it, so the panel is
+     one line of controls rather than a list of sizes. */
+  --option-control-height: 19px;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  /* Room between the last thing in a row and the scrollbar (owner,
+     2026-09-23): "Ich brauche nach Rechts mehr Padding, weil die Sachen hart
+     an der Scrollbar aufhören." */
+  padding-right: 10px;
+}
+
+/* The tool itself no longer scrolls when OPTIONS is showing: its columns do,
+   and two scrollbars inside one is a band nobody can aim in. */
+
+#work-tool:has(.options-split) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* --- a clip's moving preview ---
+   Ten frames of a clip in one picture, of which the box shows one at a time
+   (owner, 2026-09-23): "Die Bilder sollen dann beim Hover über die Slots
+   abgespielt werden und wenn die maus nicht drüber ist nur den ersten Frame
+   anzeigen. Im Layer Preview sollte das GIF durchgehend animiert sein."
+
+   A strip rather than an animated image, and this is why: a browser plays an
+   animated image whenever it is on screen, so "show only the first frame" is
+   not a thing one can be asked. A strip can be stopped anywhere, because which
+   part of it is showing is a position — and a position is something CSS can
+   hold still, and step through when it should not be still.
+
+   The server always sends exactly ten frames, repeating the last where a clip
+   was too short to give ten, so the box is always showing a whole frame and
+   never a tenth of two. */
+
+.strip {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background-repeat: no-repeat;
+  /* Ten frames across, each the size of the box. */
+  background-size: 1000% 100%;
+  background-position-x: 0%;
+}
+
+/* A pad plays while the pointer is on it, and shows its first frame otherwise.
+   The layer's own picture plays always: it is what the layer is doing, and a
+   picture of the show that only moves when somebody points at it is a picture
+   of the show nobody is watching. */
+
+.pad:hover .strip,
+.showing-picture .strip {
+  /* Four frames a second — 250ms each, which is what was asked for — and
+     `jump-none` because the ten positions have to include both ends: with the
+     default the last frame would never be shown. */
+  animation: strip-frames 2.5s steps(10, jump-none) infinite;
+}
+
+@keyframes strip-frames {
+  from {
+    background-position-x: 0%;
+  }
+
+  to {
+    background-position-x: 100%;
+  }
+}
+
+/* Somebody who has asked for less movement gets none: a preview that plays by
+   itself is exactly what this setting is about. The first frame is still there
+   and the pad still says what it holds. */
+
+@media (prefers-reduced-motion: reduce) {
+  .pad:hover .strip,
+  .showing-picture .strip {
+    animation: none;
+  }
+}
+
+/* --- a fader ---
+   The opacity bar's look, with its name and its number outside it rather than
+   written across it (owner, 2026-09-23): "wie Opacity nur mit außerhalb Text".
+
+   One control for the transform in OPTIONS, the crossfader and the master
+   dimmer, because they are one thing: a number between two ends, set by
+   dragging. A row of them reads as a row when they are the same height, the
+   same colour and the same shape, and as a pile of unrelated widgets when each
+   is whatever its platform draws.
+
+   The fill runs from where nought is rather than from the left edge, so a
+   position of −80% reads as eighty per cent the other way instead of as a bar
+   that is nearly empty. `--from` and `--to` bracket it, both in per cent of the
+   track, and the panel writes them. */
+
+.fader {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr) 52px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.fader-name {
+  overflow: hidden;
+  color: var(--dim);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fader-value {
+  text-align: right;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.fader-bar {
+  position: relative;
+  display: block;
+  height: var(--control-height, 19px);
+  min-width: 0;
+  background: #101013;
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  overflow: hidden;
+  cursor: ew-resize;
+}
+
+.fader-bar:focus-within {
+  border-color: var(--active);
+}
+
+.fader-fill {
+  position: absolute;
+  inset: 0;
+  background: var(--active);
+  clip-path: inset(0 calc(100% - var(--to, 0%)) 0 var(--from, 0%));
+  pointer-events: none;
+}
+
+/* The line where nought is, on a fader that goes both ways. Drawn over the
+   fill, because what it marks is the point the fill grows from. */
+
+.fader-bar.bipolar::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 50%;
+  width: 1px;
+  background: var(--edge);
+  pointer-events: none;
+}
+
+/* The control itself: transparent, over the whole bar, and still a real range
+   input — draggable, focusable, arrow-key-able, and what a screen reader
+   finds. The same arrangement the opacity bar uses, and for the same reason. */
+
+.fader-bar input[type='range'] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  cursor: inherit;
+}
+
+.fader-bar input[type='range']::-webkit-slider-runnable-track {
+  height: 100%;
+  background: transparent;
+}
+
+.fader-bar input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 2px;
+  height: 100%;
+  background: transparent;
+}
+
+/* In the master row the words go *inside* the bar, as the layer's opacity has
+   them (owner, 2026-09-23): the row is 170px per control, and a name above a
+   bar is two rows where the band has one.
+
+   Two faces of the same words, one over the other, exactly as the opacity bar
+   does it: the lower light on the track, the upper dark on the orange and
+   clipped to the fill. That is what keeps the name readable at both ends,
+   including a dimmer at nought. */
+
+.master-control .fader {
+  /* Stated, because `.master-control label` sets `display: flex` and the two
+     selectors weigh the same: the later one wins, and this has to be it. */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  margin-bottom: 0;
+}
+
+.master-control .fader-face {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 0 6px;
+  color: var(--dim);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.master-control .fader-face.on {
+  background: var(--active);
+  color: #06080c;
+  clip-path: inset(0 calc(100% - var(--to, 0%)) 0 var(--from, 0%));
+}
+
+/* The fill is the upper face's own background now, so the bare one goes. */
+
+.master-control .fader-fill {
+  display: none;
+}

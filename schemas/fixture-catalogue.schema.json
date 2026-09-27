@@ -1,0 +1,301 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "FixtureCatalogueResponse",
+  "description": "Every personality this build publishes.",
+  "type": "object",
+  "required": [
+    "fixtures"
+  ],
+  "properties": {
+    "fixtures": {
+      "description": "The personalities, in the order this build publishes them.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Personality"
+      }
+    }
+  },
+  "definitions": {
+    "ChannelBand": {
+      "description": "One band of a stepped channel.\n\nThe part a console programmer cannot work out from a channel list, and the part a client's patch editor needs to draw the fader's labels.",
+      "type": "object",
+      "required": [
+        "from",
+        "to",
+        "value"
+      ],
+      "properties": {
+        "from": {
+          "description": "Lowest DMX value in this band.",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0.0
+        },
+        "to": {
+          "description": "Highest DMX value in this band.",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0.0
+        },
+        "value": {
+          "description": "What this band selects, spelled as the rest of the API spells it.",
+          "type": "string"
+        }
+      }
+    },
+    "ChannelEncodingInfo": {
+      "description": "How a channel's bytes become a value.",
+      "oneOf": [
+        {
+          "description": "One channel across a range.",
+          "type": "object",
+          "required": [
+            "encoding",
+            "max",
+            "min"
+          ],
+          "properties": {
+            "encoding": {
+              "type": "string",
+              "enum": [
+                "ranged8"
+              ]
+            },
+            "max": {
+              "description": "The value at `255`.",
+              "type": "number",
+              "format": "double"
+            },
+            "min": {
+              "description": "The value at `0`.",
+              "type": "number",
+              "format": "double"
+            }
+          }
+        },
+        {
+          "description": "Two channels, coarse then fine, across a range.",
+          "type": "object",
+          "required": [
+            "encoding",
+            "max",
+            "min"
+          ],
+          "properties": {
+            "encoding": {
+              "type": "string",
+              "enum": [
+                "ranged16"
+              ]
+            },
+            "max": {
+              "description": "The value at `65535`.",
+              "type": "number",
+              "format": "double"
+            },
+            "min": {
+              "description": "The value at `0`.",
+              "type": "number",
+              "format": "double"
+            }
+          }
+        },
+        {
+          "description": "One channel as a whole number.",
+          "type": "object",
+          "required": [
+            "encoding"
+          ],
+          "properties": {
+            "encoding": {
+              "type": "string",
+              "enum": [
+                "index8"
+              ]
+            }
+          }
+        },
+        {
+          "description": "One channel as a switch.",
+          "type": "object",
+          "required": [
+            "encoding",
+            "threshold"
+          ],
+          "properties": {
+            "encoding": {
+              "type": "string",
+              "enum": [
+                "switch"
+              ]
+            },
+            "threshold": {
+              "description": "The lowest value that counts as on.",
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            }
+          }
+        },
+        {
+          "description": "One channel divided into bands.",
+          "type": "object",
+          "required": [
+            "bands",
+            "encoding"
+          ],
+          "properties": {
+            "bands": {
+              "description": "The bands, lowest first.",
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/ChannelBand"
+              }
+            },
+            "encoding": {
+              "type": "string",
+              "enum": [
+                "stepped"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "Personality": {
+      "description": "One published personality.",
+      "type": "object",
+      "required": [
+        "channels",
+        "footprint",
+        "name",
+        "target",
+        "type_id",
+        "version"
+      ],
+      "properties": {
+        "channels": {
+          "description": "Its channels, in address order.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PersonalityChannel"
+          }
+        },
+        "footprint": {
+          "description": "How many channels an instance occupies.",
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "name": {
+          "description": "What a console's personality list shows.",
+          "type": "string"
+        },
+        "target": {
+          "description": "What a patch entry using it must point at.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/PersonalityTarget"
+            }
+          ]
+        },
+        "type_id": {
+          "description": "Stable type identifier, for example `ovs.master`.",
+          "type": "string"
+        },
+        "version": {
+          "description": "Version. A new control is a new version, never a changed one.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      }
+    },
+    "PersonalityChannel": {
+      "description": "One channel of a personality.",
+      "type": "object",
+      "required": [
+        "control",
+        "encoding",
+        "home",
+        "momentary",
+        "name",
+        "offset",
+        "width"
+      ],
+      "properties": {
+        "control": {
+          "description": "The stable machine name of what it controls, for example `layer_opacity`.",
+          "type": "string"
+        },
+        "encoding": {
+          "description": "How its bytes become a value.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ChannelEncodingInfo"
+            }
+          ]
+        },
+        "home": {
+          "description": "What to send to put this channel at rest.\n\nRaw, in the units the channel is sent in: the whole sixteen-bit number for a wide channel, one byte for a narrow one. A console homes a fixture by sending numbers rather than by understanding them.\n\nZero still means zero everywhere else (owner decision Q15). This is not a neutral value the server substitutes for one; it is what a desk should put in its own home or default preset so a freshly patched layer is visible and its normal size instead of a wall of zeros.",
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "momentary": {
+          "description": "Whether it fires on a rising edge rather than holding a value.",
+          "type": "boolean"
+        },
+        "name": {
+          "description": "What a console's channel list shows.",
+          "type": "string"
+        },
+        "offset": {
+          "description": "One-based offset within the fixture.",
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "width": {
+          "description": "How many channels it occupies.",
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        }
+      }
+    },
+    "PersonalityTarget": {
+      "description": "What kind of thing a personality can drive.",
+      "oneOf": [
+        {
+          "description": "The one show-wide master.",
+          "type": "string",
+          "enum": [
+            "master"
+          ]
+        },
+        {
+          "description": "One layer.",
+          "type": "string",
+          "enum": [
+            "layer"
+          ]
+        },
+        {
+          "description": "One effect instance.\n\nA personality generated from the effect's own parameter declarations rather than published by this crate — an effect is a plugin and brings its own channels (owner decision Q19).",
+          "type": "string",
+          "enum": [
+            "effect"
+          ]
+        },
+        {
+          "description": "One generator instance. The same, for the other kind of module.",
+          "type": "string",
+          "enum": [
+            "generator"
+          ]
+        }
+      ]
+    }
+  }
+}

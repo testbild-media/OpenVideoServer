@@ -1,0 +1,34 @@
+[package]
+name = "ovs-console"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Draws the System screen off-screen, so a renderer can put it on a connector"
+
+[dependencies]
+# **Without the default features**, which are "sandbox", "build-util" and
+# "resources". The sandbox is the one that matters: linking it makes CEF expect
+# the SUID helper Chromium uses on Linux, and a service account in a rack has
+# neither that nor the user namespaces to go without it. The cef-rs examples
+# build the same way, and the runtime half is `Settings::no_sandbox`.
+#
+# **Pinned exactly, because the crate and the framework on disc must agree.**
+# `154.0.0+154.0.23` is the binary distribution installed at `CEF_PATH`; the
+# crate is generated bindings for exactly that API. A minor bump resolved on its
+# own once — to 154.1.0+154.0.26 — and a binding set that does not match the
+# library it calls is how CEF aborts during startup with nothing in the log.
+# Moving this means installing the matching distribution in the same commit.
+cef = { version = "=154.0.0", default-features = false }
+# **The only OVS crate this may link, and the reason is measured.** A binary that
+# hosts CEF and also links `getrandom` — which `ovs-ipc` reaches through
+# `ovs-types` and `ulid` — aborts inside `CefInitialize`. See that crate's
+# documentation before adding anything here.
+ovs-console-wire = { path = "../ovs-console-wire" }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[[bin]]
+name = "ovs-console"
+path = "src/main.rs"

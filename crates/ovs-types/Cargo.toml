@@ -1,0 +1,27 @@
+[package]
+name = "ovs-types"
+description = "Shared domain model and versioned persistent contracts for OpenVideoServer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+schemars.workspace = true
+ulid.workspace = true
+thiserror.workspace = true
+# schemars already depends on serde_json, so this adds nothing to the dependency tree.
+serde_json.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints.rust]
+missing_docs = "warn"
+unsafe_code = "forbid"
+
+[lints.clippy]
+todo = "warn"
+unwrap_used = "warn"

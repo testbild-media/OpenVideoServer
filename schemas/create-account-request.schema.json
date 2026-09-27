@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CreateAccountRequest",
+  "description": "Creates an account.\n\nTwo callers, one shape. On a server with no accounts this is first-run setup and needs no session; on one that has them it is an administrator adding a colleague. What differs is the authority required, not the request.",
+  "type": "object",
+  "required": [
+    "password",
+    "username"
+  ],
+  "properties": {
+    "password": {
+      "description": "Plain password.",
+      "type": "string"
+    },
+    "role": {
+      "description": "What the account may do.\n\nAbsent is [`Role::Operator`](ovs_types::account::Role::Operator), which is the safe half: an account created without anybody saying is an account nobody decided to trust with the machine. First-run setup is the exception and makes an administrator whatever this says, because a server whose only account cannot administer it is a server nobody can finish setting up.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Role"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "username": {
+      "description": "Login name.",
+      "type": "string"
+    }
+  },
+  "definitions": {
+    "Role": {
+      "description": "What an account is allowed to do.\n\nOrdered by authority, so `>=` is a meaningful test and [`Role::may_administer`] is the only place that decides what that means.",
+      "oneOf": [
+        {
+          "description": "Drives the show: everything Live Mode and the show editor can reach.\n\nThe default, because it is the safe half. An account created without a role said is an account nobody decided to trust with the machine.",
+          "type": "string",
+          "enum": [
+            "operator"
+          ]
+        },
+        {
+          "description": "Everything an operator may do, and the machine itself.\n\nAccounts, passwords other than their own, and the system settings — the Service Display's output among them. The first account a server has is this, because somebody has to be able to make the second.",
+          "type": "string",
+          "enum": [
+            "admin"
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,242 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "GeneratorCatalogueResponse",
+  "description": "Every generator this build publishes.",
+  "type": "object",
+  "required": [
+    "generators"
+  ],
+  "properties": {
+    "generators": {
+      "description": "The generators.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Generator"
+      }
+    }
+  },
+  "definitions": {
+    "Generator": {
+      "description": "One published generator.",
+      "type": "object",
+      "required": [
+        "description",
+        "name",
+        "parameters",
+        "type_id",
+        "version"
+      ],
+      "properties": {
+        "description": {
+          "description": "One line describing what it draws.",
+          "type": "string"
+        },
+        "name": {
+          "description": "What a source list shows.",
+          "type": "string"
+        },
+        "parameters": {
+          "description": "Its parameters, in the order the manifest declares them.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ModuleParameter"
+          }
+        },
+        "type_id": {
+          "description": "Stable type identifier, for example `ovs.solid_colour`.",
+          "type": "string"
+        },
+        "version": {
+          "description": "Version. A new parameter is a new version, never a changed one.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      }
+    },
+    "ModuleParameter": {
+      "description": "One parameter a generator or effect declares.",
+      "type": "object",
+      "required": [
+        "key",
+        "name",
+        "parameter_type"
+      ],
+      "properties": {
+        "key": {
+          "description": "The key it is stored under in a show.",
+          "type": "string"
+        },
+        "name": {
+          "description": "What to show beside it.",
+          "type": "string"
+        },
+        "parameter_type": {
+          "description": "What it takes.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ParameterType"
+            }
+          ]
+        }
+      }
+    },
+    "ParameterChoice": {
+      "description": "One entry in a [`ParameterType::Choice`] list.",
+      "type": "object",
+      "required": [
+        "id",
+        "name"
+      ],
+      "properties": {
+        "id": {
+          "description": "The stable identifier a show stores. Never shown to an operator.",
+          "type": "string"
+        },
+        "name": {
+          "description": "What to show beside it.",
+          "type": "string"
+        }
+      }
+    },
+    "ParameterType": {
+      "description": "What a parameter takes, and where it starts.",
+      "oneOf": [
+        {
+          "description": "A number in a closed range.",
+          "type": "object",
+          "required": [
+            "default",
+            "kind",
+            "max",
+            "min"
+          ],
+          "properties": {
+            "default": {
+              "description": "What it is when nobody has set it.",
+              "type": "number",
+              "format": "double"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "number"
+              ]
+            },
+            "max": {
+              "description": "Highest value.",
+              "type": "number",
+              "format": "double"
+            },
+            "min": {
+              "description": "Lowest value.",
+              "type": "number",
+              "format": "double"
+            }
+          }
+        },
+        {
+          "description": "A colour, as linear RGBA.",
+          "type": "object",
+          "required": [
+            "default",
+            "kind"
+          ],
+          "properties": {
+            "default": {
+              "description": "What it is when nobody has set it.",
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "maxItems": 4,
+              "minItems": 4
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "colour"
+              ]
+            }
+          }
+        },
+        {
+          "description": "On or off.",
+          "type": "object",
+          "required": [
+            "default",
+            "kind"
+          ],
+          "properties": {
+            "default": {
+              "description": "What it is when nobody has set it.",
+              "type": "boolean"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "toggle"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Words an operator types.\n\nA client draws a text field, no longer than `max_chars`.",
+          "type": "object",
+          "required": [
+            "default",
+            "kind",
+            "max_chars"
+          ],
+          "properties": {
+            "default": {
+              "description": "What it says when nobody has set it.",
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "text"
+              ]
+            },
+            "max_chars": {
+              "description": "The most characters it may hold, counted as `char`s rather than bytes.",
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0.0
+            }
+          }
+        },
+        {
+          "description": "One of a fixed list of named choices.\n\nA client draws a menu. The value a show stores is the choice's `id`, never its `name` and never its position — a name is a thing that gets reworded and a position is a thing that moves.",
+          "type": "object",
+          "required": [
+            "choices",
+            "default",
+            "kind"
+          ],
+          "properties": {
+            "choices": {
+              "description": "Every choice, in the order to offer them.",
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/ParameterChoice"
+              }
+            },
+            "default": {
+              "description": "The `id` of the one it is when nobody has set it.",
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "choice"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

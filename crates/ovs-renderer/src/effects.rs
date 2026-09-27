@@ -1,0 +1,478 @@
+//! A configured effect chain, as passes the GPU runs.
+//!
+//! An effect consumes a picture and produces one. A chain is an
+//! ordered list of them, and this is the step that turns the list a show
+//! stores into the list the compositor records: what each pass computes, and
+//! what it was set to.
+//!
+//! Pure, like [`crate::scene`]. No Vulkan and no GPU, so the rules an operator
+//! notices when they are wrong — that a disabled effect does nothing, that an
+//! untouched one is neutral, that two of them run in the order they were listed
+//! — are testable on a machine with no graphics hardware.
+//!
+//! # Every number comes from the manifest
+//!
+//! [`EffectValues`] answers with what a control source has moved it to, or what
+//! the show set, or what the effect was published with, in that order.
+//! Nothing here carries a default of its own: a default written twice is two
+//! defaults, and the second one is wrong the day the first one changes.
+//!
+//! # Live values are looked up, not merged
+//!
+//! An effect an operator is playing with during a show has live values on top of
+//! its configured ones. They arrive as a separate map and stay
+//! separate: [`EffectValues`] holds a borrow of each and asks them in order, so
+//! building a chain costs no allocation however many parameters are being
+//! driven. Merging them into one map per effect per frame is the obvious
+//! implementation and is exactly what the realtime rules forbid (house rule §5).
+//!
+//! # One effect is not one pass
+//!
+//! A separable blur is a pass across and a pass down, and a block average is the
+//! same shape of thing. So an effect is asked how many passes it is rather than
+//! being assumed to be one, and the compositor runs a flat list — which is why
+//! the blur needed no special case anywhere downstream of here.
+
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use ovs_types::config::effects::{self, EffectValues};
+use ovs_types::config::EffectInstance;
+use ovs_types::live::EffectOverrides;
+
+/// What one full-screen pass computes.
+///
+/// The value the shader switches on. The numbers are part of the contract
+/// between this and `shaders/effect.wgsl`, which is why they are written down
+/// once, here, rather than being taken from the order of the variants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PassKind {
+    /// Brightness, contrast, saturation and gamma, in that order.
+    ColourCorrect,
+    /// A mix towards one colour.
+    Tint,
+    /// The across half of a block average.
+    PixelateAcross,
+    /// The down half of a block average.
+    PixelateDown,
+    /// The across half of a separable Gaussian.
+    BlurAcross,
+    /// The down half of a separable Gaussian.
+    BlurDown,
+}
+
+impl PassKind {
+    /// Returns the number the shader's branch is selected by.
+    #[must_use]
+    pub const fn code(self) -> u32 {
+        match self {
+            Self::ColourCorrect => 0,
+            Self::Tint => 1,
+            Self::PixelateAcross => 2,
+            Self::PixelateDown => 3,
+            Self::BlurAcross => 4,
+            Self::BlurDown => 5,
+        }
+    }
+}
+
+/// One full-screen pass, with everything its shader reads.
+///
+/// Copy and fixed-size: a chain is built into a reused buffer every frame, so a
+/// pass may not own anything that would have to be allocated.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EffectPass {
+    /// Which branch of the effect shader runs.
+    pub kind: PassKind,
+    /// The pass's numbers, in the order its own branch reads them.
+    pub values: [f32; 4],
+    /// The pass's colour, where it has one.
+    pub colour: [f32; 4],
+}
+
+/// Appends the passes a chain runs at its configured values, in chain order.
+///
+/// For callers with no live state to apply: the whole show has some, but a test
+/// of what one effect draws at given values has none, and neither does anything
+/// asking what a chain would look like on its own.
+pub fn passes_into(chain: &[EffectInstance], into: &mut Vec<EffectPass>) {
+    live_passes_into(chain, &EffectOverrides::new(), into);
+}
+
+/// Appends the passes a chain runs, in chain order, live values on top.
+///
+/// A disabled effect contributes nothing, so a chain whose effects are all
+/// disabled appends nothing at all — which is what lets the compositor take a
+/// layer with such a chain down exactly the path it takes with no chain.
+///
+/// `into` is appended to rather than replaced, because a frame's chains live
+/// end to end in one buffer that is reused rather than reallocated.
+pub fn live_passes_into(
+    chain: &[EffectInstance],
+    live: &EffectOverrides,
+    into: &mut Vec<EffectPass>,
+) {
+    for instance in chain {
+        if !instance.enabled {
+            continue;
+        }
+
+        let Some(manifest) = effects::manifest(&instance.type_id, instance.version) else {
+            // Unreachable on a show that was saved by this build: validation
+            // refuses an effect nobody publishes. Reachable on one that arrives
+            // from somewhere else, and the answer is the layer without the
+            // effect rather than a layer drawn with something else's maths.
+            warn_once(&instance.type_id, instance.version);
+            continue;
+        };
+
+        // A lookup per effect per frame, against a map holding only the effects
+        // somebody has actually touched. Nothing is built and nothing is
+        // copied; an effect nobody is driving finds nothing and reads the
+        // show's values exactly as before.
+        passes_of(
+            manifest.live_over(&instance.parameters, live.get(&instance.id)),
+            into,
+        );
+    }
+}
+
+/// Appends the passes one effect runs.
+fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
+    let manifest = values.manifest();
+    let number = |key: &str| values.number(key) as f32;
+
+    match (manifest.type_id, manifest.version) {
+        ("ovs.colour_correct", 1) => into.push(EffectPass {
+            kind: PassKind::ColourCorrect,
+            values: [
+                number("brightness"),
+                number("contrast"),
+                number("saturation"),
+                number("gamma"),
+            ],
+            colour: [0.0; 4],
+        }),
+        ("ovs.tint", 1) => into.push(EffectPass {
+            kind: PassKind::Tint,
+            values: [
+                number("amount"),
+                f32::from(u8::from(values.flag("preserve_luma"))),
+                0.0,
+                0.0,
+            ],
+            colour: values.colour("colour"),
+        }),
+        ("ovs.pixelate", 1) => {
+            let block = number("block_px");
+            for kind in [PassKind::PixelateAcross, PassKind::PixelateDown] {
+                into.push(EffectPass {
+                    kind,
+                    values: [block, 0.0, 0.0, 0.0],
+                    colour: [0.0; 4],
+                });
+            }
+        }
+        ("ovs.blur", 1) => {
+            let radius = number("radius_px");
+            let amount = number("amount");
+            for kind in [PassKind::BlurAcross, PassKind::BlurDown] {
+                into.push(EffectPass {
+                    kind,
+                    values: [radius, amount, 0.0, 0.0],
+                    colour: [0.0; 4],
+                });
+            }
+        }
+        // A manifest this build publishes but the renderer cannot draw. Nothing
+        // is in this state today — the four published effects are the four
+        // above — and the day one is, it is a layer drawn without it and a line
+        // in the log rather than a guess.
+        _ => warn_once(manifest.type_id, manifest.version),
+    }
+}
+
+/// Says once that an effect cannot be drawn.
+///
+/// Once per process rather than once per frame: an effect the renderer cannot
+/// draw would be sixty lines a second for as long as the show runs, which is a
+/// log nobody can read for a fault that does not change.
+fn warn_once(type_id: &str, version: u32) {
+    static WARNED: AtomicBool = AtomicBool::new(false);
+    if !WARNED.swap(true, Ordering::Relaxed) {
+        tracing::warn!(
+            type_id,
+            version,
+            "this build cannot draw this effect; the layer is drawn without it"
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ovs_types::config::ParameterValue;
+
+    use super::*;
+
+    /// One enabled instance of a published effect, with the given values.
+    fn instance(type_id: &str, values: &[(&str, ParameterValue)]) -> EffectInstance {
+        let mut instance = EffectInstance::new(type_id, 1);
+        for (key, value) in values {
+            instance.parameters.insert((*key).to_owned(), value.clone());
+        }
+        instance
+    }
+
+    /// The passes one chain runs.
+    fn passes(chain: &[EffectInstance]) -> Vec<EffectPass> {
+        let mut passes = Vec::new();
+        passes_into(chain, &mut passes);
+        passes
+    }
+
+    #[test]
+    fn a_chain_with_nothing_in_it_runs_nothing() {
+        assert!(passes(&[]).is_empty());
+    }
+
+    #[test]
+    fn a_disabled_effect_contributes_no_passes() {
+        // The claim the renderer's fast path rests on: a layer whose every
+        // effect is switched off must be a layer with no chain at all, not a
+        // layer that renders into a scratch image and copies it back.
+        let mut off = instance("ovs.blur", &[]);
+        off.enabled = false;
+        assert!(passes(&[off]).is_empty());
+    }
+
+    #[test]
+    fn every_published_effect_has_a_renderer_implementation() {
+        // A published effect a client offers and the renderer cannot draw is an
+        // operator adding something and seeing nothing happen.
+        for manifest in ovs_types::config::EFFECTS {
+            let chain = [EffectInstance::new(manifest.type_id, manifest.version)];
+            assert!(
+                !passes(&chain).is_empty(),
+                "{} version {} runs no passes",
+                manifest.type_id,
+                manifest.version
+            );
+        }
+    }
+
+    #[test]
+    fn a_separable_effect_is_two_passes_for_one_instance() {
+        // Across then down, in that order, for both of the two that are
+        // separable. The compositor runs a flat list and does not know which
+        // pass belongs to which effect, so the order has to be right here.
+        assert_eq!(
+            passes(&[instance("ovs.blur", &[])])
+                .iter()
+                .map(|pass| pass.kind)
+                .collect::<Vec<_>>(),
+            vec![PassKind::BlurAcross, PassKind::BlurDown]
+        );
+        assert_eq!(
+            passes(&[instance("ovs.pixelate", &[])])
+                .iter()
+                .map(|pass| pass.kind)
+                .collect::<Vec<_>>(),
+            vec![PassKind::PixelateAcross, PassKind::PixelateDown]
+        );
+    }
+
+    #[test]
+    fn a_parameter_nobody_set_is_the_one_the_manifest_publishes() {
+        // Not a default written into the renderer. The manifest is the one
+        // place a default lives, so a published effect can be changed in one
+        // file and be right everywhere.
+        let correct = passes(&[instance("ovs.colour_correct", &[])]);
+        assert_eq!(correct[0].values, [1.0, 1.0, 1.0, 1.0]);
+
+        let tint = passes(&[instance("ovs.tint", &[])]);
+        assert_eq!(tint[0].values[0], 0.0, "amount");
+        assert_eq!(tint[0].values[1], 1.0, "keep brightness is on");
+        assert_eq!(tint[0].colour, [1.0, 1.0, 1.0, 1.0]);
+
+        assert_eq!(passes(&[instance("ovs.pixelate", &[])])[0].values[0], 1.0);
+        assert_eq!(passes(&[instance("ovs.blur", &[])])[0].values[0], 0.0);
+        assert_eq!(passes(&[instance("ovs.blur", &[])])[0].values[1], 1.0);
+    }
+
+    #[test]
+    fn a_parameter_a_show_set_is_the_one_that_reaches_the_shader() {
+        let brightened = passes(&[instance(
+            "ovs.colour_correct",
+            &[("brightness", ParameterValue::Float(2.0))],
+        )]);
+        assert_eq!(brightened[0].values[0], 2.0);
+        assert_eq!(brightened[0].values[1], 1.0, "and the rest stay published");
+    }
+
+    #[test]
+    fn a_tints_colour_and_switch_reach_the_shader() {
+        let tinted = passes(&[instance(
+            "ovs.tint",
+            &[
+                ("colour", ParameterValue::Color([1.0, 0.0, 0.0, 1.0])),
+                ("amount", ParameterValue::Float(0.5)),
+                ("preserve_luma", ParameterValue::Bool(false)),
+            ],
+        )]);
+        assert_eq!(tinted[0].colour, [1.0, 0.0, 0.0, 1.0]);
+        assert_eq!(tinted[0].values[0], 0.5);
+        assert_eq!(tinted[0].values[1], 0.0, "switched off");
+    }
+
+    /// The passes one chain runs with live values on top.
+    fn live_passes(chain: &[EffectInstance], live: &EffectOverrides) -> Vec<EffectPass> {
+        let mut passes = Vec::new();
+        live_passes_into(chain, live, &mut passes);
+        passes
+    }
+
+    #[test]
+    fn a_live_value_is_the_one_that_reaches_the_shader() {
+        let configured = instance("ovs.blur", &[("radius_px", ParameterValue::Float(8.0))]);
+        let live = EffectOverrides::from([(
+            configured.id,
+            ovs_types::config::ParameterMap::from([(
+                "radius_px".to_owned(),
+                ParameterValue::Float(40.0),
+            )]),
+        )]);
+
+        let passes = live_passes(std::slice::from_ref(&configured), &live);
+        assert_eq!(passes[0].values[0], 40.0);
+        assert_eq!(
+            passes[1].values[0], 40.0,
+            "both halves of the separable pair"
+        );
+        assert_eq!(
+            configured.parameters.get("radius_px"),
+            Some(&ParameterValue::Float(8.0)),
+            "the instance the chain was built from is unchanged"
+        );
+    }
+
+    #[test]
+    fn a_parameter_no_live_value_names_stays_where_the_show_put_it() {
+        // An operator moving one control must not quietly return the others to
+        // their published defaults.
+        let configured = instance(
+            "ovs.blur",
+            &[
+                ("radius_px", ParameterValue::Float(8.0)),
+                ("amount", ParameterValue::Float(0.25)),
+            ],
+        );
+        let live = EffectOverrides::from([(
+            configured.id,
+            ovs_types::config::ParameterMap::from([(
+                "radius_px".to_owned(),
+                ParameterValue::Float(40.0),
+            )]),
+        )]);
+
+        let passes = live_passes(std::slice::from_ref(&configured), &live);
+        assert_eq!(passes[0].values[0], 40.0, "radius");
+        assert_eq!(passes[0].values[1], 0.25, "amount");
+    }
+
+    #[test]
+    fn a_live_colour_and_a_live_switch_reach_the_shader_too() {
+        // Not only the numbers: every kind of parameter a manifest can declare.
+        let configured = instance("ovs.tint", &[]);
+        let live = EffectOverrides::from([(
+            configured.id,
+            ovs_types::config::ParameterMap::from([
+                (
+                    "colour".to_owned(),
+                    ParameterValue::Color([0.0, 1.0, 0.0, 1.0]),
+                ),
+                ("preserve_luma".to_owned(), ParameterValue::Bool(false)),
+            ]),
+        )]);
+
+        let passes = live_passes(std::slice::from_ref(&configured), &live);
+        assert_eq!(passes[0].colour, [0.0, 1.0, 0.0, 1.0]);
+        assert_eq!(passes[0].values[1], 0.0, "switched off live");
+    }
+
+    #[test]
+    fn a_live_value_belongs_to_one_instance_and_not_to_the_effect_type() {
+        // Two blurs on one layer are two controls. Keying on the type would
+        // make moving one move the other.
+        let first = instance("ovs.blur", &[]);
+        let second = instance("ovs.blur", &[]);
+        let live = EffectOverrides::from([(
+            second.id,
+            ovs_types::config::ParameterMap::from([(
+                "radius_px".to_owned(),
+                ParameterValue::Float(40.0),
+            )]),
+        )]);
+
+        let passes = live_passes(&[first, second], &live);
+        assert_eq!(passes[0].values[0], 0.0, "the first blur is untouched");
+        assert_eq!(passes[2].values[0], 40.0, "the second one moved");
+    }
+
+    #[test]
+    fn a_disabled_effect_stays_disabled_however_it_is_driven() {
+        // Live values decide what an effect looks like, never whether it runs:
+        // that is chain configuration, and an operator who switched an effect
+        // off must not have it come back because somebody moved a fader.
+        let mut off = instance("ovs.blur", &[]);
+        off.enabled = false;
+        let live = EffectOverrides::from([(
+            off.id,
+            ovs_types::config::ParameterMap::from([(
+                "radius_px".to_owned(),
+                ParameterValue::Float(40.0),
+            )]),
+        )]);
+
+        assert!(live_passes(std::slice::from_ref(&off), &live).is_empty());
+    }
+
+    #[test]
+    fn a_chain_runs_in_the_order_it_was_listed() {
+        let chain = [instance("ovs.tint", &[]), instance("ovs.pixelate", &[])];
+        assert_eq!(
+            passes(&chain)
+                .iter()
+                .map(|pass| pass.kind)
+                .collect::<Vec<_>>(),
+            vec![
+                PassKind::Tint,
+                PassKind::PixelateAcross,
+                PassKind::PixelateDown
+            ]
+        );
+    }
+
+    #[test]
+    fn an_effect_this_build_does_not_publish_runs_nothing() {
+        // Rather than something else's maths. A show cannot be saved in this
+        // state; one that arrives from elsewhere draws the layer without it.
+        assert!(passes(&[EffectInstance::new("ovs.kaleidoscope", 1)]).is_empty());
+        assert!(passes(&[EffectInstance::new("ovs.blur", 99)]).is_empty());
+    }
+
+    #[test]
+    fn every_pass_kind_has_its_own_code() {
+        let kinds = [
+            PassKind::ColourCorrect,
+            PassKind::Tint,
+            PassKind::PixelateAcross,
+            PassKind::PixelateDown,
+            PassKind::BlurAcross,
+            PassKind::BlurDown,
+        ];
+        for (index, kind) in kinds.iter().enumerate() {
+            for other in &kinds[index + 1..] {
+                assert_ne!(kind.code(), other.code(), "{kind:?} and {other:?}");
+            }
+        }
+    }
+}

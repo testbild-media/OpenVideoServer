@@ -1,0 +1,20 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LoginRequest",
+  "description": "Credentials for a sign-in.\n\n`Debug` is implemented by hand so a password cannot reach a log through a derived formatter.",
+  "type": "object",
+  "required": [
+    "password",
+    "username"
+  ],
+  "properties": {
+    "password": {
+      "description": "Plain password, sent over TLS and never stored.",
+      "type": "string"
+    },
+    "username": {
+      "description": "Login name.",
+      "type": "string"
+    }
+  }
+}

@@ -1,0 +1,194 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SetSlotRequest",
+  "description": "Changes one slot's settings.\n\nEvery field is optional and an absent one means \"leave this alone\", so the control an operator moved is the only thing that travels. It is a *document* edit made with a show running, like putting a source in a slot: storing the whole show would reload the show, and deciding that a clip should run to the beat, or nudging where it sits, is something done while watching it.\n\nWhat it does not carry is the source. A slot's content is changed by dragging something onto the pad, which is its own endpoint.",
+  "type": "object",
+  "properties": {
+    "direction": {
+      "description": "Which way the timeline runs.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/PlaybackDirection"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "playback_mode": {
+      "description": "What happens when the clip reaches the end.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/PlaybackMode"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "speed": {
+      "description": "How fast it runs through one pass, as a ratio.\n\nBoth kinds of sync have one (owner, 2026-09-23): \"pro Slot Scale sollt aber verfügbar sein für Free Run und BPM Sync.\" A free-running slot has no other rate — the master's scale deliberately does not reach it — and a beat-locked one is scaled on top of the beats it was given.",
+      "type": [
+        "number",
+        "null"
+      ],
+      "format": "double"
+    },
+    "sync": {
+      "description": "Whether it runs at its own rate or to the show's beat, and over how many.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/SlotSync"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "transform": {
+      "description": "Where this source sits, before the layer's own transform.\n\nThe slot's, not the layer's: two clips in one layer are rarely framed the same way, and this is where an operator puts one of them right without moving the other (owner, 2026-09-23).",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Transform2D"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "PlaybackDirection": {
+      "description": "The direction a source's timeline advances in.",
+      "oneOf": [
+        {
+          "description": "Normal playback.",
+          "type": "string",
+          "enum": [
+            "forward"
+          ]
+        },
+        {
+          "description": "Reversed playback.",
+          "type": "string",
+          "enum": [
+            "reverse"
+          ]
+        }
+      ]
+    },
+    "PlaybackMode": {
+      "description": "What happens when a source reaches the end of its timeline.",
+      "oneOf": [
+        {
+          "description": "Restart from the beginning, seamlessly.",
+          "type": "string",
+          "enum": [
+            "loop"
+          ]
+        },
+        {
+          "description": "Play through once, then hold the final frame.",
+          "type": "string",
+          "enum": [
+            "once_freeze"
+          ]
+        },
+        {
+          "description": "Play through once, then show black.",
+          "type": "string",
+          "enum": [
+            "once_black"
+          ]
+        },
+        {
+          "description": "Play forward to the end, then backwards to the start, repeatedly.",
+          "type": "string",
+          "enum": [
+            "bounce"
+          ]
+        }
+      ]
+    },
+    "SlotSync": {
+      "description": "Whether a slot runs at its own rate or to the show's beat.\n\nFree run is the default and stays the default: a clip dropped into a slot plays at the speed it was made at, whatever the tempo is doing, until somebody decides otherwise (owner, 2026-09-23). That is what an operator expects of a file they just imported, and it is the only setting under which a clip is certain to be playable — a beat-locked clip runs at whatever multiple of its own rate the tempo asks for, and a decoder has a ceiling.",
+      "oneOf": [
+        {
+          "description": "Plays at the clip's own rate, at one times, whatever the tempo is.",
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "FREE_RUN"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Plays through in this many beats of the show's clock.\n\nBeats rather than bars, because a clip is not obliged to be a whole number of bars long and an operator counting a loop counts beats. One upwards, with no ceiling but the clip's own length: a long clip over few beats is a fast clip, and how fast is a question for the decoder rather than for this type.",
+          "type": "object",
+          "required": [
+            "beats",
+            "kind"
+          ],
+          "properties": {
+            "beats": {
+              "description": "How many beats one pass takes. At least one.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "BEAT_SYNC"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "Transform2D": {
+      "description": "A 2D transform applied to a slot source or to a whole layer.\n\n`x` and `y` are an offset in composition pixels from the centre of the composition, chosen over normalised units because LED operators work in pixels and because a non-square composition makes normalised offsets behave differently on each axis.\n\nThe layer transform is intended for live Art-Net/sACN control; the slot transform is configuration only. Both use this type, but they live in different places in the model.",
+      "type": "object",
+      "required": [
+        "rotation_deg",
+        "scale_x",
+        "scale_y",
+        "x",
+        "y"
+      ],
+      "properties": {
+        "rotation_deg": {
+          "description": "Clockwise rotation in degrees about the transform anchor.",
+          "type": "number",
+          "format": "float"
+        },
+        "scale_x": {
+          "description": "Horizontal scale multiplier, `1.0` meaning unscaled.",
+          "type": "number",
+          "format": "float"
+        },
+        "scale_y": {
+          "description": "Vertical scale multiplier, `1.0` meaning unscaled.",
+          "type": "number",
+          "format": "float"
+        },
+        "x": {
+          "description": "Horizontal offset from the composition centre, in pixels.",
+          "type": "number",
+          "format": "float"
+        },
+        "y": {
+          "description": "Vertical offset from the composition centre, in pixels.",
+          "type": "number",
+          "format": "float"
+        }
+      }
+    }
+  }
+}

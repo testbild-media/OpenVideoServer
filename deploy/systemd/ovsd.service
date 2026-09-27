@@ -1,0 +1,99 @@
+[Unit]
+Description=OpenVideoServer core (authoritative state and client API)
+Documentation=https://github.com/testbild-media/OpenVideoServer
+After=network-online.target
+Wants=network-online.target
+
+# Do not give up. A server that has exhausted its restart budget at 3am is a
+# server that is down until somebody drives to the venue.
+#
+# **In `[Unit]`, which is where systemd reads it.** It was in `[Service]`, where
+# it is ignored. See the same note in `ovs-renderer.service`.
+StartLimitIntervalSec=0
+
+[Service]
+Type=exec
+ExecStart=/usr/bin/ovsd
+Environment=OVS_BIND=0.0.0.0:7420
+Environment=OVS_DATA_DIR=/var/lib/ovs
+Environment=OVS_LOG=info
+
+# Never root. The core touches the database and the network and nothing else.
+User=ovs
+Group=ovs
+
+# Port eighty, which is what a person types into a browser. Binding below 1024
+# is privileged, and this is the narrowest way to allow exactly that one thing:
+# the process gains the right to bind a low port and nothing else — not to read
+# another user's files, not to change the system, not to become root.
+#
+# Without it the server starts anyway and says the pages are only on its own
+# port. The show does not depend on them.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+# Restart on any exit, including a clean one: a core that has stopped means no
+# client can reach the server, and a rack machine has nobody standing next to it.
+# The renderer is a separate unit, so these restarts do not interrupt output.
+Restart=always
+RestartSec=2s
+
+# systemd creates and owns this, so a fresh install needs no manual setup.
+StateDirectory=ovs
+StateDirectoryMode=0750
+
+# /etc/openvideoserver, created by systemd and owned by this service.
+#
+# The machine's own configuration lives here: what this server calls itself and
+# which connector carries the System screen. It is writable because the
+# administration page changes it (owner, 2026-09-24), and `ConfigurationDirectory`
+# rather than a `ReadWritePaths` line because it also creates the directory and
+# hands it over — one statement instead of two that have to agree.
+#
+# 0755 because the renderer and the kiosk run as different users and both read
+# it. Nothing secret is in it; it describes sockets.
+#
+# The server replaces the file by writing beside it and renaming, which needs
+# write permission on the *directory* and none on the file. An administrator's
+# own root-owned config.json is therefore still replaceable, and still theirs.
+ConfigurationDirectory=openvideoserver
+ConfigurationDirectoryMode=0755
+
+# Where the kiosk's environment is written. A runtime directory rather than a
+# state one: what goes in it is derived from the configuration every time the
+# server starts, so there is nothing to keep across a reboot. It is readable by
+# everyone because the kiosk runs as a different user and needs to read it.
+RuntimeDirectory=openvideoserver
+RuntimeDirectoryMode=0755
+
+# Hardening. The core needs its state directory and a socket; nothing else.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ReadWritePaths=/var/lib/ovs
+# `AF_NETLINK` is here for one reason and it is not obvious: the discovery
+# responder asks the kernel which interfaces this machine has, and on Linux that
+# question is a netlink socket. Without it the responder starts, registers, logs
+# that it is announcing — and announces on nothing, because it believes the
+# machine has no interfaces. Measured on the reference server 2026-09-24: the
+# same binary was visible when run from a shell and invisible under this unit,
+# and this line was the whole difference.
+#
+# What it widens: a process that can read the kernel's network configuration.
+# Modest, and the same access `avahi-daemon` has for the same reason.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

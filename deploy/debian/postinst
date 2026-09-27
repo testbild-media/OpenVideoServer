@@ -1,0 +1,220 @@
+#!/bin/sh
+# What happens when the package is installed or upgraded.
+#
+# Everything a person would otherwise have to be told: the system accounts, the
+# state directory, the units, and where to go next. Nothing that could take a
+# show away — an upgrade restarts the two services and touches nothing else.
+#
+# Written for `sh` rather than `bash`, which is what a maintainer script gets.
+
+set -e
+
+case "$1" in
+  configure)
+    # The three accounts the units run as. Created with no home, no shell and
+    # no login: they exist to own a process and a directory.
+    #
+    # `ovs-console` is created even on a machine with no Service Display. It
+    # costs nothing, and a machine that grows a screen later should not need
+    # the package reinstalled to use it.
+    for user in ovs ovs-renderer ovs-console; do
+      if ! getent passwd "$user" > /dev/null; then
+        adduser --system --group --no-create-home --home /nonexistent \
+          --shell /usr/sbin/nologin --quiet "$user"
+      fi
+    done
+
+    # The renderer needs the card and the seat. Added here rather than
+    # documented, because a renderer that cannot open the card is a black wall
+    # and the reason is three layers down.
+    #
+    # **The console is not in these any more.** It was, because it used to be a
+    # compositor running chromium and a compositor takes a card. It draws the
+    # page into memory now and hands the pixels to the renderer, so it opens no
+    # device at all — and a service account in three device groups it never uses
+    # is an account with reach nobody can justify.
+    for group in video render input; do
+      if getent group "$group" > /dev/null; then
+        adduser --quiet ovs-renderer "$group" || true
+      fi
+    done
+
+    # And the other direction: the renderer reads the console's socket.
+    #
+    # The console creates it 0660 owned by its own group, and connecting to a
+    # Unix socket needs *write* permission — which is easy to get wrong while
+    # thinking of it as reading pictures. Without this the renderer drives the
+    # System screen's connector and shows nothing on it.
+    if getent group ovs-console > /dev/null; then
+      adduser --quiet ovs-renderer ovs-console || true
+    fi
+
+    # The database and the media store. `systemd` would create this from
+    # `StateDirectory`, but only when the service first starts — and the
+    # `--add-account` step below runs before that.
+    if [ ! -d /var/lib/ovs ]; then
+      install -d -o ovs -g ovs -m 0750 /var/lib/ovs
+    fi
+
+    # **The configuration directory, owned by the core.** Without this, Save on the
+    # System screen fails with "this server cannot write
+    # /etc/openvideoserver/config.json" (owner, 2026-09-25) -- and it fails on exactly
+    # the machines that have been running longest.
+    #
+    # The unit's `ConfigurationDirectory=` makes it, but only when it is not already
+    # there: systemd deliberately leaves an existing one's ownership alone, because
+    # configuration belongs to the administrator. A machine that had this directory
+    # before the unit gained that line therefore keeps it root-owned for ever.
+    #
+    # The directory, not the file. The server replaces config.json by writing beside
+    # it and renaming, which needs write permission on the directory and none on the
+    # file, so an administrator's own root-owned config.json stays theirs and stays
+    # replaceable. 0755 because the renderer and the kiosk run as other users and
+    # both read it; nothing in it is secret, it describes sockets.
+    install -d -m 0755 /etc/openvideoserver
+    chown ovs:ovs /etc/openvideoserver
+
+    # **The card's module options need the initramfs rebuilt to mean anything.**
+    #
+    # `modeset=0` is what lets an NVIDIA card give up more than one output; with
+    # modesetting on, its KMS driver owns the connectors and `VK_KHR_display`
+    # cannot take the one it is asked for. The conffile is in place by now — dpkg
+    # put it there — and these modules load from the initramfs, so the file alone
+    # changes nothing.
+    #
+    # Rebuilt only when this file is newer than the initramfs, so an ordinary
+    # upgrade does not spend twenty seconds redoing it. Never a reboot: an upgrade
+    # that restarted the machine would be an upgrade nobody could run before a
+    # show.
+    reboot_for=""
+    if [ -x /usr/sbin/update-initramfs ] && [ -f /etc/modprobe.d/ovs-nvidia.conf ]; then
+      initrd="/boot/initrd.img-$(uname -r)"
+      if [ ! -f "$initrd" ] || [ /etc/modprobe.d/ovs-nvidia.conf -nt "$initrd" ]; then
+        /usr/sbin/update-initramfs -u > /dev/null 2>&1 || true
+      fi
+    fi
+
+    # And whether the running kernel actually has it. Asked only where there is
+    # an NVIDIA card to ask about; the parameter is root-readable and reads Y or N.
+    for device in /sys/bus/pci/devices/*; do
+      [ -r "$device/vendor" ] || continue
+      [ "$(cat "$device/vendor")" = "0x10de" ] || continue
+      case "$(cat "$device/class" 2> /dev/null)" in
+        0x0300*) ;;
+        *) continue ;;
+      esac
+      # **Only where the driver is loaded.** Without it there is no module to
+      # read and nothing true to say: a fresh machine has the card and no
+      # driver, and "still running with modesetting on, reboot" would be a
+      # false errand. `install.sh` is what tells somebody they need a driver.
+      [ -d /sys/module/nvidia_drm ] || break
+
+      modeset=$(cat /sys/module/nvidia_drm/parameters/modeset 2> /dev/null || echo "?")
+      case "$modeset" in
+        N | n | 0) ;;
+        *) reboot_for="yes" ;;
+      esac
+      break
+    done
+
+    # **A unit in /etc wins over the package's, silently.** Anybody who
+    # installed this server by hand before there was a package — `deploy.sh`
+    # did exactly that — has copies there, and they keep being used after this
+    # package is installed. The package's units then look installed and are
+    # not, which is how a machine ends up without a fix that was shipped weeks
+    # ago. Said out loud rather than fixed: a file an administrator put in /etc
+    # is theirs, and deleting it behind their back would be worse.
+    shadowed=""
+    for unit in ovsd.service ovs-renderer.service ovs-console.service; do
+      if [ -f "/etc/systemd/system/$unit" ]; then
+        shadowed="$shadowed $unit"
+      fi
+    done
+
+    if [ -d /run/systemd/system ]; then
+      systemctl daemon-reload || true
+
+      # Enabled on a first install, left alone on an upgrade: a machine where
+      # somebody disabled the kiosk on purpose must not have it switched back on
+      # by an update.
+      if [ -z "${2:-}" ]; then
+        systemctl enable ovs-console.service ovs-renderer.service ovsd.service \
+          > /dev/null 2>&1 || true
+      fi
+
+      # **The order does not matter, and that is the point.** The console asks the
+      # graphics stack for nothing: it listens on a socket the renderer connects
+      # to and retries for ever, and the renderer retries that socket for ever.
+      # The console is first only because its failure is the one visible from the
+      # front of the rack.
+      #
+      # It is started on a machine with no Service Display too. It draws nothing
+      # until a connector is marked `SERVICE_DISPLAY`, and a machine that grows a
+      # screen later should not need the package reinstalled.
+      systemctl restart ovs-console.service || true
+      systemctl restart ovs-renderer.service || true
+      systemctl restart ovsd.service || true
+    fi
+
+    # Where to go next, said once, with an address rather than a placeholder.
+    # The machine's own address is what somebody standing at it needs, and
+    # "localhost" is the one answer that is useless from anywhere else.
+    address=$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^$' | head -1)
+    [ -n "$address" ] || address=$(hostname 2>/dev/null) || address="this machine"
+
+    accounts=0
+    if [ -f /var/lib/ovs/ovs.db ]; then
+      accounts=1
+    fi
+
+    echo ""
+    echo "OpenVideoServer is installed and running."
+    echo ""
+    if [ -n "$shadowed" ]; then
+      echo "  ⚠ These unit files in /etc/systemd/system override the ones this"
+      echo "    package just installed, so the package's versions are NOT in use:"
+      for unit in $shadowed; do
+        echo "      /etc/systemd/system/$unit"
+      done
+      echo ""
+      echo "    They are from installing by hand, before there was a package."
+      echo "    Remove them to use the package's, then reload and restart:"
+      echo "      sudo rm /etc/systemd/system/{ovsd,ovs-renderer,ovs-console}.service"
+      echo "      sudo systemctl daemon-reload"
+      echo "      sudo systemctl restart ovs-renderer ovsd"
+      echo ""
+    fi
+    if [ -n "$reboot_for" ]; then
+      echo "  ⚠ This machine's NVIDIA card is still running with KMS modesetting"
+      echo "    on, so it will give up one output and no more — one wall, or the"
+      echo "    System screen, not both. /etc/modprobe.d/ovs-nvidia.conf turns it"
+      echo "    off and the initramfs has been rebuilt; it takes a reboot:"
+      echo "      sudo reboot"
+      echo ""
+    fi
+    if [ "$accounts" = "0" ] || [ -z "${2:-}" ]; then
+      echo "  Set it up at   http://$address/"
+      echo ""
+      echo "  The first account you create is an administrator, because"
+      echo "  somebody has to be able to create the second."
+      echo ""
+      echo "  On a machine with no screen and no browser to hand:"
+      echo "    sudo -u ovs ovsd --add-account <name> <password>"
+      echo ""
+      echo "  That puts the password in this machine's process list while it"
+      echo "  runs, so prefer the page above where there is one."
+    else
+      echo "  It is at       http://$address/"
+    fi
+    echo ""
+    ;;
+
+  abort-upgrade | abort-remove | abort-deconfigure) ;;
+
+  *)
+    echo "postinst called with unknown argument: $1" >&2
+    exit 1
+    ;;
+esac
+
+exit 0

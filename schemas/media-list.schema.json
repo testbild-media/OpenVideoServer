@@ -1,0 +1,247 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MediaListResponse",
+  "description": "The media library.",
+  "type": "object",
+  "required": [
+    "items"
+  ],
+  "properties": {
+    "folders": {
+      "description": "Every folder the library holds, in path order.\n\nSent whole rather than worked out from the items, because a folder exists while it is empty: an operator makes one in order to put things in it (owner, 2026-09-23).",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "items": {
+      "description": "Every item, most recently imported first.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/MediaListItem"
+      }
+    }
+  },
+  "definitions": {
+    "FrameRate": {
+      "description": "An exact frame rate expressed as a rational number of frames per second.\n\nRational rather than floating point so that 60000/1001 stays exact and the scheduler cannot accumulate drift.",
+      "type": "object",
+      "required": [
+        "denominator",
+        "numerator"
+      ],
+      "properties": {
+        "denominator": {
+          "description": "Denominator, for example `1001`.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "numerator": {
+          "description": "Numerator, for example `60000`.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      }
+    },
+    "MediaItemId": {
+      "description": "MediaItemId (ULID, 26 characters)",
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "MediaKind": {
+      "description": "The kind of thing a media item is.",
+      "oneOf": [
+        {
+          "description": "A moving image with a timeline.",
+          "type": "string",
+          "enum": [
+            "video"
+          ]
+        },
+        {
+          "description": "A still image.",
+          "type": "string",
+          "enum": [
+            "image"
+          ]
+        }
+      ]
+    },
+    "MediaListItem": {
+      "description": "One item in the library, with the one fact about its content that an operator needs and the item itself deliberately does not carry.\n\nA [`MediaItem`] is the logical identity: it never reveals where its content is or which profile was chosen for it, because an operator picking a clip should not have to know either. How much disc it takes is a different kind of fact — it is what an operator uses to decide what to delete before a show, and no part of it says anything about codecs or paths.\n\nFlattened, so what a client already read out of this list still reads.",
+      "type": "object",
+      "required": [
+        "byte_size",
+        "created_at",
+        "display_name",
+        "has_alpha",
+        "id",
+        "kind",
+        "original_filename",
+        "state"
+      ],
+      "properties": {
+        "byte_size": {
+          "description": "How much disc its playable content takes, in bytes.\n\nZero for an item whose content has not arrived, which is what an imported show's items look like until they are filled.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "created_at": {
+          "description": "When the item was first imported.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "dimensions": {
+          "description": "Pixel dimensions, once known.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SizePx"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "display_name": {
+          "description": "Name shown in the content browser. Freely renameable without breaking shows.",
+          "type": "string"
+        },
+        "duration_ms": {
+          "description": "Duration in milliseconds. `None` for stills.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "failure_reason": {
+          "description": "Why the item failed, when it did.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "folder": {
+          "description": "Where this item is filed in the library.\n\nA slash-separated path, for example `Intros/2026`, and empty for the root. **Virtual, always**: it is a name the item is filed under and nothing more. The file on disk does not move, its object key does not change, and content addressing goes on working (owner, 2026-09-23).\n\nNever a path on any filesystem, and never used to find anything.",
+          "type": "string"
+        },
+        "frame_rate": {
+          "description": "Frame rate, once known. `None` for stills.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FrameRate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "has_alpha": {
+          "description": "Whether this item carries an alpha channel.",
+          "type": "boolean"
+        },
+        "id": {
+          "description": "Stable identifier.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/MediaItemId"
+            }
+          ]
+        },
+        "kind": {
+          "description": "Video or image.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/MediaKind"
+            }
+          ]
+        },
+        "original_filename": {
+          "description": "The filename this item was imported from, kept for the operator's orientation only.\n\nNever used as identity and never used to find the file on disk.",
+          "type": "string"
+        },
+        "state": {
+          "description": "Pipeline state.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/MediaState"
+            }
+          ]
+        }
+      }
+    },
+    "MediaState": {
+      "description": "Where a media item is in the ingest pipeline.\n\nThese are the states the operator is shown. They deliberately say nothing about codecs, because the operator never chooses one.",
+      "oneOf": [
+        {
+          "description": "Accepted by the client, not yet analysed.",
+          "type": "string",
+          "enum": [
+            "importing"
+          ]
+        },
+        {
+          "description": "Being analysed or transcoded on the client.",
+          "type": "string",
+          "enum": [
+            "processing"
+          ]
+        },
+        {
+          "description": "Being uploaded to the server.",
+          "type": "string",
+          "enum": [
+            "uploading"
+          ]
+        },
+        {
+          "description": "Uploaded, being verified before registration.",
+          "type": "string",
+          "enum": [
+            "verifying"
+          ]
+        },
+        {
+          "description": "Registered and usable in a show.",
+          "type": "string",
+          "enum": [
+            "ready"
+          ]
+        },
+        {
+          "description": "The pipeline failed. The reason is on the item.",
+          "type": "string",
+          "enum": [
+            "failed"
+          ]
+        }
+      ]
+    },
+    "SizePx": {
+      "description": "A size in whole pixels.",
+      "type": "object",
+      "required": [
+        "height",
+        "width"
+      ],
+      "properties": {
+        "height": {
+          "description": "Height in pixels.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "width": {
+          "description": "Width in pixels.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      }
+    }
+  }
+}

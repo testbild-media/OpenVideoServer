@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SetConnectorRoleRequest",
+  "description": "Assigns a role to a connector.",
+  "type": "object",
+  "required": [
+    "connector",
+    "gpu_pci_address",
+    "role"
+  ],
+  "properties": {
+    "connector": {
+      "description": "Connector name.",
+      "type": "string"
+    },
+    "gpu_pci_address": {
+      "description": "PCI address of the GPU.",
+      "type": "string"
+    },
+    "role": {
+      "description": "The role to assign.\n\nAlways explicit. A connector's role is never inferred from what happens to be plugged in.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/ConnectorRole"
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "ConnectorRole": {
+      "description": "What a GPU connector is used for.\n\nThis is server configuration, not show data: it describes the machine, and it must never be inferred from what happens to be plugged in. The reference server has no integrated GPU, so the single-GPU case where a service display and media outputs share one card is normal, not exceptional.",
+      "oneOf": [
+        {
+          "description": "Drives the 1024x600 local service console.",
+          "type": "string",
+          "enum": [
+            "SERVICE_DISPLAY"
+          ]
+        },
+        {
+          "description": "Drives show output. Never used for anything else.",
+          "type": "string",
+          "enum": [
+            "MEDIA_OUTPUT"
+          ]
+        },
+        {
+          "description": "Deliberately unused.",
+          "type": "string",
+          "enum": [
+            "UNUSED"
+          ]
+        }
+      ]
+    }
+  }
+}

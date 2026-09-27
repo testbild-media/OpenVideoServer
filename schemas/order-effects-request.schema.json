@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "OrderEffectsRequest",
+  "description": "Sets the order of a layer's or a slot's chain.\n\n**The whole order, not a move.** A move is a pair of positions a client works out from a list it may already be behind on, and two clients moving different effects at once would each apply theirs to the other's result. An order is one statement of what the chain is: it either matches what is there or it is refused, and sending it twice changes nothing.\n\nEvery instance currently in the chain must appear exactly once. That is what stops this from being a way to remove one by leaving it out — removing is `DELETE`, where it says so.",
+  "type": "object",
+  "required": [
+    "order"
+  ],
+  "properties": {
+    "order": {
+      "description": "Every instance in the chain, in the order it is to run.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/EffectInstanceId"
+      }
+    }
+  },
+  "definitions": {
+    "EffectInstanceId": {
+      "description": "EffectInstanceId (ULID, 26 characters)",
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    }
+  }
+}

@@ -1,0 +1,61 @@
+[package]
+name = "ovs-core"
+description = "Authoritative project and live state, API and supervision for OpenVideoServer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints.rust]
+missing_docs = "warn"
+unsafe_code = "forbid"
+
+[lints.clippy]
+todo = "warn"
+unwrap_used = "warn"
+
+[dependencies]
+argon2 = "0.6.0"
+axum = { version = "0.8.9", features = ["ws"] }
+base64 = "0.23.1"
+# Stills are verified rather than taken on trust: the client says what it
+# prepared and the server decodes the file to check. Only the formats ingest can
+# produce, because an image decoder is a parser fed operator-supplied files.
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
+# Saying where this server is, so nobody has to type an address (owner,
+# 2026-09-24). No async runtime of its own, which is why this one: the responder
+# is a thread beside the server rather than a second reactor inside it.
+mdns-sd = "0.21.4"
+ovs-clock = { path = "../ovs-clock" }
+ovs-db = { path = "../ovs-db" }
+ovs-dmx = { path = "../ovs-dmx" }
+ovs-ipc = { path = "../ovs-ipc" }
+ovs-media = { path = "../ovs-media" }
+ovs-proto = { path = "../ovs-proto" }
+ovs-types.workspace = true
+rand = "0.10.3"
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+# Content addressing. Every stored object is named by the hash of its bytes, so
+# the same file uploaded twice is stored once.
+sha2 = "0.11.0"
+sysinfo = { version = "0.39.6", default-features = false, features = ["system", "disk", "component"] }
+thiserror.workspace = true
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "signal", "sync", "net", "time", "fs", "io-util"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+ulid.workspace = true
+# For streaming a media item back to a client in chunks, which is the one
+# place this crate hands out something too large to hold in memory.
+futures-util = { version = "0.3.34", default-features = false, features = ["alloc"] }
+
+[dev-dependencies]
+futures-util = "0.3.34"
+http-body-util = "0.1.5"
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+ovs-renderer = { path = "../ovs-renderer" }
+sha2 = "0.11.0"
+tempfile = "3.27.0"
+tokio-tungstenite = "0.30.0"
+tower = { version = "0.5.3", features = ["util"] }

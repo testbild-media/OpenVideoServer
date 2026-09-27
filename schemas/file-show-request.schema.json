@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "FileShowRequest",
+  "description": "Files one show in a folder. The document is untouched.",
+  "type": "object",
+  "required": [
+    "folder"
+  ],
+  "properties": {
+    "folder": {
+      "description": "Where it is to be filed. Empty is the root.",
+      "type": "string"
+    }
+  }
+}

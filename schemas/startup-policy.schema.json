@@ -1,0 +1,68 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "StartupPolicy",
+  "description": "What a server loads after a reboot.\n\nThis is server configuration rather than show data, but it names a show, so it lives beside the show model.\n\nThree modes, with `LastActive` as the default (owner decision Q6).",
+  "oneOf": [
+    {
+      "description": "Reopen whichever show was active when the server stopped.",
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "last_active"
+          ]
+        }
+      }
+    },
+    {
+      "description": "Always open one specific show, whatever was running before.",
+      "type": "object",
+      "required": [
+        "kind",
+        "show_id"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "pinned"
+          ]
+        },
+        "show_id": {
+          "description": "The show to open.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ShowId"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "description": "Start with no show loaded and all outputs black.",
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "none"
+          ]
+        }
+      }
+    }
+  ],
+  "definitions": {
+    "ShowId": {
+      "description": "ShowId (ULID, 26 characters)",
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    }
+  }
+}

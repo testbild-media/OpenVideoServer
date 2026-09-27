@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ClientMessage",
+  "description": "A message from a client.",
+  "oneOf": [
+    {
+      "description": "Ask for a fresh snapshot.\n\nSent after a detected gap, and after a reconnect.",
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "resynchronise"
+          ]
+        }
+      }
+    },
+    {
+      "description": "Measure round-trip time.",
+      "type": "object",
+      "required": [
+        "nonce",
+        "type"
+      ],
+      "properties": {
+        "nonce": {
+          "description": "Echoed back in the pong.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "ping"
+          ]
+        }
+      }
+    }
+  ]
+}

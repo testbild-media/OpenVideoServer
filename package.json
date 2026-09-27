@@ -1,0 +1,22 @@
+{
+  "name": "openvideoserver",
+  "version": "0.2.0",
+  "private": true,
+  "description": "OpenVideoServer workspace root for the TypeScript packages",
+  "workspaces": [
+    "packages/*",
+    "clients/*"
+  ],
+  "scripts": {
+    "schema:generate": "npm run generate --workspace @ovs/schema",
+    "schema:check": "npm run check --workspace @ovs/schema",
+    "client:build": "npm run build --workspace @ovs/desktop",
+    "client:start": "npm run start --workspace @ovs/desktop",
+    "client:test": "npm run test --workspace @ovs/desktop",
+    "client:press": "npm run press --workspace @ovs/desktop",
+    "client:overflow": "npm run overflow --workspace @ovs/desktop",
+    "client:typecheck": "npm run typecheck --workspace @ovs/desktop",
+    "client:ffmpeg": "npm run ffmpeg --workspace @ovs/desktop",
+    "client:dist:win": "npm run dist:win --workspace @ovs/desktop"
+  }
+}

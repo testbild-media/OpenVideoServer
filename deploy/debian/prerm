@@ -1,0 +1,28 @@
+#!/bin/sh
+# Stops the services before the files go.
+#
+# On an upgrade they are restarted by `postinst`; on a removal they stay
+# stopped. Either way nothing here touches `/var/lib/ovs`: the shows, the media
+# and the accounts are the operator's, and removing a package must never be a
+# way to lose them.
+
+set -e
+
+case "$1" in
+  remove | upgrade | deconfigure)
+    if [ -d /run/systemd/system ]; then
+      systemctl stop ovs-console.service > /dev/null 2>&1 || true
+      systemctl stop ovsd.service > /dev/null 2>&1 || true
+      systemctl stop ovs-renderer.service > /dev/null 2>&1 || true
+    fi
+    ;;
+
+  failed-upgrade) ;;
+
+  *)
+    echo "prerm called with unknown argument: $1" >&2
+    exit 1
+    ;;
+esac
+
+exit 0

@@ -1,0 +1,228 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ImportShowResponse",
+  "description": "What an import did.",
+  "type": "object",
+  "required": [
+    "missing",
+    "relinked",
+    "show_id"
+  ],
+  "properties": {
+    "missing": {
+      "description": "Media this server does not have yet.\n\nThe show is saved either way; these layers show nothing until the content arrives, which an operator does through the ordinary upload path.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/MediaManifestEntry"
+      }
+    },
+    "relinked": {
+      "description": "References pointed at content this server already held.\n\nNot an error and not a loss: the bytes are the same bytes, and reusing them is why a package carries hashes rather than files.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Relinked"
+      }
+    },
+    "show_id": {
+      "description": "The show as it now exists here.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/ShowId"
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "FrameRate": {
+      "description": "An exact frame rate expressed as a rational number of frames per second.\n\nRational rather than floating point so that 60000/1001 stays exact and the scheduler cannot accumulate drift.",
+      "type": "object",
+      "required": [
+        "denominator",
+        "numerator"
+      ],
+      "properties": {
+        "denominator": {
+          "description": "Denominator, for example `1001`.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "numerator": {
+          "description": "Numerator, for example `60000`.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      }
+    },
+    "MediaItemId": {
+      "description": "MediaItemId (ULID, 26 characters)",
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "MediaKind": {
+      "description": "The kind of thing a media item is.",
+      "oneOf": [
+        {
+          "description": "A moving image with a timeline.",
+          "type": "string",
+          "enum": [
+            "video"
+          ]
+        },
+        {
+          "description": "A still image.",
+          "type": "string",
+          "enum": [
+            "image"
+          ]
+        }
+      ]
+    },
+    "MediaManifestEntry": {
+      "description": "One media item a package needs, and everything required to ask for it.\n\nNo physical path and no storage key: those belong to the server that holds the file, and a package moves between servers.",
+      "type": "object",
+      "required": [
+        "byte_size",
+        "codec",
+        "container",
+        "dimensions",
+        "display_name",
+        "has_alpha",
+        "kind",
+        "media_item_id",
+        "original_filename",
+        "sha256"
+      ],
+      "properties": {
+        "byte_size": {
+          "description": "Size of the asset in bytes.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "codec": {
+          "description": "Codec name, as the exporting server read it.\n\nCarried so an importing server can say what a package needs before a byte of it moves — a package built around H.264 on a machine that has no H.264 decoder is worth knowing about at import rather than at showtime.",
+          "type": "string"
+        },
+        "container": {
+          "description": "Container format, as the exporting server read it.",
+          "type": "string"
+        },
+        "dimensions": {
+          "description": "Pixel dimensions.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SizePx"
+            }
+          ]
+        },
+        "display_name": {
+          "description": "Name to show in the library.",
+          "type": "string"
+        },
+        "duration_ms": {
+          "description": "Duration in milliseconds. `None` for a still.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "frame_rate": {
+          "description": "Frame rate. `None` for a still.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FrameRate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "has_alpha": {
+          "description": "Whether it carries an alpha channel.",
+          "type": "boolean"
+        },
+        "kind": {
+          "description": "Video or image.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/MediaKind"
+            }
+          ]
+        },
+        "media_item_id": {
+          "description": "The item as the exporting server knew it.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/MediaItemId"
+            }
+          ]
+        },
+        "original_filename": {
+          "description": "The filename it was imported from, for the operator's orientation.",
+          "type": "string"
+        },
+        "sha256": {
+          "description": "SHA-256 of the playable asset, lowercase hex.\n\nThis is what identifies the content. An importing server that already holds these bytes needs none of them sent again.",
+          "type": "string"
+        }
+      }
+    },
+    "Relinked": {
+      "description": "One reference an import had to point somewhere else.",
+      "type": "object",
+      "required": [
+        "from",
+        "to"
+      ],
+      "properties": {
+        "from": {
+          "description": "The item the package named.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/MediaItemId"
+            }
+          ]
+        },
+        "to": {
+          "description": "The item on this server holding the same content.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/MediaItemId"
+            }
+          ]
+        }
+      }
+    },
+    "ShowId": {
+      "description": "ShowId (ULID, 26 characters)",
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "SizePx": {
+      "description": "A size in whole pixels.",
+      "type": "object",
+      "required": [
+        "height",
+        "width"
+      ],
+      "properties": {
+        "height": {
+          "description": "Height in pixels.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "width": {
+          "description": "Width in pixels.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      }
+    }
+  }
+}

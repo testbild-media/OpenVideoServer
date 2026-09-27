@@ -1,0 +1,14 @@
+# Production is Debian; development is Windows. Normalise to LF in the
+# repository so a shell script or a generated schema never reaches Linux with
+# CRLF line endings.
+* text=auto eol=lf
+
+# PowerShell is the exception: it wants CRLF on Windows.
+*.ps1 text eol=crlf
+
+# Binary assets must never be touched.
+*.png binary
+*.jpg binary
+*.ico binary
+*.mov binary
+*.mp4 binary

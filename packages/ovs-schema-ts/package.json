@@ -1,0 +1,16 @@
+{
+  "name": "@ovs/schema",
+  "version": "0.2.0",
+  "private": true,
+  "description": "TypeScript types generated from the OpenVideoServer shared schema. Do not edit by hand.",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "generate": "node scripts/generate.mjs",
+    "check": "node scripts/generate.mjs --check"
+  },
+  "devDependencies": {
+    "json-schema-to-typescript": "^15.0.4"
+  }
+}

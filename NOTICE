@@ -1,0 +1,76 @@
+OpenVideoServer
+Copyright 2026 testbild.media / Jason Kuhr
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use
+this file except in compliance with the License. You may obtain a copy of the
+License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software distributed
+under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+CONDITIONS OF ANY KIND, either express or implied. See the License for the
+specific language governing permissions and limitations under the License.
+
+--------------------------------------------------------------------------------
+
+THIRD-PARTY CODE, AND WHAT IT MEANS FOR A BUILD YOU HAND TO SOMEBODY
+
+The source in this repository is Apache-2.0 and links to nothing on its own. A
+*built* server is a different question, because two crates link FFmpeg.
+
+  FFmpeg (libavcodec, libavformat, libavutil, libswscale)
+
+      LGPL-2.1-or-later. **This package carries its own build** rather than
+      depending on the operating system's, and the difference is the licence:
+      Debian's FFmpeg is GPL-2.0-or-later, because the default packages are
+      built with GPL sources. Its copyright file says so outright, and it was
+      read on a real machine rather than assumed.
+
+      The build is made by `tools/build-ffmpeg.sh --profile server`, which
+      refuses to leave behind a binary configured with `--enable-gpl`,
+      `--enable-version3` or `--enable-nonfree`. Its exact configure line ships
+      beside it as FFMPEG-CONFIGURATION.txt, and its licence text as
+      FFMPEG-COPYING.LGPLv2.1, both in /usr/share/doc/openvideoserver.
+
+      The libraries are installed in /usr/lib/openvideoserver, a private
+      directory, so that nothing else on the machine links against them and the
+      machine's own FFmpeg is left exactly as it was.
+
+      **Relinking**, which is what LGPL-2.1 §6 asks for: the libraries are
+      shared and separate, so replacing them is copying a different
+      libavcodec.so.61 into that directory. Nothing is statically bound and no
+      object files are needed to exercise that right.
+
+      NVENC and NVDEC are built in and do not make this non-free: FFmpeg dropped
+      that requirement in 4.0, the headers are MIT, and the driver is loaded at
+      runtime rather than linked. `--enable-nonfree` is not used.
+
+  Vulkan loader (libvulkan1)
+
+      Apache-2.0. Declared as a dependency and not carried, because the
+      renderer opens Vulkan at runtime rather than linking it.
+
+  Rust crates
+
+      Each under its own licence, overwhelmingly MIT or Apache-2.0. `cargo
+      tree` lists them for a given build; none is carried in this repository.
+
+The desktop client is clear of this too, and as of 2026-09-27 that is enforced
+rather than asserted. Its FFmpeg is built by `tools/build-ffmpeg.sh --profile
+client` with the GPL parts left out, by the owner's decision Q18, and the
+script refuses to leave behind a binary configured otherwise.
+
+    Until 2026-09-27 this paragraph was simply wrong. The build copied the npm
+    packages `ffmpeg-static` and `@ffprobe-installer/ffprobe` instead, whose
+    binaries report `--enable-gpl --enable-version3` and whose package declares
+    GPL-3.0-or-later. It was found by running this repository's own licence
+    check over what the client actually shipped. It never reached anybody: the
+    client had never been published, and the release that would have published
+    it is the change that found this.
+
+    Those packages are still there, for a working copy, where nothing is
+    distributed. Two things stop one reaching a release. `build.mjs` refuses
+    them under `--release`, and the release workflow runs
+    `tools/build-ffmpeg.sh --check` over what it is about to package — which
+    reads `ffmpeg -version` rather than the command line that produced it.

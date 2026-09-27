@@ -1,0 +1,93 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ServerHello",
+  "description": "The server's answer to a hello.\n\nOne flat set of outcomes rather than \"accepted or rejected, and separately why\". Nothing downstream acts on the grouping — a client has to do something different for each specific outcome, update, sign in again or wait — and a tag inside a tag is a shape a generated client cannot describe faithfully, which is how a contract starts drifting from the code it was generated from.",
+  "oneOf": [
+    {
+      "description": "The connection is open. A snapshot follows.",
+      "type": "object",
+      "required": [
+        "protocol_version",
+        "result",
+        "server_version"
+      ],
+      "properties": {
+        "protocol_version": {
+          "description": "Protocol version in use.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "result": {
+          "type": "string",
+          "enum": [
+            "accepted"
+          ]
+        },
+        "server_version": {
+          "description": "Server build version, for diagnostics.",
+          "type": "string"
+        }
+      }
+    },
+    {
+      "description": "The client speaks a protocol version this server cannot.",
+      "type": "object",
+      "required": [
+        "client_version",
+        "result",
+        "server_version"
+      ],
+      "properties": {
+        "client_version": {
+          "description": "The version the client offered.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "result": {
+          "type": "string",
+          "enum": [
+            "incompatible_protocol"
+          ]
+        },
+        "server_version": {
+          "description": "The version this server speaks.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      }
+    },
+    {
+      "description": "The session token was missing, expired or invalid.",
+      "type": "object",
+      "required": [
+        "result"
+      ],
+      "properties": {
+        "result": {
+          "type": "string",
+          "enum": [
+            "unauthenticated"
+          ]
+        }
+      }
+    },
+    {
+      "description": "The server is starting and not yet able to serve state.",
+      "type": "object",
+      "required": [
+        "result"
+      ],
+      "properties": {
+        "result": {
+          "type": "string",
+          "enum": [
+            "not_ready"
+          ]
+        }
+      }
+    }
+  ]
+}

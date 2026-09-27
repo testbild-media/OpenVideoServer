@@ -1,0 +1,37 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LoginResponse",
+  "description": "A successful sign-in.",
+  "type": "object",
+  "required": [
+    "account_id",
+    "expires_at",
+    "token"
+  ],
+  "properties": {
+    "account_id": {
+      "description": "Which account signed in.\n\nV0.x has one account, but the response carries it so that a client built against this API keeps working when there are several.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/AccountId"
+        }
+      ]
+    },
+    "expires_at": {
+      "description": "When the token stops being accepted.",
+      "type": "integer",
+      "format": "int64"
+    },
+    "token": {
+      "description": "Bearer token for subsequent requests.",
+      "type": "string"
+    }
+  },
+  "definitions": {
+    "AccountId": {
+      "description": "AccountId (ULID, 26 characters)",
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    }
+  }
+}

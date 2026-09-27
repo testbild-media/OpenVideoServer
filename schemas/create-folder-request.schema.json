@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CreateFolderRequest",
+  "description": "Makes a folder in the library.\n\nEvery folder above it that is not there yet is made with it, because a tree with a hole in it cannot be drawn. Making one that already exists changes nothing and is not an error.",
+  "type": "object",
+  "required": [
+    "path"
+  ],
+  "properties": {
+    "path": {
+      "description": "The whole path, slash-separated, for example `Intros/2026`.",
+      "type": "string"
+    }
+  }
+}

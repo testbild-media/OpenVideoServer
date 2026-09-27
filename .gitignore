@@ -1,0 +1,60 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Node / Electron
+node_modules/
+dist/
+out/
+.vite/
+
+# Local runtime state
+/run/
+/storage/
+*.db
+*.db-wal
+*.db-shm
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local environment overrides
+.env
+.env.local
+ovs.local.toml
+
+# Built here rather than shipped: the measurement FFmpeg (tools/build-ffmpeg.sh
+# --profile openh264), the Windows installer electron-builder makes, and
+# anything else a tool puts beside them.
+/build/
+
+# The client's own FFmpeg (tools/build-ffmpeg.sh --profile client). A hundred
+# and fifty megabytes of binary that any machine can rebuild, and the release
+# workflow does. Its absence is why `build.mjs` has something to say.
+/clients/desktop/vendor/
+
+# The whole of docs/, by the owner’s decision (2026-09-24). The product
+# specification, the engineering notes, the decision records, the risk register
+# and their own working documents: all of it stays beside this checkout and on
+# the mirror, and none of it is published.
+#
+# reference/ is the exception and is not in here: FIXTURES.md and MODULES.md are
+# generated from the code, verified by golden tests, and are what somebody
+# programmes a lighting console from. They were never internal.
+docs/
+
+# A complete copy of the history as it stood before it was rewritten
+# (2026-09-24), kept until the rewrite has been looked at and trusted.
+# Restore from it with: git clone .git-backup-before-rewrite.bundle
+.git-backup-before-rewrite.bundle
+
+# The NDI SDK, which its licence calls Confidential Information and forbids
+# disclosing to anybody outside this company. It currently sits under docs/ and
+# is therefore already ignored — but by a rule about something else entirely,
+# and a licence obligation should not rest on that. Named here so it stays out
+# however docs/ is decided later.
+**/NDISDK/
+*NDI_SDK*

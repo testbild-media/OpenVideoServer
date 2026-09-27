@@ -1,0 +1,32 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ClientHello",
+  "description": "The first message a client sends.\n\n`Debug` is implemented by hand so a session token cannot reach a log through a derived formatter.",
+  "type": "object",
+  "required": [
+    "client_name",
+    "client_version",
+    "protocol_version",
+    "token"
+  ],
+  "properties": {
+    "client_name": {
+      "description": "Human-readable client name, for diagnostics.",
+      "type": "string"
+    },
+    "client_version": {
+      "description": "Client build version, for diagnostics.",
+      "type": "string"
+    },
+    "protocol_version": {
+      "description": "Realtime protocol version the client speaks.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0.0
+    },
+    "token": {
+      "description": "Session token obtained from the HTTP API.\n\nCarried in the handshake rather than in a header or a query string. A browser cannot set headers on a WebSocket handshake, and a query string would write the token into every access log and proxy cache along the way.",
+      "type": "string"
+    }
+  }
+}

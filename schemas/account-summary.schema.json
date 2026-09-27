@@ -1,0 +1,78 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AccountSummary",
+  "description": "One account, as everything outside the server sees it.\n\n**No password hash.** The field exists in storage and has no business on a wire: an interface that has it is an interface somebody can be talked into showing, and a hash is worth attacking offline.",
+  "type": "object",
+  "required": [
+    "account_id",
+    "created_at",
+    "last_administrator",
+    "role",
+    "username"
+  ],
+  "properties": {
+    "account_id": {
+      "description": "Stable identifier.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/AccountId"
+        }
+      ]
+    },
+    "created_at": {
+      "description": "When it was created, in milliseconds since the Unix epoch.",
+      "type": "integer",
+      "format": "int64"
+    },
+    "last_administrator": {
+      "description": "Whether this is the only account that can administer the server.\n\nSent rather than worked out by the reader, because the rule belongs to the server: an interface that counted admins itself would grey out the wrong button the moment the rule changed, or offer one the server then refuses.",
+      "type": "boolean"
+    },
+    "last_login_at": {
+      "description": "When it last signed in, if it ever has.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "int64"
+    },
+    "role": {
+      "description": "What this account may do.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Role"
+        }
+      ]
+    },
+    "username": {
+      "description": "Login name.",
+      "type": "string"
+    }
+  },
+  "definitions": {
+    "AccountId": {
+      "description": "AccountId (ULID, 26 characters)",
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "Role": {
+      "description": "What an account is allowed to do.\n\nOrdered by authority, so `>=` is a meaningful test and [`Role::may_administer`] is the only place that decides what that means.",
+      "oneOf": [
+        {
+          "description": "Drives the show: everything Live Mode and the show editor can reach.\n\nThe default, because it is the safe half. An account created without a role said is an account nobody decided to trust with the machine.",
+          "type": "string",
+          "enum": [
+            "operator"
+          ]
+        },
+        {
+          "description": "Everything an operator may do, and the machine itself.\n\nAccounts, passwords other than their own, and the system settings — the Service Display's output among them. The first account a server has is this, because somebody has to be able to make the second.",
+          "type": "string",
+          "enum": [
+            "admin"
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ShowFoldersResponse",
+  "description": "The folders the show list is organised into.\n\nIts own endpoint rather than a field on the list, because `GET /shows` answers with an array and this API is additive within a major version: a field may be added to an entry, but the shape of a response is not repurposed under a client that is already reading it.\n\nSent whole rather than worked out from the shows, because an operator makes a folder in order to put a show in it: one derived from its contents could not exist between being made and being filled.",
+  "type": "object",
+  "properties": {
+    "folders": {
+      "description": "Every folder, in path order. The root is not in it.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

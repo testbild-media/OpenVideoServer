@@ -1,0 +1,52 @@
+// Lets the server restart and stop the machine it runs on.
+//
+// Owner, 2026-09-25: "Auch reboot Shutdown auf dem Systemdisplay funktionieren
+// nicht" — the buttons reached the server, the server ran `systemctl reboot`,
+// and the machine refused it with exit status 1.
+//
+// `crates/ovs-core/src/power.rs` says of exactly this: "A server running as an
+// unprivileged user cannot reboot the machine unless it has been given
+// permission to, and that is a deployment decision rather than something to work
+// around." This file is that decision. It was never made, so the buttons could
+// not work on any machine.
+//
+// # Why polkit and not a capability
+//
+// `CAP_SYS_BOOT` would let the process call the kernel directly, which is faster
+// and loses whatever has not reached the disk. The server asks the init system
+// instead, on purpose: the show is written down, the database is closed, and the
+// units come down in the order they were brought up. Asking logind is a D-Bus
+// call, and what decides whether a D-Bus call is allowed is polkit.
+//
+// # What it grants, and what it does not
+//
+// Restart and power off, for the one system user the core runs as. Both the
+// plain actions and the `-multiple-sessions` ones, because a machine with
+// somebody logged in at the console is the ordinary case in a rack room and a
+// button that works only when nobody is there is not a button.
+//
+// **Not the `-ignore-inhibit` variants.** An inhibitor is something that has
+// asked to be allowed to finish — an update, a write — and `systemctl reboot`
+// respects one unless told otherwise. Granting those here would quietly override
+// every inhibitor on the machine, which is a different and much larger
+// permission than the one the buttons need.
+//
+// Not halt either. Nothing offers it, and a permission nothing uses is one
+// nobody reviews.
+polkit.addRule(function (action, subject) {
+  if (subject.user !== "ovs") {
+    return undefined;
+  }
+
+  if (
+    action.id === "org.freedesktop.login1.reboot" ||
+    action.id === "org.freedesktop.login1.reboot-multiple-sessions" ||
+    action.id === "org.freedesktop.login1.power-off" ||
+    action.id === "org.freedesktop.login1.power-off-multiple-sessions"
+  ) {
+    return polkit.Result.YES;
+  }
+
+  // Everything else this user might ask for is somebody else's decision.
+  return undefined;
+});

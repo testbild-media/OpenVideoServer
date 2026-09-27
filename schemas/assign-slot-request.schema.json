@@ -1,0 +1,249 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AssignSlotRequest",
+  "description": "Puts a source in one slot of one layer.\n\nThe one edit with an endpoint of its own, because it is the one edit an operator makes with a show running: a clip dragged from the browser onto a pad (owner, 2026-09-23). Sending the whole document for it would work and would be wrong — storing a show the server has open reloads it there, and reloading a show because somebody filled an empty pad puts every layer back to its opening slot in front of an audience.\n\nWhatever else the slot was set to — how it loops, its direction, its beat sync, its effects — is kept. This changes what plays, not how.",
+  "type": "object",
+  "required": [
+    "source"
+  ],
+  "properties": {
+    "source": {
+      "description": "What the slot is to play.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/SourceRef"
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "GeneratorInstanceId": {
+      "description": "GeneratorInstanceId (ULID, 26 characters)",
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "MediaItemId": {
+      "description": "MediaItemId (ULID, 26 characters)",
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "ParameterValue": {
+      "description": "A typed parameter value for an effect or generator instance.",
+      "oneOf": [
+        {
+          "description": "A boolean switch.",
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "bool"
+              ]
+            },
+            "value": {
+              "type": "boolean"
+            }
+          }
+        },
+        {
+          "description": "A whole number.",
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "int"
+              ]
+            },
+            "value": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        },
+        {
+          "description": "A real number.",
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "float"
+              ]
+            },
+            "value": {
+              "type": "number",
+              "format": "double"
+            }
+          }
+        },
+        {
+          "description": "Free text.",
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "text"
+              ]
+            },
+            "value": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "description": "A colour as linear RGBA in `0.0..=1.0`.",
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "color"
+              ]
+            },
+            "value": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "maxItems": 4,
+              "minItems": 4
+            }
+          }
+        },
+        {
+          "description": "One of a fixed list of named choices, by its stable identifier.\n\nThe identifier, never the label and never the position in the list. A label is a thing that gets reworded and translated; a position is a thing that moves when somebody inserts a choice. A show saved last year has to open looking the way it was left, and the only value that survives both of those is a name nobody displays.",
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "choice"
+              ]
+            },
+            "value": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "SourceRef": {
+      "description": "What a slot plays.\n\nNew source types are added as variants here (capture, DeckLink, NDI and HTML as expected future types). Everything downstream of a source treats them identically, so adding one must not require changes to the layer, composition, piece or output model.",
+      "oneOf": [
+        {
+          "description": "A logical item from the media library.\n\nThe show stores the media item's stable identifier and nothing else. Physical filenames and storage keys live on `MediaAsset` and never appear here.",
+          "type": "object",
+          "required": [
+            "kind",
+            "media_item_id"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "media"
+              ]
+            },
+            "media_item_id": {
+              "description": "Logical media identity.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/MediaItemId"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "description": "A procedural generator, which implements the same source contract.",
+          "type": "object",
+          "required": [
+            "kind",
+            "type_id",
+            "version"
+          ],
+          "properties": {
+            "instance_id": {
+              "description": "This instance's own identity.\n\nWhat a patched fixture points at and what a live value is keyed by, the same way an effect instance's is.\n\nOptional on the wire, so that a client need not invent one and a show written before generators had one still opens. The server gives it a real identity **when the show is saved**, because a patch entry points at this instance and lives in the same document: an identity that existed only in the loaded state would be minted again on the next open, and every fixture patched against the previous one would be pointing at a generator that no longer exists. A document already on disk without one gains it when it is opened (`Show::assign_missing_ids`).\n\nNil rather than a fresh one as the `serde` default, because a default is written into the published schema and a schema that changes on every build can never be checked against a committed one — and left out of the wire form entirely when it is nil, so that \"no identity\" never reads as \"the identity of twenty-six zeroes\".",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/GeneratorInstanceId"
+                }
+              ]
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "generator"
+              ]
+            },
+            "parameters": {
+              "description": "Generator parameters as defined by its manifest.",
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/definitions/ParameterValue"
+              }
+            },
+            "type_id": {
+              "description": "Stable generator type identifier, for example `ovs.solid_colour`.",
+              "type": "string"
+            },
+            "version": {
+              "description": "Manifest version of that generator.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            }
+          }
+        },
+        {
+          "description": "A live NDI stream on the network.\n\nHeld by the name the sender announces itself under, because that is the only handle NDI offers that survives anything: there is no identifier that outlives a sender restarting, and a position in a discovery list means nothing a moment later.\n\nA name that finds nothing on the network is a fault for that layer, the same as a file that has been deleted. It is not the show being wrong.",
+          "type": "object",
+          "required": [
+            "kind",
+            "name"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "ndi"
+              ]
+            },
+            "name": {
+              "description": "The full NDI source name, as the network announces it.\n\n`MACHINE (Source Name)` is the shape NDI uses, and it is carried whole rather than split: the two halves are one identifier and a client that took them apart would have to put them back together exactly to find the source again.",
+              "type": "string"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

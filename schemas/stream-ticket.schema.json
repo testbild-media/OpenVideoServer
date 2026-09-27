@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "StreamTicketResponse",
+  "description": "A permission to watch one preview stream, for a short while.\n\nMinted by a request that carried a session, and narrower than one on purpose: it opens one surface, it expires within the minute, and it is spent the first time it is used. A client that has this cannot load a show, move a fader or stop the machine.",
+  "type": "object",
+  "required": [
+    "expires_at",
+    "ticket"
+  ],
+  "properties": {
+    "expires_at": {
+      "description": "When it stops working, in milliseconds since the epoch.",
+      "type": "integer",
+      "format": "int64"
+    },
+    "ticket": {
+      "description": "The ticket, to be sent as the first message on the stream socket.",
+      "type": "string"
+    }
+  }
+}

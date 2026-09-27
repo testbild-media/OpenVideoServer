@@ -1,0 +1,192 @@
+[Unit]
+Description=OpenVideoServer renderer (owns the GPU and the show outputs)
+Documentation=https://github.com/testbild-media/OpenVideoServer
+After=network-online.target
+
+# Deliberately not ordered against ovsd. The renderer listens and the core
+# connects to it, so that ovsd stopping, crashing or being upgraded is a caller
+# going away rather than a server going down. Either may start first;
+# the core retries until the renderer answers.
+
+# Do not give up. A renderer that has exhausted its restart budget is a dark wall
+# until somebody drives to the venue.
+#
+# **In `[Unit]`, which is where systemd reads it.** It was in `[Service]`, where
+# it is ignored — with a comment above it saying the opposite — so this unit has
+# had the default limit all along: five starts in ten seconds and then it stops
+# trying. Found by `systemd-analyze verify`, which says "Unknown key" and carries
+# on, and which nothing in this repository ran until 2026-09-26.
+StartLimitIntervalSec=0
+
+[Service]
+Type=exec
+# **Before anything: make sure the card's compute node exists.**
+#
+# NVDEC is reached through CUDA, and CUDA needs `/dev/nvidia-uvm`. Nothing
+# creates it at boot — the module loads on demand and the node is made by
+# `nvidia-modprobe`, which is setuid root for exactly this. Until something
+# asks, it is not there, and `cuInit` fails with `CUDA_ERROR_UNKNOWN`: every
+# clip then decodes on the processor, with one line about "an error in an
+# external library" to explain it. The card is fine; nobody asked it anything.
+#
+# Found after a reboot on 2026-09-26. Idempotent, a few milliseconds, and the
+# leading `-` means a machine without the tool — an AMD or Intel one — starts
+# exactly as before.
+ExecStartPre=-/usr/bin/nvidia-modprobe -u -c 0
+
+ExecStart=/usr/bin/ovs-renderer
+Environment=OVS_RENDERER_BIND=127.0.0.1:7421
+# `display` takes a physical connector and presents to it: the production path
+#. `vulkan` composes on the GPU and presents nowhere, which is
+# what to fall back to on a machine with nothing plugged in; `headless` renders
+# nowhere at all.
+#
+# Name the connectors a show goes to, in order, and the mode if the panel's own
+# is not wanted. Without OVS_RENDERER_CONNECTOR the renderer drives whatever it
+# finds first, which on a machine with a Service Display attached is a coin toss.
+Environment=OVS_RENDERER_BACKEND=display
+# Environment=OVS_RENDERER_CONNECTOR=DP-3,DP-4
+# Environment=OVS_RENDERER_DEVICE=nvidia
+# Environment=OVS_RENDERER_MODE=1920x1080@60
+Environment=OVS_LOG=info
+
+# Never root, and not the same user as the core: the two processes share
+# nothing, which is the whole point of them being two.
+User=ovs-renderer
+Group=ovs-renderer
+
+# The GPU, and nothing else on the device tree. `render` is the group Debian
+# puts on /dev/dri/renderD*; `video` is the one on /dev/dri/card*, which direct
+# display output needs.
+#
+# `char-drm` names the whole DRM device class, and it has to: a DeviceAllow of
+# `/dev/dri/card*` looks like it says the same thing and does not. With the
+# globbed form the service saw only llvmpipe — a software rasteriser, on a
+# machine with two real GPUs in it — which is a renderer that starts, runs, and
+# shows nobody anything. Found by deploying it.
+#
+# `ovs` is the core's group, and it is here for one reason: the media store is
+# the core's state directory (0750, owned by `ovs`), and the renderer is the
+# process that opens the files in it. Without this every clip and every still
+# fails with "Permission denied" — on a machine where the upload succeeded, the
+# database is right and the file is on the disk. Found by deploying it.
+#
+# Read access, through the group, to a directory the renderer never writes to.
+#
+# `input` is the System screen's touchscreen and mouse. The renderer reads the
+# devices and tells the console where the pointer is, rather than the other way
+# round: the console hosts CEF, where every linked crate is a gamble, and "only
+# on the System Display" is a rule about which panel — which belongs in the
+# process that owns the panels.
+#
+# `ovs-console` is how the System screen's pictures are reached: the console
+# creates its socket 0660 owned by its own group, and connecting to a Unix socket
+# needs *write* permission — which is easy to get wrong while thinking of it as
+# reading pictures. Without this line the renderer drives that connector and
+# shows nothing on it.
+SupplementaryGroups=video render input ovs ovs-console
+PrivateDevices=no
+DeviceAllow=char-drm rw
+
+# The System screen's touchscreen and mouse.
+#
+# `SupplementaryGroups=input` above is necessary and was never sufficient:
+# **any** `DeviceAllow=` line turns the device policy into a whitelist, so the
+# lines below that open the GPU closed the whole rest of the device tree —
+# including the devices this service had just been given the group for. Every
+# one of the twenty-eight came back `Operation not permitted`, the renderer
+# counted each refusal as "not a pointer" and said nothing, and the System
+# screen could be looked at and not used (owner, 2026-09-26: "sehe keine Maus
+# und kann nichts bewegen").
+#
+# Proved with this unit's own list before the line was written:
+#
+#   User=ovs-renderer, SupplementaryGroups=input        OPENED
+#   ... and DeviceAllow=char-drm rw                     Operation not permitted
+#   ... and DeviceAllow=char-input r                    OPENED
+#
+# `r`, not `rw`: evdev asks for read-write and falls back to read-only — it is
+# in its source — and writing to an input device means driving its lamps and its
+# force feedback, which is nothing this does.
+DeviceAllow=char-input r
+
+# An NVIDIA card is two device classes, not one. Vulkan reaches it through
+# /dev/dri like any other card, but the driver will not open at all without
+# /dev/nvidiactl and /dev/nvidia0 — so with `char-drm` alone the NVIDIA ICD
+# fails quietly, the renderer picks the only device left, and a machine with an
+# RTX 4070 in it renders the show on the processor's own graphics. It came up,
+# it composed, it reported 16 GB of "video memory" that was really system
+# memory, and the GPU row on the System screen was a dash. Found by deploying
+# it, again.
+#
+# The names come from /proc/devices, which is the only thing systemd resolves
+# `char-` against; all three are major 195, and they are listed separately
+# because that file lists them separately.
+DeviceAllow=char-nvidia rw
+DeviceAllow=char-nvidiactl rw
+DeviceAllow=char-nvidia-modeset rw
+DeviceAllow=char-nvidia-caps rw
+
+# NVENC is reached through CUDA, and CUDA's first call opens the unified memory
+# device. Without this the encoder fails at `cuInit` with CUDA_ERROR_UNKNOWN and
+# the preview falls back to the processor, which costs about a fifth of a core
+# per surface for something the card does for nothing. Found by deploying it:
+# every measurement before this was taken from a shell, where none of these
+# restrictions apply. `nvidia-uvm-tools` is the same major number, so one line
+# covers both nodes.
+DeviceAllow=char-nvidia-uvm rw
+
+# Where the driver keeps compiled shaders between runs. Without it the service
+# user has no home to write to, the driver says so on every start and then
+# compiles everything again — a warning in the log and a slower start, for no
+# reason.
+CacheDirectory=ovs-renderer
+Environment=__GL_SHADER_DISK_CACHE_PATH=/var/cache/ovs-renderer
+# The driver asks for a home before it reads that variable, and a system user
+# has none, so it says so twice on every start and gives up on caching.
+Environment=HOME=/var/cache/ovs-renderer
+
+# A renderer that has stopped is a dark wall, and a rack machine has nobody
+# standing next to it. Restarting costs the frames it takes to come back, which
+# is less than the rest of the evening.
+Restart=always
+RestartSec=1s
+
+# Paging out the render path would cost frames at the worst possible moment.
+LimitMEMLOCK=infinity
+
+# Priority, not realtime scheduling. A modest `nice` keeps the render thread
+# ahead of the housekeeping on the same machine without the risk that a
+# misbehaving realtime thread takes the box with it. Whether this should become
+# SCHED_FIFO is a question for the reference server with a frame-time histogram
+# in front of it, not for a unit file written in advance.
+Nice=-10
+IOSchedulingClass=realtime
+IOSchedulingPriority=2
+
+# Hardening. The renderer needs the GPU and one loopback socket. It has no
+# database, no media store and no business writing anything: the files it reads
+# are named to it by the core over the control channel, and it opens them read
+# only.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ReadOnlyPaths=/var/lib/ovs
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# MemoryDenyWriteExecute is deliberately absent. A graphics driver may compile
+# shaders at runtime, which needs pages that are written and then executed; the
+# core sets it because the core has no such thing.
+
+[Install]
+WantedBy=multi-user.target

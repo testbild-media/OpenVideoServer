@@ -1,0 +1,20 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PowerResponse",
+  "description": "What happened to a request that the machine restart or stop.",
+  "type": "object",
+  "required": [
+    "accepted",
+    "detail"
+  ],
+  "properties": {
+    "accepted": {
+      "description": "Whether the machine accepted it.\n\nFalse is ordinary rather than exceptional: a server that has not been given permission to reboot itself is a server that will not, and saying so beats an operator pressing a button that does nothing.",
+      "type": "boolean"
+    },
+    "detail": {
+      "description": "What was run, or why nothing was.",
+      "type": "string"
+    }
+  }
+}

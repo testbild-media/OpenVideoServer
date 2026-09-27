@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ResetCountersRequest",
+  "description": "Which counters an operator has asked to put back to zero.",
+  "type": "object",
+  "properties": {
+    "group": {
+      "description": "The group to clear. Everything, unless something narrower is named.",
+      "default": "ALL",
+      "allOf": [
+        {
+          "$ref": "#/definitions/CounterGroup"
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "CounterGroup": {
+      "description": "Which of the operator-visible counters to put back to zero.\n\nThe three numbers on a System screen that only mean anything relative to when somebody last looked. They are separate because they are tapped separately: an operator clearing the dropped-frame count after fixing a cable has not decided that the evening's decoder errors never happened.",
+      "oneOf": [
+        {
+          "description": "Every one of them.",
+          "type": "string",
+          "enum": [
+            "ALL"
+          ]
+        },
+        {
+          "description": "Frames the outputs did not present in time.",
+          "type": "string",
+          "enum": [
+            "DROPPED_FRAMES"
+          ]
+        },
+        {
+          "description": "Frames a decoder could not produce in time.",
+          "type": "string",
+          "enum": [
+            "LATE_FRAMES"
+          ]
+        },
+        {
+          "description": "Media that could not be decoded.",
+          "type": "string",
+          "enum": [
+            "DECODE_ERRORS"
+          ]
+        }
+      ]
+    }
+  }
+}

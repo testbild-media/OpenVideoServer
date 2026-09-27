@@ -1,0 +1,636 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OpenVideoServer</title>
+    <!--
+      What somebody gets for typing this machine's address into a browser.
+
+      It says what the machine is and how it is coping: load, temperatures,
+      memory, disc, decoders, frames held, and for each wall whether it is lit,
+      at what rate and how many frames it has dropped. The owner asked for
+      exactly that without a sign-in (2026-09-24), and it is the half of the
+      System screen that answers "is this machine healthy" — the question
+      somebody standing in a rack room has.
+
+      It names the show that is open, because the owner asked for it
+      (2026-09-24): walking up to a rack and confirming from a phone that this
+      machine has tonight's show open beats signing in to find out.
+
+      It stops there. Which clip is on which layer, the tempo and the DMX
+      universes a desk is driving describe the performance rather than the
+      machine, and nobody has asked to publish them.
+
+      No fonts, no scripts and no styles from anywhere else. A server in a rack
+      has no reason to have internet, and a page that went blank without one
+      would be a page that fails on exactly the night it is needed.
+    -->
+    <style>
+      :root {
+        --bg: #0b0c10;
+        --panel: #14161c;
+        --edge: #262a33;
+        --text: #e8e9ed;
+        --dim: #8f8f98;
+        --active: #ff7a1a;
+        --good: #35c46b;
+        --bad: #e5484d;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 32px 16px;
+        background: var(--bg);
+        color: var(--text);
+        font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+
+      main {
+        max-width: 640px;
+        margin: 0 auto;
+      }
+
+      h1 {
+        margin: 0 0 4px;
+        font-size: 26px;
+        letter-spacing: 0.01em;
+      }
+
+      .under {
+        margin: 0 0 28px;
+        color: var(--dim);
+        font-size: 13px;
+      }
+
+      section {
+        margin-bottom: 20px;
+        padding: 16px;
+        background: var(--panel);
+        border: 1px solid var(--edge);
+        border-radius: 8px;
+      }
+
+      h2 {
+        margin: 0 0 10px;
+        font-size: 13px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--dim);
+      }
+
+      dl {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 6px 16px;
+        margin: 0;
+      }
+
+      dt {
+        color: var(--dim);
+        font-size: 13px;
+      }
+
+      dd {
+        margin: 0;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .state {
+        display: inline-flex;
+        align-items: baseline;
+        gap: 6px;
+      }
+
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--dim);
+      }
+
+      .dot.good {
+        background: var(--good);
+      }
+
+      .dot.bad {
+        background: var(--bad);
+      }
+
+      p {
+        margin: 0 0 10px;
+      }
+
+      p:last-child {
+        margin-bottom: 0;
+      }
+
+      a {
+        color: var(--active);
+      }
+
+      ul {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      li + li {
+        margin-top: 8px;
+      }
+
+      .file {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        padding: 10px 12px;
+        background: #101013;
+        border: 1px solid var(--edge);
+        border-radius: 6px;
+        color: var(--text);
+        text-decoration: none;
+      }
+
+      .file:hover {
+        border-color: var(--active);
+      }
+
+      .file-name {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .file-size {
+        color: var(--dim);
+        font-size: 13px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .notice {
+        color: var(--dim);
+        font-size: 13px;
+      }
+
+      .setup {
+        border-color: var(--active);
+      }
+
+      /* The machine's vital signs, and the walls'. Two columns on a desk, one on
+         a phone in a rack room, which is where this page is read from. */
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 12px 20px;
+      }
+
+      .fact {
+        min-width: 0;
+      }
+
+      .fact-label {
+        color: var(--dim);
+        font-size: 12px;
+      }
+
+      .fact-value {
+        font-size: 17px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .fact-value.warn {
+        color: var(--active);
+      }
+
+      .fact-value.bad {
+        color: var(--bad);
+      }
+
+      .fact-note {
+        color: var(--dim);
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .output {
+        padding: 12px;
+        background: #101013;
+        border: 1px solid var(--edge);
+        border-radius: 6px;
+      }
+
+      .output + .output {
+        margin-top: 10px;
+      }
+
+      .output-name {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+
+      .output-name strong {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .missing {
+        border-color: var(--bad);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1 id="name">OpenVideoServer</h1>
+      <p class="under" id="version">&nbsp;</p>
+
+      <section id="setup" class="setup" hidden>
+        <h2>This server has not been set up</h2>
+        <p>
+          It has no account yet, so nobody can sign in and nothing can drive it.
+          Create the first one — it will be an administrator, because somebody
+          has to be able to make the second.
+        </p>
+        <p><a href="/admin">Set this server up</a></p>
+      </section>
+
+      <section>
+        <h2>State</h2>
+        <dl>
+          <dt>Renderer</dt>
+          <dd>
+            <span class="state"><span class="dot" id="renderer-dot"></span
+              ><span id="renderer">…</span></span>
+          </dd>
+          <dt>Show</dt>
+          <dd id="show">…</dd>
+          <dt>Running for</dt>
+          <dd id="uptime">…</dd>
+          <dt>Test pattern</dt>
+          <dd id="pattern">…</dd>
+        </dl>
+      </section>
+
+      <section>
+        <h2>This machine</h2>
+        <div class="grid" id="machine"></div>
+      </section>
+
+      <section>
+        <h2>Playback</h2>
+        <div class="grid" id="playback"></div>
+      </section>
+
+      <section id="outputs-section">
+        <h2>Outputs</h2>
+        <div id="outputs"></div>
+      </section>
+
+      <section>
+        <h2>Driving the show</h2>
+        <p>
+          This page watches. To load a show, put clips on pads and run the
+          show you need the <strong>OpenVideoServer client</strong>, which talks
+          to this machine over the network.
+        </p>
+        <p class="notice">
+          The client finds servers on its own, so there is usually no address to
+          type.
+        </p>
+      </section>
+
+      <section id="downloads" hidden>
+        <h2>The client</h2>
+        <ul id="download-list"></ul>
+      </section>
+
+      <section>
+        <h2>Administration</h2>
+        <p><a href="/admin">Accounts and machine settings</a></p>
+        <p class="notice">
+          Needs an administrator account. This server speaks plain HTTP, so sign
+          in only on a network you trust.
+        </p>
+      </section>
+    </main>
+
+    <script>
+      const text = (id, value) => {
+        document.getElementById(id).textContent = value;
+      };
+
+      /** Bytes, as a person reads them. */
+      const size = (bytes) => {
+        if (bytes >= 1024 * 1024 * 1024) {
+          return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+        }
+        if (bytes >= 1024 * 1024) {
+          return `${Math.round(bytes / (1024 * 1024))} MB`;
+        }
+        return `${Math.max(1, Math.round(bytes / 1024))} kB`;
+      };
+
+      /** Bytes as gigabytes, which is the only unit these numbers want. */
+      const gb = (bytes) => `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+
+      /** Seconds as something a person reads off a rack. */
+      const forHowLong = (seconds) => {
+        if (!Number.isFinite(seconds)) {
+          return '—';
+        }
+        const days = Math.floor(seconds / 86400);
+        const hours = Math.floor((seconds % 86400) / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        if (days > 0) {
+          return `${days}d ${hours}h`;
+        }
+        if (hours > 0) {
+          return `${hours}h ${minutes}m`;
+        }
+        return `${minutes}m`;
+      };
+
+      /** One reading, with the classes that colour it when it is not healthy. */
+      const fact = (label, value, note, level) => {
+        const holder = document.createElement('div');
+        holder.className = 'fact';
+        const name = document.createElement('div');
+        name.className = 'fact-label';
+        name.textContent = label;
+        const shown = document.createElement('div');
+        shown.className = `fact-value${level ? ` ${level}` : ''}`;
+        shown.textContent = value;
+        holder.append(name, shown);
+        if (note !== undefined && note !== null && note !== '') {
+          const under = document.createElement('div');
+          under.className = 'fact-note';
+          under.textContent = note;
+          holder.append(under);
+        }
+        return holder;
+      };
+
+      /**
+       * Draws the machine, what it is decoding and where it is sending it.
+       *
+       * Absent is drawn as an em dash rather than as zero. A machine with no
+       * card the renderer could open reports no GPU figures at all, and a card
+       * at 0% must not look the same as one nobody asked.
+       */
+      function drawVitals(status) {
+        const machine = status.machine ?? {};
+        const holder = document.getElementById('machine');
+        holder.replaceChildren();
+
+        const hot = (degrees, warm, hot) =>
+          degrees === null || degrees === undefined
+            ? ''
+            : degrees >= hot
+              ? 'bad'
+              : degrees >= warm
+                ? 'warn'
+                : '';
+
+        holder.append(
+          fact(
+            'Processor',
+            machine.cpu_percent === null || machine.cpu_percent === undefined
+              ? '—'
+              : `${Math.round(machine.cpu_percent)}%`,
+            machine.cpu_temperature_c === null || machine.cpu_temperature_c === undefined
+              ? ''
+              : `${Math.round(machine.cpu_temperature_c)} °C`,
+            hot(machine.cpu_temperature_c, 80, 95),
+          ),
+          fact(
+            'Graphics',
+            machine.gpu_percent === null || machine.gpu_percent === undefined
+              ? '—'
+              : `${Math.round(machine.gpu_percent)}%`,
+            machine.gpu_temperature_c === null || machine.gpu_temperature_c === undefined
+              ? 'no card reported'
+              : `${Math.round(machine.gpu_temperature_c)} °C`,
+            hot(machine.gpu_temperature_c, 80, 90),
+          ),
+          fact(
+            'Memory',
+            machine.ram_percent === null || machine.ram_percent === undefined
+              ? '—'
+              : `${Math.round(machine.ram_percent)}%`,
+            machine.ram_total_bytes
+              ? `${gb(machine.ram_used_bytes)} of ${gb(machine.ram_total_bytes)}`
+              : '',
+            machine.ram_percent >= 92 ? 'bad' : machine.ram_percent >= 80 ? 'warn' : '',
+          ),
+          fact(
+            'Card memory',
+            machine.vram_total_bytes
+              ? `${Math.round((machine.vram_used_bytes / machine.vram_total_bytes) * 100)}%`
+              : '—',
+            machine.vram_total_bytes
+              ? `${gb(machine.vram_used_bytes)} of ${gb(machine.vram_total_bytes)}`
+              : 'no card reported',
+            machine.vram_total_bytes &&
+              machine.vram_used_bytes / machine.vram_total_bytes >= 0.92
+              ? 'bad'
+              : '',
+          ),
+          fact(
+            'Media store',
+            machine.disk_total_bytes
+              ? `${Math.round((machine.disk_used_bytes / machine.disk_total_bytes) * 100)}%`
+              : '—',
+            machine.disk_total_bytes
+              ? `${gb(machine.disk_used_bytes)} of ${gb(machine.disk_total_bytes)}`
+              : '',
+            machine.disk_total_bytes &&
+              machine.disk_used_bytes / machine.disk_total_bytes >= 0.95
+              ? 'bad'
+              : '',
+          ),
+        );
+
+        const playback = status.playback ?? {};
+        const frame = status.frame ?? null;
+        const slots = document.getElementById('playback');
+        slots.replaceChildren();
+        slots.append(
+          fact('Decoders', String(playback.active_decoders ?? 0)),
+          fact(
+            'Frames held',
+            String(playback.late_frames ?? 0),
+            'a decoder that could not keep up',
+            (playback.late_frames ?? 0) > 0 ? 'warn' : '',
+          ),
+          fact(
+            'Decode errors',
+            String(playback.decode_errors ?? 0),
+            '',
+            (playback.decode_errors ?? 0) > 0 ? 'bad' : '',
+          ),
+          fact(
+            'Last frame',
+            frame ? `${Math.round((frame.compose_us ?? 0) / 10) / 100} ms` : '—',
+            frame ? `media ${frame.media_us ?? 0} µs · playback ${frame.playback_us ?? 0} µs` : '',
+          ),
+        );
+
+        const outputs = Array.isArray(status.outputs) ? status.outputs : [];
+        const missing = Array.isArray(status.missing_outputs) ? status.missing_outputs : [];
+        const list = document.getElementById('outputs');
+        list.replaceChildren();
+
+        for (const output of outputs) {
+          const box = document.createElement('div');
+          box.className = 'output';
+
+          const head = document.createElement('div');
+          head.className = 'output-name';
+          const name = document.createElement('strong');
+          name.textContent = output.name ?? 'output';
+          const dot = document.createElement('span');
+          dot.className = `dot ${output.active ? 'good' : 'bad'}`;
+          head.append(dot, name);
+          box.append(head);
+
+          const grid = document.createElement('div');
+          grid.className = 'grid';
+          const dropped = output.dropped_frames ? output.dropped_frames.since_reset : 0;
+          grid.append(
+            fact(
+              'Rate',
+              output.actual_fps === null || output.actual_fps === undefined
+                ? '—'
+                : `${output.actual_fps.toFixed(2)} fps`,
+              output.refresh
+                ? `mode ${(output.refresh.numerator / output.refresh.denominator).toFixed(2)}`
+                : '',
+            ),
+            fact(
+              'Size',
+              output.size ? `${output.size.width} × ${output.size.height}` : '—',
+              output.connector ?? '',
+            ),
+            fact(
+              'Dropped',
+              String(dropped),
+              output.dropped_frames ? `${output.dropped_frames.lifetime} since the server started` : '',
+              dropped > 0 ? 'warn' : '',
+            ),
+            fact(
+              'Draw time',
+              output.frame_render_time_us === null || output.frame_render_time_us === undefined
+                ? '—'
+                : `${Math.round((output.frame_render_time_us / 10)) / 100} ms`,
+              output.display ?? '',
+            ),
+          );
+          box.append(grid);
+          list.append(box);
+        }
+
+        // A wall that should be there and is not. The fault somebody in a rack
+        // room is looking for, so it is on the page rather than in a log.
+        for (const gone of missing) {
+          const box = document.createElement('div');
+          box.className = 'output missing';
+          const head = document.createElement('div');
+          head.className = 'output-name';
+          const dot = document.createElement('span');
+          dot.className = 'dot bad';
+          const name = document.createElement('strong');
+          name.textContent = gone.name ?? 'output';
+          head.append(dot, name);
+          const note = document.createElement('div');
+          note.className = 'fact-note';
+          note.textContent = gone.reason ?? 'not present';
+          box.append(head, note);
+          list.append(box);
+        }
+
+        document.getElementById('outputs-section').hidden =
+          outputs.length === 0 && missing.length === 0;
+
+        text(
+          'show',
+          status.show === null || status.show === undefined
+            ? 'nothing open'
+            : status.show,
+        );
+        text('uptime', forHowLong(status.uptime_s));
+        text(
+          'pattern',
+          status.test_pattern === undefined || status.test_pattern === 'OFF'
+            ? 'off'
+            : String(status.test_pattern).toLowerCase(),
+        );
+      }
+
+      async function draw() {
+        let status;
+        try {
+          const answer = await fetch('/status.json', { cache: 'no-store' });
+          if (!answer.ok) {
+            throw new Error(String(answer.status));
+          }
+          status = await answer.json();
+        } catch {
+          // The page is served by the same process that answers this, so the
+          // only way here is a server that has stopped between the two. Saying
+          // so is better than leaving the last reading on screen.
+          text('renderer', 'this server is not answering');
+          document.getElementById('renderer-dot').className = 'dot bad';
+          return;
+        }
+
+        text('name', status.name);
+        text('version', `OpenVideoServer ${status.version}`);
+        document.title = status.name;
+
+        const state = status.renderer && status.renderer.state;
+        text('renderer', state ?? 'unknown');
+        document.getElementById('renderer-dot').className =
+          state === 'running' ? 'dot good' : state === 'stopped' ? 'dot bad' : 'dot';
+
+        document.getElementById('setup').hidden = status.needs_setup !== true;
+
+        drawVitals(status);
+
+        const files = Array.isArray(status.downloads) ? status.downloads : [];
+        const list = document.getElementById('download-list');
+        list.replaceChildren();
+        for (const file of files) {
+          const row = document.createElement('a');
+          row.className = 'file';
+          row.href = `/download/${encodeURIComponent(file.name)}`;
+          const name = document.createElement('span');
+          name.className = 'file-name';
+          name.textContent = file.name;
+          const bytes = document.createElement('span');
+          bytes.className = 'file-size';
+          bytes.textContent = size(file.bytes);
+          row.append(name, bytes);
+          const item = document.createElement('li');
+          item.append(row);
+          list.append(item);
+        }
+        document.getElementById('downloads').hidden = files.length === 0;
+      }
+
+      void draw();
+      setInterval(() => void draw(), 5000);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,1565 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ShowExport",
+  "description": "A show and the inventory of what it needs to play.\n\nThe media itself is not in here. A package is a document an operator can read and a server can validate before a byte of video moves; the files come afterwards, through the same upload path as any other import, and only the ones the receiving server does not already hold.",
+  "type": "object",
+  "required": [
+    "exported_at",
+    "exported_by",
+    "media",
+    "package_version",
+    "show"
+  ],
+  "properties": {
+    "exported_at": {
+      "description": "When it was written.",
+      "type": "integer",
+      "format": "int64"
+    },
+    "exported_by": {
+      "description": "Version of the server that wrote it, for diagnostics.",
+      "type": "string"
+    },
+    "media": {
+      "description": "Every media item the show refers to.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/MediaManifestEntry"
+      }
+    },
+    "package_version": {
+      "description": "Format version of this package.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0.0
+    },
+    "show": {
+      "description": "The show itself.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Show"
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "AnchorPoint": {
+      "description": "Where in a rectangle a turn happens.\n\nA fraction of the rectangle's own size, measured from its top-left corner: `(0.0, 0.0)` is that corner, `(0.5, 0.5)` the centre, `(1.0, 1.0)` the bottom-right. Fractions rather than pixels so that resizing the rectangle does not move the point the operator picked.\n\nThe owner asked for an anchor point per piece (2026-09-23). Rotation used to be about the centre and nothing else, which is right for a wall hung square and wrong for one hinged at a corner: turning it about its centre moves the hinge, and the operator then has to put the rectangle back by hand.\n\nThe centre is the default, and the default is what every document written before this field existed reads as — so nothing already mapped moves.",
+      "type": "object",
+      "required": [
+        "x",
+        "y"
+      ],
+      "properties": {
+        "x": {
+          "description": "Across, as a fraction of the width from the left edge.",
+          "type": "number",
+          "format": "float"
+        },
+        "y": {
+          "description": "Down, as a fraction of the height from the top edge.",
+          "type": "number",
+          "format": "float"
+        }
+      }
+    },
+    "BlendMode": {
+      "description": "How a layer composites onto the bus below it.",
+      "oneOf": [
+        {
+          "description": "Standard source-over alpha compositing.",
+          "type": "string",
+          "enum": [
+            "normal"
+          ]
+        },
+        {
+          "description": "Additive.",
+          "type": "string",
+          "enum": [
+            "add"
+          ]
+        },
+        {
+          "description": "Multiplicative.",
+          "type": "string",
+          "enum": [
+            "multiply"
+          ]
+        },
+        {
+          "description": "Inverse multiply.",
+          "type": "string",
+          "enum": [
+            "screen"
+          ]
+        },
+        {
+          "description": "Multiply or screen depending on the backdrop.",
+          "type": "string",
+          "enum": [
+            "overlay"
+          ]
+        },
+        {
+          "description": "Per-channel maximum.",
+          "type": "string",
+          "enum": [
+            "lighten"
+          ]
+        },
+        {
+          "description": "Per-channel minimum.",
+          "type": "string",
+          "enum": [
+            "darken"
+          ]
+        },
+        {
+          "description": "Absolute per-channel difference.",
+          "type": "string",
+          "enum": [
+            "difference"
+          ]
+        }
+      ]
+    },
+    "Composition": {
+      "description": "The canvas everything composites onto before being cut into pieces.",
+      "type": "object",
+      "required": [
+        "render_rate",
+        "size"
+      ],
+      "properties": {
+        "render_rate": {
+          "description": "The rate the composition is rendered at.\n\nOutputs carry their own refresh rate. When they differ, this is the rate the compositor runs at and outputs present from.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/FrameRate"
+            }
+          ]
+        },
+        "size": {
+          "description": "Canvas size in pixels.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SizePx"
+            }
+          ]
+        }
+      }
+    },
+    "CrossfaderCurve": {
+      "description": "How the A/B crossfader converts its position into bus contributions.",
+      "oneOf": [
+        {
+          "description": "Contribution is the fader position, so both buses sit at 0.5 in the middle.\n\nWhich means the *middle of a crossfade is visibly darker than either end*: two pictures at half contribution sum to half the light, and an audience sees the wall dip every time the fader crosses. It is here because some material wants it — a hard cut between two graphics rather than a blend — and it is no longer the default.",
+          "type": "string",
+          "enum": [
+            "linear"
+          ]
+        },
+        {
+          "description": "Contribution follows a quarter-sine, holding perceived brightness across the fade.\n\nThe default since the owner's decision of 2026-09-23, and the one a crossfade should be: the two contributions square-sum to one, so the light on the wall stays where it was all the way across.",
+          "type": "string",
+          "enum": [
+            "equal_power"
+          ]
+        }
+      ]
+    },
+    "DisplayMode": {
+      "description": "A display mode: resolution plus exact refresh rate.",
+      "type": "object",
+      "required": [
+        "refresh",
+        "size"
+      ],
+      "properties": {
+        "refresh": {
+          "description": "Refresh rate as an exact rational value.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/FrameRate"
+            }
+          ]
+        },
+        "size": {
+          "description": "Resolution in pixels.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SizePx"
+            }
+          ]
+        }
+      }
+    },
+    "EffectInstance": {
+      "description": "One configured effect in a slot or layer effect chain.\n\nEffects deliberately have no generic \"effect master\". Each effect exposes its own parameters, and may optionally carry its own DMX fixture personality defined by its manifest.",
+      "type": "object",
+      "required": [
+        "enabled",
+        "id",
+        "type_id",
+        "version"
+      ],
+      "properties": {
+        "enabled": {
+          "description": "Whether this effect contributes to the chain.",
+          "type": "boolean"
+        },
+        "id": {
+          "description": "Stable identifier of this instance.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/EffectInstanceId"
+            }
+          ]
+        },
+        "parameters": {
+          "description": "Parameter values as declared by the manifest.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/ParameterValue"
+          }
+        },
+        "type_id": {
+          "description": "Stable effect type identifier, for example `ovs.colour_correct`.",
+          "type": "string"
+        },
+        "version": {
+          "description": "Manifest version this instance was configured against.\n\nPublished manifests are immutable, so an old show keeps loading the exact effect behaviour it was built with.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      }
+    },
+    "EffectInstanceId": {
+      "description": "EffectInstanceId (ULID, 26 characters)",
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "FixtureInstance": {
+      "description": "A fixture definition bound to a target, universe and start address.",
+      "type": "object",
+      "required": [
+        "enabled",
+        "footprint",
+        "id",
+        "start_address",
+        "target",
+        "type_id",
+        "universe",
+        "version"
+      ],
+      "properties": {
+        "enabled": {
+          "description": "Whether this patch entry is active.",
+          "type": "boolean"
+        },
+        "footprint": {
+          "description": "Number of channels this fixture occupies.",
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "id": {
+          "description": "Stable identifier of this patch entry.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/FixtureInstanceId"
+            }
+          ]
+        },
+        "start_address": {
+          "description": "One-based DMX start address within the universe.",
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "target": {
+          "description": "What this fixture controls.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/FixtureTarget"
+            }
+          ]
+        },
+        "type_id": {
+          "description": "Stable fixture type identifier, for example `ovs.master`.",
+          "type": "string"
+        },
+        "universe": {
+          "description": "Universe number.",
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "version": {
+          "description": "Definition version this patch was created against.\n\nPublished fixture definitions are immutable, because a console has the channel layout physically programmed into its show file.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      }
+    },
+    "FixtureInstanceId": {
+      "description": "FixtureInstanceId (ULID, 26 characters)",
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "FixtureTarget": {
+      "description": "What a patched fixture controls.",
+      "oneOf": [
+        {
+          "description": "The single show-wide master fixture.\n\nCarries global controls only: master dimmer, A/B crossfader, BPM, BPM tap, BPM reset, master speed scale and freeze.",
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "master"
+              ]
+            }
+          }
+        },
+        {
+          "description": "One layer.\n\nExplicitly does not carry BPM tap, BPM reset, an effect master or a layer black control.",
+          "type": "object",
+          "required": [
+            "kind",
+            "layer_id"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "layer"
+              ]
+            },
+            "layer_id": {
+              "description": "The layer this fixture drives.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/LayerId"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "description": "One effect instance that opts into DMX control.",
+          "type": "object",
+          "required": [
+            "effect_instance_id",
+            "kind"
+          ],
+          "properties": {
+            "effect_instance_id": {
+              "description": "The instance this fixture drives.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/EffectInstanceId"
+                }
+              ]
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "effect"
+              ]
+            }
+          }
+        },
+        {
+          "description": "One generator instance that opts into DMX control.\n\nThe same thing as [`Effect`](Self::Effect) for the other kind of module. Both are plugins, both declare their own channels, and both are driven through one parameter model (owner, 2026-09-23) — they are two variants rather than one only because the identity differs.",
+          "type": "object",
+          "required": [
+            "generator_instance_id",
+            "kind"
+          ],
+          "properties": {
+            "generator_instance_id": {
+              "description": "The instance this fixture drives.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/GeneratorInstanceId"
+                }
+              ]
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "generator"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "FrameRate": {
+      "description": "An exact frame rate expressed as a rational number of frames per second.\n\nRational rather than floating point so that 60000/1001 stays exact and the scheduler cannot accumulate drift.",
+      "type": "object",
+      "required": [
+        "denominator",
+        "numerator"
+      ],
+      "properties": {
+        "denominator": {
+          "description": "Denominator, for example `1001`.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "numerator": {
+          "description": "Numerator, for example `60000`.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      }
+    },
+    "GeneratorInstanceId": {
+      "description": "GeneratorInstanceId (ULID, 26 characters)",
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "Layer": {
+      "description": "One compositing layer of a show.",
+      "type": "object",
+      "required": [
+        "blend_mode",
+        "default_opacity",
+        "default_transform",
+        "effects",
+        "enabled",
+        "id",
+        "name",
+        "order",
+        "route",
+        "slots"
+      ],
+      "properties": {
+        "banks": {
+          "description": "How many banks of twelve the matrix shows for this layer.\n\nStored rather than worked out from the slots, because an operator adds a bank in order to put something in it: one derived from the slots would collapse back to what is filled the moment the screen redrew, and the empty bank they had just asked for would vanish (owner, 2026-09-23).\n\nOne by default, which is the owner's default of 1–12 alone, and at most [`Layer::MAX_BANKS`]. A document written before this field existed reads as one bank and still shows every slot it has — see [`Layer::bank_count`].",
+          "default": 1,
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "blend_mode": {
+          "description": "How this layer composites onto the bus.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/BlendMode"
+            }
+          ]
+        },
+        "default_opacity": {
+          "description": "Opacity the layer starts from, in `0.0..=1.0`.\n\nLive opacity is DMX-driven and lives in [`crate::live`].",
+          "type": "number",
+          "format": "float"
+        },
+        "default_transform": {
+          "description": "Transform the layer starts from.\n\nLive transform is DMX-driven and lives in [`crate::live`].",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Transform2D"
+            }
+          ]
+        },
+        "effects": {
+          "description": "Effects applied to the whole layer, in chain order.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/EffectInstance"
+          }
+        },
+        "enabled": {
+          "description": "Whether the layer contributes to its bus at all.",
+          "type": "boolean"
+        },
+        "id": {
+          "description": "Stable identifier.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/LayerId"
+            }
+          ]
+        },
+        "name": {
+          "description": "Operator-visible name.",
+          "type": "string"
+        },
+        "order": {
+          "description": "Composite order; lower values composite first, so higher values are on top.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "route": {
+          "description": "Which bus this layer feeds.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Route"
+            }
+          ]
+        },
+        "slots": {
+          "description": "Configured slots, never including index 0.\n\nSlot 0 is permanently Black and is implicit on every layer . It is not stored, cannot be assigned and needs no decoder.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Slot"
+          }
+        }
+      }
+    },
+    "LayerId": {
+      "description": "LayerId (ULID, 26 characters)",
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "MasterConfig": {
+      "description": "Show-level master settings.\n\nThese are the values a show *starts* from. What the master is doing right now lives in [`crate::live::MasterLive`] and is never written back here.",
+      "type": "object",
+      "required": [
+        "beats_per_bar",
+        "crossfader_curve",
+        "default_bpm",
+        "default_crossfader",
+        "default_dimmer",
+        "default_speed_scale"
+      ],
+      "properties": {
+        "beats_per_bar": {
+          "description": "Beats per bar, which is what the clock counts in.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "crossfader_curve": {
+          "description": "Crossfader response curve.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/CrossfaderCurve"
+            }
+          ]
+        },
+        "default_bpm": {
+          "description": "BPM the master clock starts at.",
+          "type": "number",
+          "format": "double"
+        },
+        "default_crossfader": {
+          "description": "Crossfader position a restart returns to: `0.0` is fully A, `1.0` fully B.",
+          "type": "number",
+          "format": "float"
+        },
+        "default_dimmer": {
+          "description": "Master dimmer a restart returns to, in `0.0..=1.0`.\n\nLive state is not restored after a restart, so this is the value the show sits at until a console sends one.",
+          "type": "number",
+          "format": "float"
+        },
+        "default_speed_scale": {
+          "description": "Master speed scale the show starts at.",
+          "type": "number",
+          "format": "double"
+        }
+      }
+    },
+    "MediaItemId": {
+      "description": "MediaItemId (ULID, 26 characters)",
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "MediaKind": {
+      "description": "The kind of thing a media item is.",
+      "oneOf": [
+        {
+          "description": "A moving image with a timeline.",
+          "type": "string",
+          "enum": [
+            "video"
+          ]
+        },
+        {
+          "description": "A still image.",
+          "type": "string",
+          "enum": [
+            "image"
+          ]
+        }
+      ]
+    },
+    "MediaManifestEntry": {
+      "description": "One media item a package needs, and everything required to ask for it.\n\nNo physical path and no storage key: those belong to the server that holds the file, and a package moves between servers.",
+      "type": "object",
+      "required": [
+        "byte_size",
+        "codec",
+        "container",
+        "dimensions",
+        "display_name",
+        "has_alpha",
+        "kind",
+        "media_item_id",
+        "original_filename",
+        "sha256"
+      ],
+      "properties": {
+        "byte_size": {
+          "description": "Size of the asset in bytes.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "codec": {
+          "description": "Codec name, as the exporting server read it.\n\nCarried so an importing server can say what a package needs before a byte of it moves — a package built around H.264 on a machine that has no H.264 decoder is worth knowing about at import rather than at showtime.",
+          "type": "string"
+        },
+        "container": {
+          "description": "Container format, as the exporting server read it.",
+          "type": "string"
+        },
+        "dimensions": {
+          "description": "Pixel dimensions.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SizePx"
+            }
+          ]
+        },
+        "display_name": {
+          "description": "Name to show in the library.",
+          "type": "string"
+        },
+        "duration_ms": {
+          "description": "Duration in milliseconds. `None` for a still.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "frame_rate": {
+          "description": "Frame rate. `None` for a still.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FrameRate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "has_alpha": {
+          "description": "Whether it carries an alpha channel.",
+          "type": "boolean"
+        },
+        "kind": {
+          "description": "Video or image.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/MediaKind"
+            }
+          ]
+        },
+        "media_item_id": {
+          "description": "The item as the exporting server knew it.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/MediaItemId"
+            }
+          ]
+        },
+        "original_filename": {
+          "description": "The filename it was imported from, for the operator's orientation.",
+          "type": "string"
+        },
+        "sha256": {
+          "description": "SHA-256 of the playable asset, lowercase hex.\n\nThis is what identifies the content. An importing server that already holds these bytes needs none of them sent again.",
+          "type": "string"
+        }
+      }
+    },
+    "OutputConfig": {
+      "description": "A configured output.",
+      "type": "object",
+      "required": [
+        "enabled",
+        "id",
+        "identity",
+        "mode",
+        "name"
+      ],
+      "properties": {
+        "enabled": {
+          "description": "Whether this output is driven at all.",
+          "type": "boolean"
+        },
+        "id": {
+          "description": "Stable logical identifier, persisted and referenced by pieces.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/OutputId"
+            }
+          ]
+        },
+        "identity": {
+          "description": "Hardware identity used to find this output again after a reboot.\n\nEmpty on an output that goes on the network, and refused as non-empty there: an output cannot be a socket and a stream at once.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/OutputIdentity"
+            }
+          ]
+        },
+        "mode": {
+          "description": "The mode this output is configured to run at.\n\nOn a network output this is what the stream declares itself as rather than a mode set on a panel: the size the composition is sampled into and the rate the frames are stamped with.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/DisplayMode"
+            }
+          ]
+        },
+        "name": {
+          "description": "Operator-visible name, for example `LED Wall Left`.",
+          "type": "string"
+        },
+        "on_the_network": {
+          "description": "Published on the network instead of driven out of a socket.\n\nThe stream carries this output's own [`name`](Self::name), so there is one name and not two. **What the operator typed is the part in brackets**: the runtime puts the machine in front of it, so `Wall Left` on a server called `OPENVIDEOSERVER` is announced as `OPENVIDEOSERVER (Wall Left)` — measured on the reference machine rather than assumed. Storing the announced name would rename every stream in a show the day it moved to another machine.\n\nA flag rather than a second name, because a second name would have to be kept in step with the first and the rule about which one wins is where the fault would live.\n\nNot decided once and for all: an output can be moved between a socket and the network either way, which is what happens when a wall is unplugged for an evening and its feed has to go somewhere.",
+          "type": "boolean"
+        }
+      }
+    },
+    "OutputId": {
+      "description": "OutputId (ULID, 26 characters)",
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "OutputIdentity": {
+      "description": "Which connector an output is forced onto, and what was found there.\n\n**The GPU and the connector decide; nothing else does.** An output is wired to a socket on the back of a machine and stays there, so a show names that socket and the renderer drives it — whatever is plugged in, and whether or not the driver thinks anything is. Outputs are not hotplugged.\n\nThe EDID fields are what was discovered there, kept for the patch page and for support: \"DP-3 says it is a Novastar\" is worth being able to read. They are never matched against, because the hardware this product drives cannot be relied on to identify itself — LED processors commonly report no EDID at all, or the same serial on every unit in the rack — and because a processor that is powered off after the server boots would otherwise take its wall dark for the night.",
+      "type": "object",
+      "properties": {
+        "connector": {
+          "description": "Connector name as reported by the driver, for example `DP-1`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "edid_hash": {
+          "description": "Hash of the EDID identification block.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "gpu_pci_address": {
+          "description": "PCI address of the GPU, for example `0000:01:00.0`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "manufacturer": {
+          "description": "EDID manufacturer name, when reported.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model": {
+          "description": "EDID model name, when reported.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "serial": {
+          "description": "EDID serial number, when reported and non-empty.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "ParameterValue": {
+      "description": "A typed parameter value for an effect or generator instance.",
+      "oneOf": [
+        {
+          "description": "A boolean switch.",
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "bool"
+              ]
+            },
+            "value": {
+              "type": "boolean"
+            }
+          }
+        },
+        {
+          "description": "A whole number.",
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "int"
+              ]
+            },
+            "value": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        },
+        {
+          "description": "A real number.",
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "float"
+              ]
+            },
+            "value": {
+              "type": "number",
+              "format": "double"
+            }
+          }
+        },
+        {
+          "description": "Free text.",
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "text"
+              ]
+            },
+            "value": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "description": "A colour as linear RGBA in `0.0..=1.0`.",
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "color"
+              ]
+            },
+            "value": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "maxItems": 4,
+              "minItems": 4
+            }
+          }
+        },
+        {
+          "description": "One of a fixed list of named choices, by its stable identifier.\n\nThe identifier, never the label and never the position in the list. A label is a thing that gets reworded and translated; a position is a thing that moves when somebody inserts a choice. A show saved last year has to open looking the way it was left, and the only value that survives both of those is a name nobody displays.",
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "choice"
+              ]
+            },
+            "value": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "Piece": {
+      "description": "One rectangular mapping from the composition to an output.",
+      "type": "object",
+      "required": [
+        "dest_rect",
+        "enabled",
+        "id",
+        "name",
+        "order",
+        "output_id",
+        "rotation_deg",
+        "source_rect"
+      ],
+      "properties": {
+        "anchor": {
+          "description": "The point in `dest_rect` the rotation happens about.\n\nThe centre unless somebody says otherwise, which is what every document written before this field existed reads as — so nothing already mapped moves.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/AnchorPoint"
+            }
+          ]
+        },
+        "dest_rect": {
+          "description": "Region of the output this piece fills, in output pixels.\n\nScaling is the relationship between `source_rect` and this rectangle, so there is no separate scale factor that could disagree with the geometry.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/RectPx"
+            }
+          ]
+        },
+        "enabled": {
+          "description": "Whether this piece is drawn.",
+          "type": "boolean"
+        },
+        "id": {
+          "description": "Stable identifier.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/PieceId"
+            }
+          ]
+        },
+        "name": {
+          "description": "Operator-visible name, for example `Wall Left Upper`.",
+          "type": "string"
+        },
+        "order": {
+          "description": "Draw order within its output; lower values draw first.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "output_id": {
+          "description": "Which output this piece draws to.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/OutputId"
+            }
+          ]
+        },
+        "rotation_deg": {
+          "description": "Clockwise rotation of the *placed* rectangle, in degrees.\n\nAbout [`anchor`](Self::anchor), in output pixels.",
+          "type": "number",
+          "format": "float"
+        },
+        "source": {
+          "description": "Which picture this piece takes its rectangle out of.\n\nThe composition unless somebody says otherwise, which is what every document written before this field existed reads as — so nothing already mapped changes when it is loaded.\n\nThe owner asked for a choice here (2026-09-23): a wall showing the incoming look rather than the outgoing one is a monitor, and a wall showing one bus is what a crossfade is judged against.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/PieceSource"
+            }
+          ]
+        },
+        "source_anchor": {
+          "description": "The point in `source_rect` that rotation happens about.\n\nThe centre unless somebody says otherwise, for the same reason [`anchor`](Self::anchor) is.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/AnchorPoint"
+            }
+          ]
+        },
+        "source_rect": {
+          "description": "Region of the composition this piece takes, in composition pixels.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/RectPx"
+            }
+          ]
+        },
+        "source_rotation_deg": {
+          "description": "Clockwise rotation of the *taken* region, in degrees.\n\nAbout [`source_anchor`](Self::source_anchor), and in composition pixels rather than in texture coordinates — a forty-five degree turn of a 16:9 region is a turn and not a shear.\n\nBoth ends of a piece turn (owner, 2026-09-23): the output rotation puts a rectangle on a wall at an angle, and this one takes a rectangle out of the composition at an angle, which is what a wall hung on the diagonal needs fed to it.\n\nZero unless somebody says otherwise, which is what every document written before this field existed reads as.",
+          "type": "number",
+          "format": "float"
+        }
+      }
+    },
+    "PieceId": {
+      "description": "PieceId (ULID, 26 characters)",
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "PieceSource": {
+      "description": "Which picture a piece takes its rectangle out of.\n\nThe composition is the show as it leaves the server, and is what every piece took until the owner asked for a choice (2026-09-23). The three buses are what it is made of: A and B are the two sides of the crossfade, and M is the master path that goes over them.\n\nA wall fed from one bus is a monitor — it shows the look coming up rather than the look going out, which is the thing an operator is judging a crossfade against and cannot see on the wall itself.\n\n**One layer's own picture is not here yet.** A layer composites straight into its bus, so there is no image of one on its own to sample, and giving this a variant the renderer cannot honour would be a control that does nothing.",
+      "oneOf": [
+        {
+          "description": "The composition: the show as it leaves the server.",
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "composition"
+              ]
+            }
+          }
+        },
+        {
+          "description": "One of the three buses, before the combine.",
+          "type": "object",
+          "required": [
+            "kind",
+            "route"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "bus"
+              ]
+            },
+            "route": {
+              "description": "Which one: A and B are the crossfade's sides, M is the master path.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Route"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "PlaybackDirection": {
+      "description": "The direction a source's timeline advances in.",
+      "oneOf": [
+        {
+          "description": "Normal playback.",
+          "type": "string",
+          "enum": [
+            "forward"
+          ]
+        },
+        {
+          "description": "Reversed playback.",
+          "type": "string",
+          "enum": [
+            "reverse"
+          ]
+        }
+      ]
+    },
+    "PlaybackMode": {
+      "description": "What happens when a source reaches the end of its timeline.",
+      "oneOf": [
+        {
+          "description": "Restart from the beginning, seamlessly.",
+          "type": "string",
+          "enum": [
+            "loop"
+          ]
+        },
+        {
+          "description": "Play through once, then hold the final frame.",
+          "type": "string",
+          "enum": [
+            "once_freeze"
+          ]
+        },
+        {
+          "description": "Play through once, then show black.",
+          "type": "string",
+          "enum": [
+            "once_black"
+          ]
+        },
+        {
+          "description": "Play forward to the end, then backwards to the start, repeatedly.",
+          "type": "string",
+          "enum": [
+            "bounce"
+          ]
+        }
+      ]
+    },
+    "RectPx": {
+      "description": "An axis-aligned rectangle in whole pixels.\n\nThe origin is the top-left corner of the surrounding surface, with `x` growing right and `y` growing down. Offsets are signed so a piece may be positioned partly outside its output, which is a legitimate mapping choice.",
+      "type": "object",
+      "required": [
+        "height",
+        "width",
+        "x",
+        "y"
+      ],
+      "properties": {
+        "height": {
+          "description": "Height in pixels.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "width": {
+          "description": "Width in pixels.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "x": {
+          "description": "Left edge in pixels, may be negative.",
+          "type": "integer",
+          "format": "int32"
+        },
+        "y": {
+          "description": "Top edge in pixels, may be negative.",
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    },
+    "Route": {
+      "description": "Which bus a layer feeds.\n\nExactly one of three, never a blend of them. `A` and `B` feed the global crossfader; `M` bypasses it and goes straight to the master path.",
+      "oneOf": [
+        {
+          "description": "Crossfader side A.",
+          "type": "string",
+          "enum": [
+            "A"
+          ]
+        },
+        {
+          "description": "Crossfader side B.",
+          "type": "string",
+          "enum": [
+            "B"
+          ]
+        },
+        {
+          "description": "Direct master path, bypassing the crossfader.",
+          "type": "string",
+          "enum": [
+            "M"
+          ]
+        }
+      ]
+    },
+    "Show": {
+      "description": "A complete show.",
+      "type": "object",
+      "required": [
+        "composition",
+        "created_at",
+        "id",
+        "layers",
+        "master",
+        "name",
+        "outputs",
+        "pieces",
+        "schema_version",
+        "settings",
+        "updated_at"
+      ],
+      "properties": {
+        "composition": {
+          "description": "The composition canvas.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Composition"
+            }
+          ]
+        },
+        "created_at": {
+          "description": "When the show was created.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "fixture_patch": {
+          "description": "DMX-over-IP patch.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/FixtureInstance"
+          }
+        },
+        "id": {
+          "description": "Stable identifier.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ShowId"
+            }
+          ]
+        },
+        "layers": {
+          "description": "Compositing layers.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Layer"
+          }
+        },
+        "master": {
+          "description": "Master settings this show starts from.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/MasterConfig"
+            }
+          ]
+        },
+        "name": {
+          "description": "Operator-visible name.",
+          "type": "string"
+        },
+        "outputs": {
+          "description": "Configured physical outputs.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/OutputConfig"
+          }
+        },
+        "pieces": {
+          "description": "Rectangular mappings from composition to outputs.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Piece"
+          }
+        },
+        "schema_version": {
+          "description": "Schema version this show was written with.\n\nAlways present and always checked on load, so a show written by a newer build is refused with an explanation rather than partially understood.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "settings": {
+          "description": "Show preferences.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ShowSettings"
+            }
+          ]
+        },
+        "updated_at": {
+          "description": "When the show was last written.",
+          "type": "integer",
+          "format": "int64"
+        }
+      }
+    },
+    "ShowId": {
+      "description": "ShowId (ULID, 26 characters)",
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "ShowSettings": {
+      "description": "Show-level preferences that are not part of the show itself.",
+      "type": "object",
+      "required": [
+        "auto_save"
+      ],
+      "properties": {
+        "auto_save": {
+          "description": "Whether edits are saved automatically.",
+          "type": "boolean"
+        },
+        "notes": {
+          "description": "Free-form operator notes.",
+          "type": "string"
+        }
+      }
+    },
+    "SizePx": {
+      "description": "A size in whole pixels.",
+      "type": "object",
+      "required": [
+        "height",
+        "width"
+      ],
+      "properties": {
+        "height": {
+          "description": "Height in pixels.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "width": {
+          "description": "Width in pixels.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      }
+    },
+    "Slot": {
+      "description": "One configured slot on a layer.",
+      "type": "object",
+      "required": [
+        "direction",
+        "effects",
+        "index",
+        "playback_mode",
+        "source",
+        "transform"
+      ],
+      "properties": {
+        "direction": {
+          "description": "Timeline direction.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/PlaybackDirection"
+            }
+          ]
+        },
+        "effects": {
+          "description": "Effects applied to this source, in chain order.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/EffectInstance"
+          }
+        },
+        "index": {
+          "description": "Slot number as shown in the Live Mode matrix. Never 0.",
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "playback_mode": {
+          "description": "End-of-timeline behaviour.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/PlaybackMode"
+            }
+          ]
+        },
+        "source": {
+          "description": "What this slot plays.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SourceRef"
+            }
+          ]
+        },
+        "speed": {
+          "description": "How fast this slot runs through one pass, as a ratio.\n\n`1.0` is a pass exactly as long as [`sync`](Self::sync) says: the clip's own length when it free-runs, or the beats it was given when it is locked. `2.0` is twice as fast, `0.5` half.\n\nOn **both** kinds of sync, and on the slot (owner, 2026-09-23): \"pro Slot Scale sollt aber verfügbar sein für Free Run und BPM Sync.\" It is not the master's scale wearing a different hat — the master's does not reach a free-running clip at all, and must not, \"weil 'Free' ist\". This is the operator's hand on this one clip, and it is the only rate a free-running slot has.\n\nBetween [`MIN_SPEED_SCALE`](crate::config::MIN_SPEED_SCALE) and [`MAX_SPEED_SCALE`](crate::config::MAX_SPEED_SCALE), the same ladder the master runs on, so an operator meets one range rather than two.\n\nWhat it cannot do is make a decoder faster. A pass shorter than the clip asks for frames at a multiple of the rate the file was written at, and past what the card can decode the picture stops advancing — see [`SlotSync::BeatSync`].",
+          "default": 1.0,
+          "type": "number",
+          "format": "double"
+        },
+        "sync": {
+          "description": "Whether this slot follows the beat, and over how many beats.\n\nOn the slot rather than on the layer, because it is a property of the clip: how long *this* piece of footage takes is a fact about the footage, and a layer that carried it would apply one answer to every slot on it (owner, 2026-09-23). A layer therefore has no rate of its own at all; what it shows is whatever the slot it is playing says.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SlotSync"
+            }
+          ]
+        },
+        "transform": {
+          "description": "Source transform, applied before the layer transform.\n\nConfiguration only. The standard Layer Fixture drives the layer transform instead.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Transform2D"
+            }
+          ]
+        }
+      }
+    },
+    "SlotSync": {
+      "description": "Whether a slot runs at its own rate or to the show's beat.\n\nFree run is the default and stays the default: a clip dropped into a slot plays at the speed it was made at, whatever the tempo is doing, until somebody decides otherwise (owner, 2026-09-23). That is what an operator expects of a file they just imported, and it is the only setting under which a clip is certain to be playable — a beat-locked clip runs at whatever multiple of its own rate the tempo asks for, and a decoder has a ceiling.",
+      "oneOf": [
+        {
+          "description": "Plays at the clip's own rate, at one times, whatever the tempo is.",
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "FREE_RUN"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Plays through in this many beats of the show's clock.\n\nBeats rather than bars, because a clip is not obliged to be a whole number of bars long and an operator counting a loop counts beats. One upwards, with no ceiling but the clip's own length: a long clip over few beats is a fast clip, and how fast is a question for the decoder rather than for this type.",
+          "type": "object",
+          "required": [
+            "beats",
+            "kind"
+          ],
+          "properties": {
+            "beats": {
+              "description": "How many beats one pass takes. At least one.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "BEAT_SYNC"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "SourceRef": {
+      "description": "What a slot plays.\n\nNew source types are added as variants here (capture, DeckLink, NDI and HTML as expected future types). Everything downstream of a source treats them identically, so adding one must not require changes to the layer, composition, piece or output model.",
+      "oneOf": [
+        {
+          "description": "A logical item from the media library.\n\nThe show stores the media item's stable identifier and nothing else. Physical filenames and storage keys live on `MediaAsset` and never appear here.",
+          "type": "object",
+          "required": [
+            "kind",
+            "media_item_id"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "media"
+              ]
+            },
+            "media_item_id": {
+              "description": "Logical media identity.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/MediaItemId"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "description": "A procedural generator, which implements the same source contract.",
+          "type": "object",
+          "required": [
+            "kind",
+            "type_id",
+            "version"
+          ],
+          "properties": {
+            "instance_id": {
+              "description": "This instance's own identity.\n\nWhat a patched fixture points at and what a live value is keyed by, the same way an effect instance's is.\n\nOptional on the wire, so that a client need not invent one and a show written before generators had one still opens. The server gives it a real identity **when the show is saved**, because a patch entry points at this instance and lives in the same document: an identity that existed only in the loaded state would be minted again on the next open, and every fixture patched against the previous one would be pointing at a generator that no longer exists. A document already on disk without one gains it when it is opened (`Show::assign_missing_ids`).\n\nNil rather than a fresh one as the `serde` default, because a default is written into the published schema and a schema that changes on every build can never be checked against a committed one — and left out of the wire form entirely when it is nil, so that \"no identity\" never reads as \"the identity of twenty-six zeroes\".",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/GeneratorInstanceId"
+                }
+              ]
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "generator"
+              ]
+            },
+            "parameters": {
+              "description": "Generator parameters as defined by its manifest.",
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/definitions/ParameterValue"
+              }
+            },
+            "type_id": {
+              "description": "Stable generator type identifier, for example `ovs.solid_colour`.",
+              "type": "string"
+            },
+            "version": {
+              "description": "Manifest version of that generator.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            }
+          }
+        },
+        {
+          "description": "A live NDI stream on the network.\n\nHeld by the name the sender announces itself under, because that is the only handle NDI offers that survives anything: there is no identifier that outlives a sender restarting, and a position in a discovery list means nothing a moment later.\n\nA name that finds nothing on the network is a fault for that layer, the same as a file that has been deleted. It is not the show being wrong.",
+          "type": "object",
+          "required": [
+            "kind",
+            "name"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "ndi"
+              ]
+            },
+            "name": {
+              "description": "The full NDI source name, as the network announces it.\n\n`MACHINE (Source Name)` is the shape NDI uses, and it is carried whole rather than split: the two halves are one identifier and a client that took them apart would have to put them back together exactly to find the source again.",
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "Transform2D": {
+      "description": "A 2D transform applied to a slot source or to a whole layer.\n\n`x` and `y` are an offset in composition pixels from the centre of the composition, chosen over normalised units because LED operators work in pixels and because a non-square composition makes normalised offsets behave differently on each axis.\n\nThe layer transform is intended for live Art-Net/sACN control; the slot transform is configuration only. Both use this type, but they live in different places in the model.",
+      "type": "object",
+      "required": [
+        "rotation_deg",
+        "scale_x",
+        "scale_y",
+        "x",
+        "y"
+      ],
+      "properties": {
+        "rotation_deg": {
+          "description": "Clockwise rotation in degrees about the transform anchor.",
+          "type": "number",
+          "format": "float"
+        },
+        "scale_x": {
+          "description": "Horizontal scale multiplier, `1.0` meaning unscaled.",
+          "type": "number",
+          "format": "float"
+        },
+        "scale_y": {
+          "description": "Vertical scale multiplier, `1.0` meaning unscaled.",
+          "type": "number",
+          "format": "float"
+        },
+        "x": {
+          "description": "Horizontal offset from the composition centre, in pixels.",
+          "type": "number",
+          "format": "float"
+        },
+        "y": {
+          "description": "Vertical offset from the composition centre, in pixels.",
+          "type": "number",
+          "format": "float"
+        }
+      }
+    }
+  }
+}

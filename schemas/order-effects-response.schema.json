@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "OrderEffectsResponse",
+  "description": "Result of setting a chain's order.",
+  "type": "object",
+  "required": [
+    "updated_at"
+  ],
+  "properties": {
+    "updated_at": {
+      "description": "When the server recorded the edit.",
+      "type": "integer",
+      "format": "int64"
+    }
+  }
+}

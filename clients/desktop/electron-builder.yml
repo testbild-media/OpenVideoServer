@@ -1,0 +1,70 @@
+# What a published Windows client is made of.
+#
+# The server hands this file out on its own download page: the package puts
+# whatever is in `dist/client` into `/usr/share/openvideoserver/client`, and
+# `crates/ovs-core/src/server/downloads.rs` offers it by its own name. The
+# point is the evening where somebody needs the client on a second laptop and
+# the venue's wifi is a captive portal — so the name wants to say what it is
+# without anything else beside it.
+#
+# # What is in it, and what is deliberately not
+#
+# `dist/` only. Everything the client runs is bundled into three files by
+# `build.mjs`, so `node_modules` is a build-time thing and shipping it would be
+# shipping the same code twice — once bundled and once not.
+#
+# The two executables are the exception, because an executable cannot be
+# bundled into a JavaScript file, and `asarUnpack` is why they work: a binary
+# inside an asar archive is not a path the operating system can execute, and
+# `spawn` on one fails with a message about a file that is plainly there.
+#
+# # Not signed
+#
+# There is no certificate, so Windows will show SmartScreen's "unrecognised
+# app" on first run. Said here rather than discovered: an unsigned installer
+# that nobody warned anybody about looks exactly like a tampered one.
+
+appId: media.testbild.openvideoserver
+productName: OpenVideoServer
+copyright: Copyright © testbild.media
+
+directories:
+  # Beside the FFmpeg build rather than in `dist/`, which is the client's own
+  # bundle output and is emptied on every build. The release workflow copies
+  # the installer from here into `dist/client`, which is where `package.sh`
+  # looks for something to put in the `.deb`.
+  output: ../../build/client
+  buildResources: assets
+
+files:
+  - dist/**
+  - package.json
+
+asarUnpack:
+  # ffmpeg, ffprobe, and the licence material that has to travel with them.
+  - dist/bin/**
+
+win:
+  icon: assets/icon.ico
+  target:
+    - target: nsis
+      arch: [x64]
+  # `OpenVideoServer-0.2.0-setup.exe`. The version is in the name because the
+  # server's download page lists files by name and nothing else: a page
+  # offering "OpenVideoServer.exe" tells an operator nothing about whether it
+  # is the one their server speaks to.
+  artifactName: ${productName}-${version}-setup.${ext}
+
+nsis:
+  oneClick: false
+  # A show machine and an operator's laptop are different arguments, and the
+  # person installing it is the one who knows which this is.
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  # The licence the client is under, shown before it installs. Apache-2.0, as
+  # the repository's LICENSE says; the LGPL text that belongs to the bundled
+  # FFmpeg travels beside the binaries in `dist/bin`, because it is a licence
+  # for a different thing and conflating the two would misstate both.
+  license: ../../LICENSE

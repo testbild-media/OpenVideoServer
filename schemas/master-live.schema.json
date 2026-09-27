@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MasterLive",
+  "description": "The live state of the master bus and the global clock.",
+  "type": "object",
+  "required": [
+    "bpm",
+    "crossfader",
+    "dimmer",
+    "freeze",
+    "speed_scale"
+  ],
+  "properties": {
+    "bpm": {
+      "description": "Current master BPM. There is exactly one of these in the whole system.",
+      "type": "number",
+      "format": "double"
+    },
+    "crossfader": {
+      "description": "Crossfader position: `0.0` is fully A, `1.0` is fully B.",
+      "type": "number",
+      "format": "float"
+    },
+    "dimmer": {
+      "description": "Master dimmer in `0.0..=1.0`, applied after the buses are combined.",
+      "type": "number",
+      "format": "float"
+    },
+    "dmx_enabled": {
+      "description": "Whether incoming DMX reaches this show at all.\n\nOn by default, because a show is normally driven from the desk and a server that came up ignoring it would be a server that looks broken.\n\nOff is the operator taking the show by hand: Art-Net and sACN keep arriving, the status keeps saying what is on the wire, and **nothing they carry changes anything**. The show holds whatever it had, which is the same behaviour as a desk that has stopped sending — loss is a hold, not a blackout — and Live Mode drives it instead (owner, 2026-09-23).\n\nLive rather than configuration: it is a thing somebody does in the middle of a night that has gone wrong, and a show that opened with its console ignored would be a worse surprise than the one it solved.",
+      "default": true,
+      "type": "boolean"
+    },
+    "freeze": {
+      "description": "Whether the final output is frozen.\n\nFreezing holds the visible output but does not stop control or state processing, so the show resumes coherently.",
+      "type": "boolean"
+    },
+    "speed_scale": {
+      "description": "Global speed scale, roughly `0.5` to `4.0`.",
+      "type": "number",
+      "format": "double"
+    }
+  }
+}

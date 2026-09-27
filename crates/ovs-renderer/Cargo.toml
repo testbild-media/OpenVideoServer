@@ -1,0 +1,79 @@
+[package]
+name = "ovs-renderer"
+description = "The realtime renderer for OpenVideoServer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints.rust]
+missing_docs = "warn"
+
+[lints.clippy]
+todo = "warn"
+unwrap_used = "warn"
+
+[dependencies]
+arc-swap = "1.9.2"
+ash = "0.38.0"
+base64 = "0.23.1"
+# Only the formats the renderer can actually be handed. Ingest decides the
+# internal still profile and produces PNG; JPEG is here because a file placed in
+# the store by hand during support is a real situation and refusing to open it
+# would be unhelpful. Everything else is left out rather than carried: an image
+# decoder is a parser fed operator-supplied files, so the smaller the surface the
+# better.
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
+# Opening NVIDIA's management library by name at runtime. Nothing links against
+# it: a machine without it loses two numbers on a console and nothing else.
+libloading = "0.8.9"
+ovs-clock = { path = "../ovs-clock" }
+ovs-ipc = { path = "../ovs-ipc" }
+# The System screen's pictures. It has no dependencies of its own, which is a
+# requirement of the process at the *other* end rather than of this one — see
+# that crate's documentation before reaching for `ovs-ipc` there.
+ovs-console-wire = { path = "../ovs-console-wire" }
+# Reading the touchscreen and the mouse on the System screen's panel. Pure Rust
+# over /dev/input: no libinput, no seat, no compositor -- the ioctls a device's
+# axis ranges need are the whole reason this is a crate rather than a read loop.
+evdev = "0.13"
+ovs-proto.workspace = true
+ovs-types.workspace = true
+thiserror.workspace = true
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+# The ProRes decoder, and the only part of this crate that is not built
+# everywhere. FFmpeg's libraries are what every tool in the building already
+# decodes with, which matters more than it sounds: a clip that plays in the
+# editor and not on the server is a support call. Debian is the deployment
+# target and a Windows development machine builds the rest without
+# it; the tests that need it run where the screens are.
+#
+#   sudo apt install libavcodec-dev libavformat-dev libavutil-dev #                    libswscale-dev libclang-dev
+[target.'cfg(unix)'.dependencies]
+# One ioctl: `DRM_IOCTL_SET_MASTER`. Taking a display from the kernel is a
+# master's privilege, and there is no Vulkan call that asks to be one.
+libc = "0.2"
+
+# Only the four libraries a decoder needs: demuxing, decoding, and the colour
+# conversion between them. The default feature set also links avfilter,
+# avdevice and swresample — a filter graph, a capture-card layer and an audio
+# resampler, none of which this opens. Leaving them out is the same rule the
+# image decoder above follows: what is not linked cannot be a way in, and what
+# is not needed is one fewer package a deployment has to have.
+ffmpeg-next = { version = "7.1.0", default-features = false, features = [
+    "codec",
+    "format",
+    "software-scaling",
+] }
+
+[build-dependencies]
+# WGSL in, SPIR-V out. The GLSL front end was dropped with the shaders that used
+# it: naga's does not implement binding qualifiers, so a GLSL shader cannot name
+# a texture or a sampler.
+naga = { version = "30.0.1", features = ["wgsl-in", "spv-out"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"
