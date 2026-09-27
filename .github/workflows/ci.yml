@@ -18,6 +18,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # **Room for what this builds.** A debug build of this workspace is 13 GB,
+      # and `ovs-console` fetches a 1.5 GB Chromium on top of it; a runner
+      # starts with about 21 GB. It filled, and so completely that the runner
+      # could not write its own diagnostic log — which is why that failure
+      # arrived as a job with no output at all rather than as an error.
+      #
+      # None of what is removed here is anything this repository uses, and
+      # between them they are larger than the whole build.
+      - name: Make room
+        run: |
+          df -h / | tail -1
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+            /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          df -h / | tail -1
+
       # `ovs-renderer` and `ovs-media` link FFmpeg under `cfg(unix)`, and the
       # bindings need libclang for bindgen. None of it is
       # compiled on the Windows job, so this is the only place the linkage is
@@ -41,6 +56,14 @@ jobs:
 
       - name: Test
         run: cargo test --workspace
+
+      # What it cost, so that the next time this fills there is a number to
+      # compare against rather than a job that produced nothing.
+      - name: Say what is left
+        if: always()
+        run: |
+          df -h / | tail -1
+          du -sh target 2>/dev/null || true
 
       # The golden schema test above already fails on drift. This runs the
       # generator so a failure shows the actual diff rather than only the name
