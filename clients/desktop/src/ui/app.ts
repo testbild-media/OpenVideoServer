@@ -10,7 +10,8 @@
 // `live.ts`, `editor.ts`, `patch.ts`, `media.ts` — and none of them knows about
 // the others.
 
-import type { FoundServer } from '../main/discovery.js';
+import type { DiscoveryState, FoundServer } from '../main/discovery.js';
+import { whyEmpty } from '../shared/discovery-note.js';
 import type { ConnectionStatus } from '../shared/connection.js';
 import type { ShowView } from '../shared/view.js';
 import type { OvsBridge } from '../preload.js';
@@ -123,17 +124,14 @@ let connected = false;
  * machine — and on a fresh install it is the only thing that tells an operator
  * they are looking at a server at all.
  */
-function drawServers(servers: FoundServer[]): void {
+function drawServers(servers: FoundServer[], state?: DiscoveryState): void {
   // **Never hidden.** It used to disappear when the list was empty, on the
   // reasoning that an empty list is an apology. The owner, 2026-09-24: "ich sehe
   // sowieso kein fenster für server liste also kann ich da auch nie was sehen" —
   // which is the whole objection. A panel that is not there cannot say whether
   // it is searching, whether it found nothing, or whether this build even has
   // the feature, and the operator is left guessing about all three.
-  ui.foundNote.textContent =
-    servers.length === 0
-      ? 'None found yet. Type the address instead, or check the server is on this network.'
-      : '';
+  ui.foundNote.textContent = servers.length === 0 ? whyEmpty(state) : '';
   ui.foundNote.hidden = servers.length > 0;
   ui.foundList.replaceChildren();
 

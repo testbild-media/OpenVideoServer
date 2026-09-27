@@ -20,7 +20,7 @@ import type {
 } from '@ovs/schema';
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 
-import { browse, type FoundServer } from './discovery.js';
+import { browse, type DiscoveryState, type FoundServer } from './discovery.js';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -95,10 +95,14 @@ const session = new Session(
 // A browse that finds nothing costs one datagram every five seconds and changes
 // nothing on screen: the address box is there either way, which is what makes
 // this safe to run on a network that filters multicast.
-const servers = browse((found) => {
+const servers = browse((found, state) => {
   latestServers = found;
-  send('ovs:servers', found);
+  latestDiscovery = state;
+  send('ovs:servers', found, state);
 });
+
+/** The last thing the browse said about itself, for a window opening late. */
+let latestDiscovery: DiscoveryState | null = null;
 
 /** The last list, for a window that opens after the first answer arrived. */
 let latestServers: FoundServer[] = [];
@@ -111,9 +115,9 @@ export function foundServers(): FoundServer[] {
 }
 
 /** Sends to the window, if there is one to send to. */
-function send(channel: string, payload: unknown): void {
+function send(channel: string, ...payload: readonly unknown[]): void {
   if (window !== null && !window.isDestroyed()) {
-    window.webContents.send(channel, payload);
+    window.webContents.send(channel, ...payload);
   }
 }
 
@@ -188,7 +192,9 @@ function createWindow(): void {
   // What this client has already found, for a window that opened after the
   // answer arrived. Without it a window created a second late shows "looking…"
   // for ever, because the list only speaks when it changes.
-  window.webContents.once('did-finish-load', () => send('ovs:servers', latestServers));
+  window.webContents.once('did-finish-load', () =>
+    send('ovs:servers', latestServers, latestDiscovery ?? servers.state()),
+  );
   window.on('closed', () => {
     window = null;
   });

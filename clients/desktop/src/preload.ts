@@ -37,7 +37,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { Library, SaveResult } from './shared/api.js';
 import type { DroppedFile, HandDeclaration, QueueItem } from './shared/ingest.js';
 import type { Answer, Command, CommandResult } from './shared/types.js';
-import type { FoundServer } from './main/discovery.js';
+import type { DiscoveryState, FoundServer } from './main/discovery.js';
 import type { ConnectionStatus } from './shared/connection.js';
 import type { ShowView } from './shared/view.js';
 
@@ -366,7 +366,7 @@ export interface OvsBridge {
    * the rack is switched on. A list that stays empty is not a fault: a network
    * that filters multicast is ordinary, and the address box is still there.
    */
-  onServers(listener: (servers: FoundServer[]) => void): void;
+  onServers(listener: (servers: FoundServer[], state: DiscoveryState) => void): void;
   onView(listener: (view: ShowView) => void): void;
   /** What the server measures, about once a second, including its outputs. */
   onTelemetry(listener: (telemetry: ServerTelemetry) => void): void;
@@ -467,7 +467,9 @@ const bridge: OvsBridge = {
     ipcRenderer.on('ovs:status', (_event, status: ConnectionStatus) => listener(status));
   },
   onServers: (listener) => {
-    ipcRenderer.on('ovs:servers', (_event, servers: FoundServer[]) => listener(servers));
+    ipcRenderer.on('ovs:servers', (_event, servers: FoundServer[], state: DiscoveryState) =>
+      listener(servers, state),
+    );
   },
   onView: (listener) => {
     ipcRenderer.on('ovs:view', (_event, view: ShowView) => listener(view));

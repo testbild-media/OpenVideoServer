@@ -72,10 +72,42 @@ export interface FoundServer {
   seenAt: number;
 }
 
+/**
+ * What the browse is doing, for a list that is staying empty.
+ *
+ * **An empty list has three causes and they need different answers**, and until
+ * 2026-09-27 the client showed the same sentence for all of them: a socket that
+ * would not open, a machine whose inbound multicast is dropped, and a network
+ * with no server on it. The owner hit the middle one on a freshly installed
+ * client and there was nothing anywhere to say which it was.
+ */
+export interface DiscoveryState {
+  /** Why the socket could not be opened or bound, or null when it is. */
+  refused: string | null;
+  /** How many interfaces joined the multicast group. */
+  joined: number;
+  /** How many were tried, which is every IPv4 address this machine has. */
+  interfaces: number;
+  /** How many queries have gone out since this browse started. */
+  asked: number;
+  /**
+   * How many packets of any kind have arrived.
+   *
+   * **The one that names a firewall.** The group carries every service on the
+   * network, so a machine that has heard nothing at all has not heard the
+   * network; a machine that has heard plenty and found no server is on a
+   * network with no server on it. Those are different problems and they were
+   * the same sentence.
+   */
+  heard: number;
+}
+
 /** A browse that is running. */
 export interface Browser {
   /** Asks again, for a list an operator has just opened. */
   refresh(): void;
+  /** What it is doing, for a list that is staying empty. */
+  state(): DiscoveryState;
   /** Stops listening and closes the socket. */
   stop(): void;
 }
@@ -88,15 +120,24 @@ export interface Browser {
  * at all are all ordinary, and the answer to every one of them is a list that
  * stays empty while the address box keeps working.
  */
-export function browse(onFound: (servers: FoundServer[]) => void): Browser {
+export function browse(
+  onFound: (servers: FoundServer[], state: DiscoveryState) => void,
+): Browser {
   const found = new Map<string, FoundServer>();
   let socket: Socket | null = null;
   let timer: NodeJS.Timeout | null = null;
   let settle: NodeJS.Timeout | null = null;
+  const state: DiscoveryState = {
+    refused: null,
+    joined: 0,
+    interfaces: 0,
+    asked: 0,
+    heard: 0,
+  };
 
   const publish = (): void => {
     const servers = [...found.values()].sort((a, b) => a.name.localeCompare(b.name));
-    onFound(servers);
+    onFound(servers, { ...state });
   };
 
   const query = (): void => {
@@ -119,11 +160,13 @@ export function browse(onFound: (servers: FoundServer[]) => void): Browser {
     const addresses = interfaceAddresses();
     if (addresses.length === 0) {
       send(live, packet, null);
+      state.asked += 1;
       return;
     }
     for (const address of addresses) {
       send(live, packet, address);
     }
+    state.asked += 1;
   };
 
   try {
@@ -132,15 +175,23 @@ export function browse(onFound: (servers: FoundServer[]) => void): Browser {
     // avahi on a Linux one. Without it this would refuse to start on exactly
     // the machines most likely to have a server to find.
     socket = createSocket({ type: 'udp4', reuseAddr: true });
-  } catch {
-    return { refresh: () => undefined, stop: () => undefined };
+  } catch (error) {
+    state.refused = error instanceof Error ? error.message : String(error);
+    return {
+      refresh: () => undefined,
+      state: () => ({ ...state }),
+      stop: () => undefined,
+    };
   }
 
   const live = socket;
 
-  live.on('error', () => {
-    // Closed under us, or a send that failed late. Nothing to report: the list
-    // stops growing and the address box is still there.
+  live.on('error', (error) => {
+    // Closed under us, or a send that failed late. The list stops growing and
+    // the address box is still there — but it is written down now, because a
+    // socket that died is indistinguishable from a quiet network to everybody
+    // except this line.
+    state.refused = error instanceof Error ? error.message : String(error);
     try {
       live.close();
     } catch {
@@ -149,6 +200,11 @@ export function browse(onFound: (servers: FoundServer[]) => void): Browser {
   });
 
   live.on('message', (message) => {
+    // Before the parse, and whatever the parse makes of it. The group carries
+    // every service on this network, so most of these are for somebody else —
+    // which is exactly what makes the count worth having: hearing the chatter
+    // and finding no server is a different machine from hearing nothing at all.
+    state.heard += 1;
     try {
       const servers = read(message);
       let changed = false;
@@ -177,13 +233,18 @@ export function browse(onFound: (servers: FoundServer[]) => void): Browser {
   live.bind(PORT, () => {
     try {
       live.setMulticastTTL(255);
-      for (const address of interfaceAddresses()) {
+      const addresses = interfaceAddresses();
+      state.interfaces = addresses.length;
+      for (const address of addresses) {
         try {
           live.addMembership(GROUP, address);
+          state.joined += 1;
         } catch {
           // One interface of several, and the others may work. A virtual
           // adapter that cannot join is the common case on a developer's
-          // machine and says nothing about the venue's network.
+          // machine and says nothing about the venue's network. Counted rather
+          // than only shrugged at: none of them joining is a different machine
+          // from one of four not joining.
         }
       }
     } catch {
@@ -207,6 +268,7 @@ export function browse(onFound: (servers: FoundServer[]) => void): Browser {
 
   return {
     refresh: query,
+    state: () => ({ ...state }),
     stop: () => {
       if (timer !== null) {
         clearInterval(timer);
