@@ -12,8 +12,14 @@ On a fresh Debian machine with nothing on it but a network. A netinst has no
 
 ```bash
 sudo apt install curl -y
-curl -fsSL https://raw.githubusercontent.com/testbild-media/OpenVideoServer/main/install.sh | sudo sh
+export OVS_TOKEN=github_pat_...
+curl -fsSL -H "Authorization: Bearer $OVS_TOKEN" -H "Accept: application/vnd.github.raw" https://api.github.com/repos/testbild-media/OpenVideoServer/contents/install.sh | sudo -E sh
 ```
+
+The token is needed because the repository is private: an anonymous request
+sees no releases at all, which looks exactly like a release that carries no
+package for this architecture. The installer says so when it finds nothing and
+has no token.
 
 That fetches the newest published package for this architecture, checks it
 against the checksum published beside it, and installs it with `apt` so the

@@ -4,12 +4,28 @@
 # From nothing but a network. A Debian netinst has no curl, so:
 #
 #   sudo apt install curl -y
+#
+# **The repository is private**, so every request needs a token — a fine-grained
+# personal access token with read access to its contents. Nothing anonymous
+# reaches it, including this file:
+#
+#   export OVS_TOKEN=github_pat_...
+#   curl -fsSL -H "Authorization: Bearer $OVS_TOKEN" \
+#        -H "Accept: application/vnd.github.raw" \
+#        https://api.github.com/repos/testbild-media/OpenVideoServer/contents/install.sh \
+#     | sudo -E sh
+#
+# `sudo -E` keeps the variable, which is what stops the token becoming an
+# argument in the process list. `--token` takes one too, for a checkout.
+#
+# On a public repository neither is needed and the plain form works:
+#
 #   curl -fsSL https://raw.githubusercontent.com/testbild-media/OpenVideoServer/main/install.sh | sudo sh
 #
-# That takes everything from the newest GitHub release: the `.deb` for this
-# architecture, the checksum published beside it, and the Windows client, which
-# goes where the server's own download page looks. The graphics driver comes
-# from Debian's own archive.
+# Either way it takes everything from the newest GitHub release: the `.deb` for
+# this architecture, the checksum published beside it, and the Windows client,
+# which goes where the server's own download page looks. The graphics driver
+# comes from Debian's own archive.
 #
 # From a checkout, which builds what it installs instead of downloading it:
 #
@@ -19,6 +35,7 @@
 #   sudo ./install.sh --no-driver          leave the graphics driver alone
 #   sudo ./install.sh --no-client          do not fetch the Windows client
 #   sudo ./install.sh --no-reboot          and leave restarting to somebody
+#   sudo ./install.sh --token ghp_...      or OVS_TOKEN, for a private repository
 #
 # It works out which of those it is in: a checkout beside it means build, and
 # anything else means fetch the newest release. Either way it installs with apt
@@ -87,6 +104,9 @@ url=""
 driver=yes
 restart=yes
 client=yes
+# The environment first, because a token in a variable is a token that is not in
+# the process list. `--token` overrides it.
+token="${OVS_TOKEN:-}"
 while [ $# -gt 0 ]; do
   case "$1" in
     # Taken and ignored rather than refused. It used to fetch a compositor and a
@@ -101,6 +121,7 @@ while [ $# -gt 0 ]; do
     --no-driver) driver=no ;;
     --no-reboot) restart=no ;;
     --no-client) client=no ;;
+    --token) shift; token="${1:-}" ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
   shift
@@ -137,6 +158,89 @@ export DEBIAN_FRONTEND NEEDRESTART_SUSPEND
 # package's answer where there is one and `confold` keeps what an administrator
 # put there, which is what this server's own conffile wants: an edited
 # `ovs-nvidia.conf` survives an upgrade.
+# Asks GitHub something, with the token when there is one.
+github() {
+  if [ -n "$token" ]; then
+    curl -fsSL -H "Authorization: Bearer $token" "$1" 2>/dev/null
+  else
+    curl -fsSL "$1" 2>/dev/null
+  fi
+}
+
+# Downloads one thing from GitHub into a file.
+#
+# `Accept: application/octet-stream` is what turns an asset's API address into
+# the file rather than a description of it, and it is harmless on the public
+# one.
+download() {
+  if [ -n "$token" ]; then
+    curl -fSL --progress-bar \
+      -H "Authorization: Bearer $token" \
+      -H "Accept: application/octet-stream" \
+      "$1" -o "$2"
+  else
+    curl -fSL --progress-bar "$1" -o "$2"
+  fi
+}
+
+# One asset's address in `$release`, by the name it was published under.
+#
+# **Which address depends on the token.** The API answers with two for every
+# asset. `browser_download_url` is the public one and needs nothing;
+# `url` is the API's own, and it is the only one that works for a private
+# repository. The browser URL ignores a token and answers 404 there — which
+# reads exactly like a release that carries no such asset, and would have sent
+# somebody looking for a broken release rather than a missing header.
+#
+# Read with awk rather than a grep because an asset carries its *uploader's*
+# API url as well as its own, and a grep for `"url"` finds whichever came last.
+# The asset's own is the one ending `/releases/assets/<n>`; `name` comes before
+# it in the object and `browser_download_url` comes last, so by the time that
+# line is reached both belong to the same asset.
+asset_named() {
+  printf '%s' "$release" | tr ',' '\n' | awk -v want="$1" -v api="${token:+yes}" '
+    /"url": *"https:\/\/api\.github\.com\/repos\/.*\/releases\/assets\/[0-9]+"/ {
+      match($0, /https:[^"]*/)
+      mine = substr($0, RSTART, RLENGTH)
+    }
+    /"name": *"/ {
+      line = $0
+      sub(/.*"name": *"/, "", line)
+      sub(/".*/, "", line)
+      name = line
+    }
+    /"browser_download_url": *"/ {
+      match($0, /https:[^"]*/)
+      web = substr($0, RSTART, RLENGTH)
+      if (name ~ want) {
+        print (api == "yes" ? mine : web)
+        exit
+      }
+    }
+  '
+}
+
+# The same asset's published name, which is what it is saved as.
+#
+# Needed because an API address ends in a number: `basename` on it would save
+# the Windows client as `47`.
+asset_name() {
+  printf '%s' "$release" | tr ',' '\n' | awk -v want="$1" '
+    /"name": *"/ {
+      line = $0
+      sub(/.*"name": *"/, "", line)
+      sub(/".*/, "", line)
+      name = line
+    }
+    /"browser_download_url": *"/ {
+      if (name ~ want) {
+        print name
+        exit
+      }
+    }
+  '
+}
+
 apt_install() {
   apt-get install -y \
     -o Dpkg::Options::=--force-confdef \
@@ -175,23 +279,28 @@ if [ -z "$package" ]; then
   else
     echo "==> looking for the newest release for $architecture"
 
-    release=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null || true)
-    asset=$(printf '%s' "$release" \
-      | grep -o "\"browser_download_url\": *\"[^\"]*openvideoserver_[^\"]*_${architecture}\.deb\"" \
-      | head -1 | sed 's/.*"\(https[^"]*\)"/\1/' || true)
+    release=$(github "https://api.github.com/repos/$REPO/releases/latest" || true)
+    asset=$(asset_named "^openvideoserver_.*_${architecture}\\\\.deb\$")
+    sums=$(asset_named "^openvideoserver_.*_${architecture}\\\\.deb\\\\.sha256\$")
     # The Windows client from the same release, taken below once the package
     # has made the directory it goes in. Read here because this is where the
     # release is in hand, and asking for it twice would be asking GitHub for
     # the same answer twice and hoping it is the same one.
-    client_asset=$(printf '%s' "$release" \
-      | grep -o "\"browser_download_url\": *\"[^\"]*\.exe\"" \
-      | head -1 | sed 's/.*"\(https[^"]*\)"/\1/' || true)
+    client_asset=$(asset_named "\\\\.exe\$")
+    client_name=$(asset_name "\\\\.exe\$")
+    package_name=$(asset_name "^openvideoserver_.*_${architecture}\\\\.deb\$")
   fi
 
   if [ -z "$asset" ]; then
     echo "" >&2
     echo "No published release carries a package for $architecture." >&2
     echo "" >&2
+    if [ -z "$token" ]; then
+      echo "This repository is private, so an anonymous request sees no" >&2
+      echo "releases at all — which looks exactly like this. Give it a token:" >&2
+      echo "  sudo ./install.sh --token github_pat_...   (or set OVS_TOKEN)" >&2
+      echo "" >&2
+    fi
     echo "Name one to download:" >&2
     echo "  sudo ./install.sh --url https://example/openvideoserver_x.y.z_$architecture.deb" >&2
     echo "" >&2
@@ -203,15 +312,22 @@ if [ -z "$package" ]; then
 
   download=$(mktemp -d)
   trap 'rm -rf "$download"' EXIT
-  package="$download/$(basename "$asset")"
+  # By the name it was published under, not by the last part of the address:
+  # an asset's API address ends in a number, and `basename` on one would save
+  # the package as `312`.
+  name="${package_name:-$(basename "$asset")}"
+  package="$download/$name"
 
-  echo "==> downloading $(basename "$asset")"
-  curl -fSL --progress-bar "$asset" -o "$package"
+  echo "==> downloading $name"
+  download "$asset" "$package"
 
   # Checked against the checksum published beside it. A download that arrived
   # wrong is the one failure mode a package manager cannot catch for you, and a
   # server built from a truncated file fails later and stranger.
-  if curl -fsSL "$asset.sha256" -o "$package.sha256" 2>/dev/null; then
+  # Its own asset in the release rather than the package's address with
+  # `.sha256` stuck on the end — which was true of a browser URL and is not
+  # true of an API one.
+  if [ -n "${sums:-}" ] && download "$sums" "$package.sha256" 2>/dev/null; then
     echo "==> checking it"
     expected=$(awk '{print $1}' "$package.sha256")
     actual=$(sha256sum "$package" | awk '{print $1}')
@@ -266,16 +382,17 @@ if [ "$client" = yes ] && [ -n "${client_asset:-}" ]; then
   if [ -n "$(ls -A "$client_dir" 2>/dev/null)" ]; then
     echo "==> the package already carries a client; leaving it"
   else
-    echo "==> fetching the Windows client: $(basename "$client_asset")"
+    client_file="${client_name:-$(basename "$client_asset")}"
+    echo "==> fetching the Windows client: $client_file"
     mkdir -p "$client_dir"
-    if curl -fSL --progress-bar "$client_asset" -o "$client_dir/$(basename "$client_asset")"; then
-      chmod 0644 "$client_dir/$(basename "$client_asset")"
+    if download "$client_asset" "$client_dir/$client_file"; then
+      chmod 0644 "$client_dir/$client_file"
       echo "    the server's download page will offer it"
     else
       # Left tidy rather than half-downloaded: `downloads.rs` lists whatever is
       # in this directory by name and size, so a truncated file would be
       # offered as though it were the client.
-      rm -f "$client_dir/$(basename "$client_asset")"
+      rm -f "$client_dir/$client_file"
       echo "    could not fetch it; the server will offer no client" >&2
     fi
   fi

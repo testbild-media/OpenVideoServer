@@ -30,12 +30,30 @@ On a Debian machine with nothing on it but a network. A Debian netinst has no
 
 ```bash
 sudo apt install curl -y
-curl -fsSL https://raw.githubusercontent.com/testbild-media/OpenVideoServer/main/install.sh | sudo sh
 ```
 
-The script is [install.sh](install.sh) in the root of this repository, and the
-link above is that same file served raw. Nothing else is needed and nothing
-else is fetched from anywhere but this repository's releases.
+**This repository is private**, so every request needs a token — a fine-grained
+personal access token with read access to its contents. Nothing anonymous
+reaches it, including the script itself:
+
+```bash
+export OVS_TOKEN=github_pat_...
+curl -fsSL -H "Authorization: Bearer $OVS_TOKEN" -H "Accept: application/vnd.github.raw" https://api.github.com/repos/testbild-media/OpenVideoServer/contents/install.sh | sudo -E sh
+```
+
+`sudo -E` keeps the variable, which is what stops the token becoming an
+argument in the process list. From a checkout, `--token` takes one instead.
+
+The script is [install.sh](install.sh) in the root of this repository. Nothing
+else is needed and nothing else is fetched from anywhere but this repository's
+releases.
+
+Were the repository public, the short form would work and no token would be
+involved — the script asks for one only when it has one:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/testbild-media/OpenVideoServer/main/install.sh | sudo sh
+```
 
 It does all of this:
 
@@ -49,7 +67,8 @@ It does all of this:
 
 Each of the last three can be left out: `--no-client`, `--no-driver`,
 `--no-reboot`. `--url` names a package to install instead of looking for one,
-and `--package` installs one that is already on the machine.
+and `--package` installs one that is already on the machine. `--token` is the
+other way to give it the token, for a checkout rather than a pipe.
 
 Piping a script into a root shell is a real trust decision, and the honest
 mitigation is the checksum rather than a comment saying the pipe is safe. Read
@@ -67,7 +86,11 @@ places to get the same file:
   the show has the installer on it and its address is already on a screen.
 * **From the releases**, at
   [github.com/testbild-media/OpenVideoServer/releases](https://github.com/testbild-media/OpenVideoServer/releases),
-  which is where to start when there is no server yet.
+  which is where to start when there is no server yet. Signed in, since the
+  repository is private.
+
+The server's own page needs no token: the installer puts the client on the
+machine, and the machine hands it out.
 
 It is not code-signed, so Windows shows SmartScreen's "unrecognised app" the
 first time. Said here rather than discovered: an unsigned installer nobody
