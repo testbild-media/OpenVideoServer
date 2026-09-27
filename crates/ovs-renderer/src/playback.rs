@@ -2161,10 +2161,20 @@ mod tests {
         let mut playback = Playback::new(Instant::now(), true);
 
         playback.update(&state, &catalogue, &mut compositor, Instant::now());
+        // **Whatever it managed in that pass, it does not claim more than it
+        // has.** This used to insist on `false`, which is a statement about how
+        // fast the decoder is rather than about what the scheduler reports —
+        // and on 2026-09-27 a runner opened, decoded and uploaded a frame
+        // inside that single call, which is not a fault.
+        //
+        // The agreement is the thing worth pinning, and it is what the note
+        // above is about: a layer that says it is showing a frame it has not
+        // uploaded draws a quad sampling a texture that is not there, and that
+        // is white.
         assert_eq!(
-            playback.showing().get(&layer_id),
-            Some(&false),
-            "the layer is this scheduler's, and has no frame yet"
+            playback.showing().get(&layer_id).copied(),
+            Some(compositor.texture(layer_id).is_some()),
+            "the layer is this scheduler's, and says exactly what it has"
         );
 
         // And it arrives, without anything having had to be primed for it.
