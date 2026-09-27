@@ -87,6 +87,7 @@ jobs:
             mingw-w64-x86_64-snappy
             mingw-w64-x86_64-ffnvcodec-headers
             mingw-w64-x86_64-amf-headers
+            mingw-w64-x86_64-libvpl
 
       - name: Build the FFmpeg that may be shipped
         shell: msys2 {0}
