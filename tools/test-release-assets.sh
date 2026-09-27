@@ -9,6 +9,19 @@
 #
 # The fixture below is shaped like GitHub's real answer, including the uploader
 # object and an arm64 package and two checksums to pick wrongly from.
+#
+# **Its shape was checked against a real one**, on 2026-09-27, by fetching a
+# public release with 22 assets. Three things the awk depends on, all confirmed:
+#
+#   url, id, node_id, name, label, uploader, …, browser_download_url
+#
+# the asset's own `url` comes before its `name`; the uploader — which carries a
+# `url` of its own and is the whole reason this is not a grep — sits between the
+# name and the end; and `browser_download_url` is last, so by the time that line
+# is reached the name and the address in hand belong to the same asset.
+#
+# Checked there rather than here because a test that fetched somebody else's
+# release would fail the day they cut a new one.
 set -eu
 
 architecture=amd64
