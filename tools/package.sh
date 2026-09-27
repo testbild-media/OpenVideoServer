@@ -267,11 +267,15 @@ SHLIBS
 # the whole reason for shipping them is not to depend on Debian's. If FFmpeg
 # still appears in this answer, something linked the machine's copy, and the
 # guard below refuses to build such a package.
+# **Kept, not discarded.** This used to end `2>/dev/null`, and when the answer
+# came back empty there was nothing at all to say why — which is exactly what a
+# container without Chromium's libraries produces, and exactly how one silent
+# exit cost two CI runs to explain.
 ( cd "$scratch" && dpkg-shlibdeps -O --ignore-missing-info \
     -l"$OLDPWD/$staging$PRIVATE_LIB" -l"$OLDPWD/$staging$PRIVATE_LIB/cef" \
     "$OLDPWD/$staging/usr/bin/ovsd" "$OLDPWD/$staging/usr/bin/ovs-renderer" \
     "$OLDPWD/$staging/usr/bin/ovs-console" \
-    2>/dev/null ) > "$scratch/depends" || true
+    2>"$scratch/binaries.log" ) > "$scratch/depends" || true
 
 shlibs=$(sed -n 's/^shlibs:Depends=//p' "$scratch/depends" | head -1)
 
@@ -302,11 +306,36 @@ if [ ${#carried[@]} -gt 0 ]; then
   ( cd "$scratch" && dpkg-shlibdeps -O --ignore-missing-info \
       -l"$OLDPWD/$staging$PRIVATE_LIB" -l"$OLDPWD/$staging$PRIVATE_LIB/cef" \
       "${carried[@]}" \
-      2>/dev/null ) > "$scratch/carried-depends" || true
+      2>"$scratch/carried.log" ) > "$scratch/carried-depends" || true
 
   carried_shlibs=$(sed -n 's/^shlibs:Depends=//p' "$scratch/carried-depends" | head -1)
+  # `|| true` on the grep, because it answers 1 when it selects nothing — and
+  # with `pipefail` that ends this script. It did, with no message: the whole
+  # of the first container run's output was "working out the dependencies".
   carried_shlibs=$(printf '%s' "$carried_shlibs" | tr ',' '\n' | sed 's/^ *//' \
-    | grep -vE '^(libav[a-z]+[0-9]*|libsw[a-z]+[0-9]*) ' | paste -sd ',' - | sed 's/,/, /g')
+    | { grep -vE '^(libav[a-z]+[0-9]*|libsw[a-z]+[0-9]*) ' || true; } \
+    | paste -sd ',' - | sed 's/,/, /g')
+
+  # **A Chromium with no dependencies is not a package worth building.**
+  # `ovs-console` names only `libcef.so`; everything the browser needs is named
+  # by `libcef.so` and by nothing else here. If this came back empty, the
+  # libraries it needs are not installed on *this* machine, so `dpkg-shlibdeps`
+  # could not resolve them — and the package would install a System screen onto
+  # a minimal Debian and leave it unable to load its own library.
+  if [ -f "$staging$PRIVATE_LIB/cef/libcef.so" ] && [ -z "$carried_shlibs" ]; then
+    echo "" >&2
+    echo "this package ships Chromium and dpkg-shlibdeps named nothing for it." >&2
+    echo "the libraries libcef.so needs are not installed here, so the package" >&2
+    echo "would declare none of them and the System screen could not start." >&2
+    echo "" >&2
+    if [ -s "$scratch/carried.log" ]; then
+      echo "what dpkg-shlibdeps said:" >&2
+      sed 's/^/  /' "$scratch/carried.log" >&2
+      echo "" >&2
+    fi
+    echo "install what it names and build again." >&2
+    exit 1
+  fi
 
   if [ -n "$carried_shlibs" ]; then
     shlibs="${shlibs:+$shlibs, }$carried_shlibs"
@@ -318,11 +347,17 @@ fi
 # That is valid and apt takes the stronger, and collapsing it by hand was tried
 # and withdrawn: it is a cosmetic gain, and the shell it takes broke the build
 # twice before it worked once.
-shlibs=$(printf '%s' "$shlibs" | tr ',' '\n' | sed 's/^ *//' | grep -v '^$' \
-  | sort -u | paste -sd ',' - | sed 's/,/, /g')
+shlibs=$(printf '%s' "$shlibs" | tr ',' '\n' | sed 's/^ *//' \
+  | { grep -v '^$' || true; } | sort -u | paste -sd ',' - | sed 's/,/, /g')
 
 if [ -z "$shlibs" ]; then
+  # This could not be reached before: the pipeline above ended the script on
+  # the empty input it exists to report on.
   echo "dpkg-shlibdeps found nothing; the package will declare no library dependencies" >&2
+  if [ -s "$scratch/binaries.log" ]; then
+    echo "what it said:" >&2
+    sed 's/^/  /' "$scratch/binaries.log" >&2
+  fi
 fi
 
 # `adduser` for the system accounts the units run as; `systemd` because the

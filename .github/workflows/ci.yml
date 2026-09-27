@@ -121,6 +121,26 @@ jobs:
             dpkg-dev fakeroot \
             nasm libopenh264-dev zlib1g-dev \
             libclang-dev
+          # **What Chromium names.** Not to run it — nothing here starts a
+          # browser — but because `dpkg-shlibdeps` answers "which package owns
+          # this library" by asking the local dpkg, and can only name a
+          # dependency for a library that is installed. Without these it names
+          # none, and the package installs a System screen onto a minimal
+          # Debian with nothing to load it. `tools/package.sh` refuses to build
+          # such a package; this is what stops it having to.
+          #
+          # Each name checked against Debian's archive for trixie before it was
+          # written here: several carry the `t64` suffix from the 64-bit time_t
+          # transition, and guessing between `libasound2` and `libasound2t64`
+          # costs a whole run.
+          apt-get install -y --no-install-recommends \
+            libnss3 libnspr4 \
+            libatk1.0-0t64 libatk-bridge2.0-0t64 libatspi2.0-0t64 \
+            libcups2t64 libdrm2 libgbm1 libxkbcommon0 \
+            libx11-6 libxcb1 libxcomposite1 libxdamage1 libxext6 \
+            libxfixes3 libxrandr2 libxshmfence1 \
+            libasound2t64 libpango-1.0-0 libcairo2 \
+            libexpat1 libdbus-1-3 libglib2.0-0t64
         # **No libav*-dev.** The package builds its own FFmpeg, so Debian's is
         # not needed — and leaving it off makes this job a proof rather than a
         # hope: anything that tried to link the system's FFmpeg fails here,
