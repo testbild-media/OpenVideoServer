@@ -84,10 +84,22 @@ jobs:
 
   windows-build:
     # Development happens on Windows, so it must keep compiling there.
+    #
+    # The first time this ever ran — 2026-09-27, on the first push to GitHub —
+    # it did not: `ovs-renderer` used `std::os::fd` and `libc` in four places
+    # with no `cfg` gate, and called a `cfg(unix)` function unconditionally.
+    # None of it can run on Windows and all of it had to compile there, which
+    # is the whole point of this job and exactly what nothing was checking.
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - run: cargo test --workspace
+      # **Without `ovs-console`.** It links CEF, which is a gigabyte of
+      # distribution that has to be fetched and pinned to the crate's exact
+      # version — and the thing it builds is a browser window on a DRM
+      # connector, which is a Debian rack display and nothing a Windows machine
+      # has. Fetching CEF here to prove a Linux-only crate still compiles for a
+      # platform it never runs on is a long download for no answer.
+      - run: cargo test --workspace --exclude ovs-console
 
   package:
     # A server is installed from the `.deb`, so a break in the packaging is a

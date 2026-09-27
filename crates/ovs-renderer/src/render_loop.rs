@@ -1822,6 +1822,12 @@ impl RenderLoop {
     /// A faulted output contributes nothing, because its pieces stay dark
     ///. An output with no mapping contributes the whole
     /// composition, because that is what it shows.
+    /// **Unix, or a test.** Its one caller outside the tests is the masked
+    /// preview surface, which lives in the `cfg(unix)` half of `update_streams`
+    /// because it needs the encoder. Without this the Windows build carries a
+    /// method nothing calls, and `-D warnings` makes that an error rather than
+    /// a warning — which is how the workspace came to stop compiling there.
+    #[cfg(any(unix, test))]
     fn mapped_regions(&self) -> Vec<crate::mask::Region> {
         let mut regions = Vec::new();
         for output in &self.outputs {

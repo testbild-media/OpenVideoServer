@@ -154,6 +154,11 @@ mod tests {
     /// Builds a `/sys/class/drm` and a `/dev/dri/by-path` like the reference
     /// machine's: an Intel adapter with the laptop's panel, and an NVIDIA card
     /// with the Sony on it.
+    ///
+    /// Unix, because every test that uses it is: a `/sys/class/drm` built out
+    /// of symlinks is not a thing a Windows test can make, and without this the
+    /// Windows test build carries a helper nothing calls.
+    #[cfg(unix)]
     fn machine() -> tempfile::TempDir {
         let root = tempfile::tempdir().expect("a directory");
         let sysfs = root.path().join("drm");

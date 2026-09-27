@@ -1056,6 +1056,9 @@ struct Streamed {
 /// Its own runtime directory: the one place it can certainly create a socket,
 /// and the unit that makes that directory is the unit that runs it.
 /// `OVS_CONSOLE_SOCKET` moves it, for running the two by hand.
+///
+/// Unix, because its one caller is `build_console` and that is.
+#[cfg(unix)]
 fn console_socket() -> std::path::PathBuf {
     std::env::var("OVS_CONSOLE_SOCKET")
         .map_or_else(|_| "/run/ovs-console/console.sock".into(), Into::into)
@@ -1109,19 +1112,34 @@ fn follow_displays(
     render.release_displays();
 
     let (outputs, built) = build_panels(stage, &panels);
-    let console_output = console
-        .as_ref()
-        .and_then(|(connector, mode)| build_console(stage, connector, *mode));
 
     // What was actually built, which is not always what was wanted: a panel that
     // refuses a mode leaves its entry out, and the next pass tries again.
     stage.running = built;
-    *console_running = console_output
-        .as_ref()
-        .and(console.clone())
-        .filter(|_| console_output.is_some());
 
-    render.adopt_displays(outputs, console_output, now)
+    // **The console half is Unix's.** `build_console` puts a CEF window on a DRM
+    // connector and `adopt_displays` takes it only there, so calling either
+    // unconditionally is what stopped this binary compiling on Windows.
+    #[cfg(unix)]
+    {
+        let console_output = console
+            .as_ref()
+            .and_then(|(connector, mode)| build_console(stage, connector, *mode));
+        *console_running = console_output
+            .as_ref()
+            .and(console.clone())
+            .filter(|_| console_output.is_some());
+        render.adopt_displays(outputs, console_output, now)
+    }
+    #[cfg(not(unix))]
+    {
+        // There is no System screen to run, so there is none running. Said
+        // rather than left alone: `follow_displays` returned early above only
+        // when nothing changed, and leaving a stale value here would have this
+        // decide nothing changed the next time round.
+        *console_running = None;
+        render.adopt_displays(outputs, now)
+    }
 }
 
 /// Which connector the System screen should be on, and at what mode.

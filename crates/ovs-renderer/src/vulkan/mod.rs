@@ -561,6 +561,26 @@ impl VulkanContext {
         )
     }
 
+    /// This context's card node as a raw descriptor.
+    ///
+    /// A descriptor is a Unix idea and `VK_EXT_acquire_drm_display` is a Linux
+    /// extension, so the other half of this is here to compile rather than to
+    /// run: without the extension there is no `acquire_drm`, without
+    /// `/sys/class/drm` there is no `drm`, and every caller has already
+    /// returned on one of those. It panics rather than answering `-1`, because
+    /// an invalid descriptor handed to a driver is the kind of wrong that comes
+    /// back as something else entirely.
+    #[cfg(unix)]
+    fn card_fd(drm: &std::fs::File) -> std::os::fd::RawFd {
+        use std::os::fd::AsRawFd as _;
+        drm.as_raw_fd()
+    }
+
+    #[cfg(not(unix))]
+    fn card_fd(_drm: &std::fs::File) -> i32 {
+        unreachable!("a card node is only ever opened where /sys/class/drm is")
+    }
+
     /// Takes a display from the kernel, so a surface created for it lands on it.
     ///
     /// **Without this the display is still the kernel's**, and what a surface
@@ -594,11 +614,11 @@ impl VulkanContext {
             return;
         }
 
-        use std::os::fd::AsRawFd as _;
         // SAFETY: the physical device belongs to this instance, and the
         // descriptor is this device's own card node, opened by this context.
-        match unsafe { acquire.acquire_drm_display(self.physical_device, drm.as_raw_fd(), display) }
-        {
+        match unsafe {
+            acquire.acquire_drm_display(self.physical_device, Self::card_fd(drm), display)
+        } {
             Ok(()) => {
                 acquired.insert(raw);
                 tracing::info!("this display is now this renderer's rather than the kernel's");
@@ -630,6 +650,7 @@ impl VulkanContext {
     /// # Errors
     ///
     /// The kernel's own error.
+    #[cfg(unix)]
     pub fn become_drm_master(&self) -> std::io::Result<()> {
         /// `_IO('d', 0x1e)`, which on Linux is the type in the high byte.
         const DRM_IOCTL_SET_MASTER: libc::c_ulong = 0x641e;
@@ -641,15 +662,29 @@ impl VulkanContext {
             ));
         };
 
-        use std::os::fd::AsRawFd as _;
         // SAFETY: an ioctl with no argument on a descriptor this context owns.
         // Nothing is read from or written to userspace memory.
-        let result = unsafe { libc::ioctl(drm.as_raw_fd(), DRM_IOCTL_SET_MASTER, 0) };
+        let result = unsafe { libc::ioctl(Self::card_fd(drm), DRM_IOCTL_SET_MASTER, 0) };
         if result == 0 {
             Ok(())
         } else {
             Err(std::io::Error::last_os_error())
         }
+    }
+
+    /// Says that this is a Linux thing, which is the whole of it elsewhere.
+    ///
+    /// # Errors
+    ///
+    /// Always [`std::io::ErrorKind::Unsupported`]. There is no `ioctl` and no
+    /// card node to send one to, and a build that answered `Ok(())` would be
+    /// telling the caller it had taken something it cannot even name.
+    #[cfg(not(unix))]
+    pub fn become_drm_master(&self) -> std::io::Result<()> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "DRM mastering is Linux's; this build has no card node to ask",
+        ))
     }
 
     /// The display one kernel connector id names, if this card has it.
@@ -672,10 +707,9 @@ impl VulkanContext {
             });
         };
 
-        use std::os::fd::AsRawFd as _;
         // SAFETY: the physical device belongs to this instance, and the
         // descriptor is this device's own card node, opened by this context.
-        unsafe { acquire.get_drm_display(self.physical_device, drm.as_raw_fd(), connector_id) }
+        unsafe { acquire.get_drm_display(self.physical_device, Self::card_fd(drm), connector_id) }
             .map_err(|result| VulkanError::Call {
                 operation: "vkGetDrmDisplayEXT",
                 result,
@@ -699,9 +733,8 @@ impl VulkanContext {
             });
         };
 
-        use std::os::fd::AsRawFd as _;
         // SAFETY: as above.
-        unsafe { acquire.acquire_drm_display(self.physical_device, drm.as_raw_fd(), display) }
+        unsafe { acquire.acquire_drm_display(self.physical_device, Self::card_fd(drm), display) }
             .map_err(|result| VulkanError::Call {
                 operation: "vkAcquireDrmDisplayEXT",
                 result,
