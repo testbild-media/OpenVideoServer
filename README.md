@@ -30,9 +30,6 @@ On a Debian machine with nothing on it but a network. A Debian netinst has no
 
 ```bash
 sudo apt install curl -y
-```
-
-```bash
 curl -fsSL https://raw.githubusercontent.com/testbild-media/OpenVideoServer/main/install.sh | sudo sh
 ```
 
