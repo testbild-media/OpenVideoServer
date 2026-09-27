@@ -417,6 +417,20 @@ impl VulkanContext {
         // SAFETY: `create` is fully initialised above and outlives the call;
         // `enabled` borrows from `wanted`, which is alive here.
         let instance = unsafe { entry.create_instance(&create, None) }.map_err(|result| {
+            // **A loader with no driver behind it is a machine with no Vulkan**,
+            // not a call that went wrong. Windows ships `vulkan-1.dll` whether
+            // or not anything ever registered an ICD, so a machine with no
+            // graphics driver gets past the loader check and fails here — which
+            // is every CI runner, and is how 88 offscreen tests failed on the
+            // first Windows job instead of skipping the way they are written to.
+            //
+            // Only this one result. It means exactly "nothing here implements
+            // the version asked for", and widening it would start swallowing
+            // failures that are worth hearing about on a machine that does have
+            // a card.
+            if result == vk::Result::ERROR_INCOMPATIBLE_DRIVER {
+                return VulkanError::NoDevice(NoDevice::None);
+            }
             VulkanError::Call {
                 operation: "vkCreateInstance",
                 result,

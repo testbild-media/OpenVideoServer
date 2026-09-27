@@ -178,6 +178,40 @@ jobs:
       - name: Resolve the toolchain
         run: rustup show
 
+      # **The Chromium the System screen draws with.** `tools/package.sh`
+      # refuses to build a package without it, and rightly: the package installs
+      # a System screen, and one that cannot start is worse than one that is not
+      # there.
+      #
+      # The version is read out of the manifest rather than written here.
+      # `export-cef-dir` decides which distribution to fetch from *its own*
+      # version, so the newest one fetches a CEF that bindings pinned at
+      # 154.0.0 do not describe — and a binding set that does not match the
+      # library it calls is how CEF aborts inside `CefInitialize` with nothing
+      # in the log. This repository has paid for that once already; see the
+      # comment on the pin in `crates/ovs-console/Cargo.toml`.
+      - name: Read the CEF pin out of the manifest
+        id: cef
+        run: |
+          version=$(sed -n 's/^cef = .*"=\([0-9.]*\)".*/\1/p' crates/ovs-console/Cargo.toml)
+          test -n "$version" || { echo "no cef pin found in crates/ovs-console/Cargo.toml" >&2; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "the cef crate is pinned at $version"
+
+      # It is 1.5 GB, and it changes only when that pin does.
+      - name: Cache the distribution
+        id: cef-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/cef
+          key: cef-${{ steps.cef.outputs.version }}
+
+      - name: Fetch the distribution
+        if: steps.cef-cache.outputs.cache-hit != 'true'
+        run: |
+          cargo install export-cef-dir --version "=${{ steps.cef.outputs.version }}"
+          export-cef-dir -f ~/.local/share/cef
+
       - name: Build the package
         run: ./tools/package.sh
 
