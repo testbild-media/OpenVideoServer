@@ -12,6 +12,12 @@ env:
   # — which would quietly make every build here say `unknown`, and that constant
   # exists precisely so nobody has to guess which build they are holding.
   OVS_BUILD_COMMIT: ${{ github.sha }}
+  # **The Debian revision**, the part of a version after the hyphen. `dpkg`
+  # orders by it, so a new build is an upgrade rather than a reinstall — and
+  # two packages that are different software stop being called the same thing.
+  # The run number because it is monotonic, already here, and nobody has to
+  # remember to bump it.
+  OVS_PACKAGE_REVISION: ${{ github.run_number }}
   # The renderer is realtime infrastructure; a warning here is a defect later.
   RUSTFLAGS: -D warnings
 

@@ -48,32 +48,32 @@ release='{
     {
       "url": "https://api.github.com/repos/testbild-media/OpenVideoServer/releases/assets/12",
       "id": 12,
-      "name": "openvideoserver_0.2.0_arm64.deb",
+      "name": "openvideoserver_0.2.0-42_arm64.deb",
       "uploader": {
         "login": "someone",
         "url": "https://api.github.com/users/someone"
       },
-      "browser_download_url": "https://github.com/testbild-media/OpenVideoServer/releases/download/v0.2.0/openvideoserver_0.2.0_arm64.deb"
+      "browser_download_url": "https://github.com/testbild-media/OpenVideoServer/releases/download/v0.2.0/openvideoserver_0.2.0-42_arm64.deb"
     },
     {
       "url": "https://api.github.com/repos/testbild-media/OpenVideoServer/releases/assets/13",
       "id": 13,
-      "name": "openvideoserver_0.2.0_amd64.deb",
+      "name": "openvideoserver_0.2.0-42_amd64.deb",
       "uploader": {
         "login": "someone",
         "url": "https://api.github.com/users/someone"
       },
-      "browser_download_url": "https://github.com/testbild-media/OpenVideoServer/releases/download/v0.2.0/openvideoserver_0.2.0_amd64.deb"
+      "browser_download_url": "https://github.com/testbild-media/OpenVideoServer/releases/download/v0.2.0/openvideoserver_0.2.0-42_amd64.deb"
     },
     {
       "url": "https://api.github.com/repos/testbild-media/OpenVideoServer/releases/assets/14",
       "id": 14,
-      "name": "openvideoserver_0.2.0_amd64.deb.sha256",
+      "name": "openvideoserver_0.2.0-42_amd64.deb.sha256",
       "uploader": {
         "login": "someone",
         "url": "https://api.github.com/users/someone"
       },
-      "browser_download_url": "https://github.com/testbild-media/OpenVideoServer/releases/download/v0.2.0/openvideoserver_0.2.0_amd64.deb.sha256"
+      "browser_download_url": "https://github.com/testbild-media/OpenVideoServer/releases/download/v0.2.0/openvideoserver_0.2.0-42_amd64.deb.sha256"
     }
   ]
 }'
@@ -157,10 +157,10 @@ echo "without a token, the public addresses:"
 token=""
 check "the amd64 package, not the arm64 one" \
   "$(asset_named "$PKG")" \
-  "https://github.com/testbild-media/OpenVideoServer/releases/download/v0.2.0/openvideoserver_0.2.0_amd64.deb"
+  "https://github.com/testbild-media/OpenVideoServer/releases/download/v0.2.0/openvideoserver_0.2.0-42_amd64.deb"
 check "its checksum, which is a different asset" \
   "$(asset_named "$SUM")" \
-  "https://github.com/testbild-media/OpenVideoServer/releases/download/v0.2.0/openvideoserver_0.2.0_amd64.deb.sha256"
+  "https://github.com/testbild-media/OpenVideoServer/releases/download/v0.2.0/openvideoserver_0.2.0-42_amd64.deb.sha256"
 check "the Windows client" \
   "$(asset_named "$EXE")" \
   "https://github.com/testbild-media/OpenVideoServer/releases/download/v0.2.0/OpenVideoServer-0.2.0-setup.exe"
@@ -177,7 +177,7 @@ check "the Windows client" "$(asset_named "$EXE")" \
   "https://api.github.com/repos/testbild-media/OpenVideoServer/releases/assets/11"
 
 echo "and the names, because an API address ends in a number:"
-check "the package's name" "$(asset_name "$PKG")" "openvideoserver_0.2.0_amd64.deb"
+check "the package's name" "$(asset_name "$PKG")" "openvideoserver_0.2.0-42_amd64.deb"
 check "the client's name" "$(asset_name "$EXE")" "OpenVideoServer-0.2.0-setup.exe"
 
 echo "a release with no client in it:"

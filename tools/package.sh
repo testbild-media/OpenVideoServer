@@ -52,7 +52,28 @@ for argument in "$@"; do
   esac
 done
 
-version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+upstream=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+
+# **The revision, which is what tells two packages of one version apart.**
+#
+# Debian puts it after a hyphen, and `dpkg` orders by it: `0.2.0-7` is newer
+# than `0.2.0-6`, so a new build is an upgrade rather than a reinstall. Before
+# this, every build of 0.2.0 was `openvideoserver_0.2.0_amd64.deb`, apt
+# considered the installed one already current, and two packages that were
+# different software were indistinguishable by name, by apt and by eye. That
+# cost two installs on 2026-10-10 and the wrong conclusion both times.
+#
+# `OVS_PACKAGE_REVISION` is the CI run number: monotonic, already there, and
+# nobody has to remember to bump it. A build made by hand claims no number it
+# did not earn — `0~<date>` sorts below every CI build, which is correct, since
+# a package somebody made on their own machine should never look newer than
+# one that came out of the pipeline.
+revision="${OVS_PACKAGE_REVISION:-}"
+if [ -z "$revision" ]; then
+  revision="0~$(date -u +%Y%m%d%H%M%S)"
+fi
+version="${upstream}-${revision}"
+
 architecture=$(dpkg --print-architecture)
 package="openvideoserver"
 staging="target/package/${package}_${version}_${architecture}"

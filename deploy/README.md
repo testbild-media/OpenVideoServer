@@ -60,7 +60,7 @@ sudo ./install.sh --no-reboot     # and the restart with it
 From a package published somewhere, named outright:
 
 ```bash
-sudo ./install.sh --url https://github.com/testbild-media/OpenVideoServer/releases/download/v0.2.0/openvideoserver_0.2.0_amd64.deb
+sudo ./install.sh --url https://github.com/testbild-media/OpenVideoServer/releases/download/v0.2.0/openvideoserver_0.2.0-1_amd64.deb
 ```
 
 With no checkout, no `--url` and no published release, it falls back to the
@@ -77,7 +77,7 @@ package somewhere else and carry it:
 
 ```bash
 ./tools/package.sh                                    # on a build machine
-sudo apt install ./openvideoserver_0.2.0_amd64.deb    # on the server
+sudo apt install ./openvideoserver_0.2.0-1_amd64.deb    # on the server
 ```
 
 Either way the package creates the `ovs`, `ovs-renderer` and `ovs-console`

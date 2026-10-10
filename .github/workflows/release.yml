@@ -48,6 +48,12 @@ env:
   # — which would quietly make every published build say `unknown`, and that
   # constant exists precisely so nobody has to guess which build they installed.
   OVS_BUILD_COMMIT: ${{ github.sha }}
+  # **The Debian revision**, the part of a version after the hyphen. `dpkg`
+  # orders by it, so a new build is an upgrade rather than a reinstall — and
+  # two packages that are different software stop being called the same thing.
+  # The run number because it is monotonic, already here, and nobody has to
+  # remember to bump it.
+  OVS_PACKAGE_REVISION: ${{ github.run_number }}
 
 jobs:
   windows-client:
@@ -117,10 +123,17 @@ jobs:
       # `--release` refuses to fall back to the npm FFmpeg. Belt and braces
       # with the check above: that one proves the vendored build is clean, and
       # this one proves the vendored build is the one that got packaged.
+      # `extraMetadata.version` puts the revision in the installer's filename
+      # *and* in what the running client reports, which is the version the
+      # server sees in the handshake. One flag, both places.
       - name: Build the installer
-        run: npm run client:dist:win
+        shell: bash
+        run: |
+          upstream=$(node -p "require('./clients/desktop/package.json').version")
+          npm run client:dist:win -- \
+            --config.extraMetadata.version="$upstream-$OVS_PACKAGE_REVISION"
 
-      - name: Say what came out
+      - name: Say what it is called
         shell: bash
         run: ls -l build/client/*.exe
 
