@@ -7,6 +7,11 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # **The commit, told rather than asked for.** `ovs-types`' build script reads
+  # it from git, and git in a container often refuses a checkout it does not own
+  # — which would quietly make every build here say `unknown`, and that constant
+  # exists precisely so nobody has to guess which build they are holding.
+  OVS_BUILD_COMMIT: ${{ github.sha }}
   # The renderer is realtime infrastructure; a warning here is a defect later.
   RUSTFLAGS: -D warnings
 

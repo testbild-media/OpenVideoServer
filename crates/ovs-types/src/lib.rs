@@ -28,6 +28,20 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs, clippy::all)]
 
+/// Which commit this was built from, for a package that cannot say so itself.
+///
+/// **Every build of 0.2.0 is called `openvideoserver_0.2.0_amd64.deb`**,
+/// because the Debian version is read out of `Cargo.toml`. Two packages naming
+/// the same version can be different software, and on 2026-10-10 that cost two
+/// installs: a fix was pushed, a package was installed, the fix was not in it,
+/// and the only symptom was an unrelated error about a port.
+///
+/// `unknown` for a build from a source tarball, which has no history to ask,
+/// and `<commit>-modified` for one with uncommitted changes in it — which is
+/// precisely the build somebody is holding when they cannot work out why their
+/// fix is missing.
+pub const BUILD_COMMIT: &str = env!("OVS_BUILD_COMMIT");
+
 pub mod account;
 pub mod config;
 pub mod depth;

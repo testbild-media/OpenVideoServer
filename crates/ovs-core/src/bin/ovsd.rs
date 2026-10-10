@@ -157,6 +157,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let database_path = data_dir.join("ovs.db");
     tracing::info!(path = %database_path.display(), "opening database");
     let database = Database::open(&database_path)?;
+    tracing::info!(
+        version = env!("CARGO_PKG_VERSION"),
+        commit = ovs_types::BUILD_COMMIT,
+        "ovsd"
+    );
     tracing::info!(version = database.schema_version()?, "database ready");
 
     // Media lives beside the database, under the same data directory, so a

@@ -68,6 +68,16 @@ fn main() -> ExitCode {
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
+    // **Before anything else it might say.** Every build of 0.2.0 carries the
+    // same version, so this is the only thing that tells one from another —
+    // and the question it answers, "is the fix I just made in this", cost two
+    // installs on 2026-10-10 because nothing could answer it.
+    tracing::info!(
+        version = env!("CARGO_PKG_VERSION"),
+        commit = ovs_types::BUILD_COMMIT,
+        "ovs-renderer"
+    );
+
     // **Anything unrecognised is refused.** These used to be two `any()` scans
     // with everything else falling through to starting a renderer — so a
     // misspelt flag, or the right flag on a build older than it, starts a
@@ -611,6 +621,14 @@ fn list_ndi_sources() -> ExitCode {
     // answers in well under a second on a healthy network; this is five.
     const PATIENCE_MS: u32 = 5_000;
 
+    // Before the load, not after it: the run where somebody most wants to know
+    // which build they are holding is the one that fails.
+    println!(
+        "ovs-renderer {} ({})",
+        env!("CARGO_PKG_VERSION"),
+        ovs_types::BUILD_COMMIT
+    );
+
     let ndi = match ovs_renderer::ndi::Ndi::load() {
         Ok(ndi) => ndi,
         Err(error) => {
@@ -652,6 +670,11 @@ fn list_ndi_sources() -> ExitCode {
 }
 
 fn list_displays() -> Result<(), Box<dyn std::error::Error>> {
+    println!(
+        "ovs-renderer {} ({})",
+        env!("CARGO_PKG_VERSION"),
+        ovs_types::BUILD_COMMIT
+    );
     let context = VulkanContext::open("ovs-renderer", wanted_device().as_deref())?;
     let summary = context.summary();
     println!("{} ({})", summary.name, summary.kind);
