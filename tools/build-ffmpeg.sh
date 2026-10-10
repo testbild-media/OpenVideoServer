@@ -303,6 +303,42 @@ verify() {
     fi
   done
 
+  # **Nothing it cannot find on a machine that has only the installer.**
+  #
+  # A binary that needs a DLL beside it works on every machine it was built on
+  # and fails on every machine it is installed on, which is a fault no care at
+  # the build end can catch. It failed exactly that way once (owner, 2026-10-10)
+  # and the process said nothing at all, because a process that will not start
+  # has no stderr to say it with.
+  #
+  # The rule is a name test rather than a list of Windows' own DLLs: a system
+  # DLL is `KERNEL32.dll` or `ole32.dll`, and the things that go missing are
+  # `libstdc++-6.dll`, `libwinpthread-1.dll`, `zlib1.dll` — ports, carrying the
+  # names ports have.
+  if [ -n "$EXE" ] && ! command -v objdump > /dev/null; then
+    # Said rather than skipped. The thing this catches cannot be seen on the
+    # machine that builds it, so a check that quietly did not run would leave
+    # exactly the impression that it had.
+    echo "  no objdump, so what these binaries need could not be checked" >&2
+    echo "    (mingw-w64-x86_64-toolchain carries it; install it and build again)" >&2
+    failures=$((failures + 1))
+  elif [ -n "$EXE" ]; then
+    for binary in "ffmpeg$EXE" "ffprobe$EXE"; do
+      [ -x "$where/$binary" ] || continue
+      local carried
+      carried=$(objdump -p "$where/$binary" 2>/dev/null \
+        | sed -n 's/^[[:space:]]*DLL Name:[[:space:]]*//p' \
+        | grep -iE '^(lib|zlib|msys-|avcodec|avformat|avutil|swscale|swresample)' \
+        || true)
+      if [ -n "$carried" ]; then
+        echo "  $binary needs libraries it does not ship:" >&2
+        printf '    %s\n' $carried >&2
+        echo "    (build with --extra-ldflags=-static)" >&2
+        failures=$((failures + 1))
+      fi
+    done
+  fi
+
   # The licence material the LGPL requires to travel with the binaries.
   for file in COPYING.LGPLv2.1 CONFIGURATION.txt; do
     if [ ! -s "$where/$file" ]; then
@@ -413,11 +449,25 @@ fi
 # Static executables for the client, shared libraries for the server. A client
 # ships one file that runs anywhere; a server links these into two processes and
 # wants one copy of each.
+#
+# **`--enable-static` is not the whole of "runs anywhere".** It makes FFmpeg's
+# own libraries static and leaves everything else a DLL: the MinGW runtime, and
+# every MSYS2 package the configure line enables. Snappy is C++, so
+# `libstdc++-6.dll` on its own would be enough to stop it. Those are on the
+# PATH where it is built and nowhere on a machine that only has the installer,
+# and Windows then refuses to start the process with nothing on stderr — which
+# is what the owner met on 2026-10-10, "Command failed" and not one word about
+# why, on every file he dropped.
+#
+# `-static` to the linker is what actually makes it one file. Only for the
+# client: the server's libraries are meant to be shared, by all three processes
+# that link them.
 if [ "$profile" = server ]; then
   sharing="--enable-shared --disable-static"
   decoders="$DECODERS,$CUVID_DECODERS"
 else
   sharing="--disable-shared --enable-static"
+  sharing="$sharing --extra-ldflags=-static"
   decoders="$DECODERS"
 fi
 readonly sharing decoders

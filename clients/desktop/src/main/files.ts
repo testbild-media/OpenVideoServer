@@ -13,6 +13,8 @@
 // by hand instead, which is the honest failure.
 
 import { execFile, spawn } from 'node:child_process';
+
+import { probeFailure } from '../shared/probe-failure.js';
 import { createHash } from 'node:crypto';
 import { createReadStream, existsSync } from 'node:fs';
 import { mkdtemp, open, rm, stat } from 'node:fs/promises';
@@ -685,6 +687,12 @@ export const files: IngestFiles = {
 
 // --- the small parts ---------------------------------------------------------
 
+/**
+ * What Windows exits a process with when it cannot find a library it needs.
+ *
+ * `STATUS_DLL_NOT_FOUND`. Node reports it unsigned on some paths and signed on
+ * others, which is why both are checked where this is used.
+ */
 /** Runs a command and gives back what it printed. */
 function run(command: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -694,10 +702,17 @@ function run(command: string, args: string[]): Promise<string> {
       { timeout: PROBE_TIMEOUT_MS, maxBuffer: PROBE_OUTPUT_LIMIT, windowsHide: true },
       (error, stdout, stderr) => {
         if (error) {
-          // The prober's own words when it had any, because "exited with code
-          // 1" tells an operator nothing about the file they dropped.
-          const said = stderr.trim();
-          reject(said === '' ? error : Object.assign(new Error(said), { code: (error as NodeJS.ErrnoException).code }));
+          // `code` is the exit status when the process ran, and a string like
+          // `ENOENT` when it could not be started at all.
+          // `NodeJS.ErrnoException` only knows about the second.
+          const status: number | string | undefined = (
+            error as Error & { code?: number | string }
+          ).code;
+          reject(
+            Object.assign(new Error(probeFailure(command, stderr, status)), {
+              code: (error as NodeJS.ErrnoException).code,
+            }),
+          );
           return;
         }
         resolve(stdout);
