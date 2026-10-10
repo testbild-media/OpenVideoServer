@@ -1,6 +1,6 @@
 {
   "name": "@ovs/schema",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "private": true,
   "description": "TypeScript types generated from the OpenVideoServer shared schema. Do not edit by hand.",
   "type": "module",
