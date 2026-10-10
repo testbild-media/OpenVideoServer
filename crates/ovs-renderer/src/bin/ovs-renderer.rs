@@ -68,18 +68,41 @@ fn main() -> ExitCode {
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
-    if std::env::args().any(|argument| argument == "--displays") {
-        return match list_displays() {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => {
-                tracing::error!("{error}");
-                ExitCode::FAILURE
+    // **Anything unrecognised is refused.** These used to be two `any()` scans
+    // with everything else falling through to starting a renderer — so a
+    // misspelt flag, or the right flag on a build older than it, starts a
+    // second renderer beside the running one and says `Address already in use`.
+    // That names a port and not the one thing that is wrong (owner,
+    // 2026-10-10, running `--ndi-sources` against the installed package).
+    let mut asked: Option<&'static str> = None;
+    for argument in std::env::args().skip(1) {
+        match argument.as_str() {
+            "--displays" => asked = Some("--displays"),
+            "--ndi-sources" => asked = Some("--ndi-sources"),
+            other => {
+                eprintln!("ovs-renderer: no such option: {other}");
+                eprintln!();
+                eprintln!("  --displays      what this machine is plugged into");
+                eprintln!("  --ndi-sources   what NDI it can see on the network");
+                eprintln!();
+                eprintln!("With none of them it runs the renderer.");
+                return ExitCode::FAILURE;
             }
-        };
+        }
     }
 
-    if std::env::args().any(|argument| argument == "--ndi-sources") {
-        return list_ndi_sources();
+    match asked {
+        Some("--displays") => {
+            return match list_displays() {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    tracing::error!("{error}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some("--ndi-sources") => return list_ndi_sources(),
+        _ => {}
     }
 
     match run() {
