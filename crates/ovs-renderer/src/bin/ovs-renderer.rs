@@ -78,6 +78,10 @@ fn main() -> ExitCode {
         };
     }
 
+    if std::env::args().any(|argument| argument == "--ndi-sources") {
+        return list_ndi_sources();
+    }
+
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
@@ -563,6 +567,64 @@ fn wanted_device() -> Option<String> {
 /// Reports rather than decides. Which connector carries a show is server
 /// configuration and is never inferred from what happens to be plugged in
 ///; this is how an operator finds out what the choices are.
+/// What this machine can see on the network, asked once and printed.
+///
+/// **The question that had no way of being asked.** The client shows an empty
+/// list; the service says nothing unless it found something; and between them
+/// there was nothing that would say whether a machine was looking and finding
+/// nothing, or not looking. A camera on one machine's Studio Monitor and an
+/// empty list on the server is two facts about two machines and no fact about
+/// the one that matters (owner, 2026-10-10).
+///
+/// Run as the renderer's own user, because what a service can see and what a
+/// login shell can see are not always the same thing:
+///
+/// ```text
+/// sudo -u ovs-renderer /usr/bin/ovs-renderer --ndi-sources
+/// ```
+fn list_ndi_sources() -> ExitCode {
+    // Long enough for a sender that answers slowly, short enough to be a
+    // command somebody runs rather than a thing they wait for. Discovery
+    // answers in well under a second on a healthy network; this is five.
+    const PATIENCE_MS: u32 = 5_000;
+
+    let ndi = match ovs_renderer::ndi::Ndi::load() {
+        Ok(ndi) => ndi,
+        Err(error) => {
+            println!("{error}");
+            println!();
+            println!("deploy/README.md says where the runtime comes from and where to put it.");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    println!("the NDI runtime is here");
+    println!("looking for {} ms", PATIENCE_MS);
+
+    let sources = ndi.sources(PATIENCE_MS);
+    if sources.is_empty() {
+        println!();
+        println!("nothing answered.");
+        println!();
+        println!("Discovery is mDNS, so a sender answers only if it is on a network this");
+        println!("machine can hear multicast on, and only if it is in a group this machine");
+        println!("looks at. Things worth knowing, in the order they go wrong:");
+        println!();
+        println!("  - whether the sender is on this machine's own subnet;");
+        println!("  - whether it sends in the default NDI group, which is all this looks at;");
+        println!("  - whether anything between them forwards multicast.");
+        return ExitCode::FAILURE;
+    }
+
+    println!();
+    for name in &sources {
+        println!("  {name}");
+    }
+    println!();
+    println!("{} source(s). A server that is running will offer these.", sources.len());
+    ExitCode::SUCCESS
+}
+
 fn list_displays() -> Result<(), Box<dyn std::error::Error>> {
     let context = VulkanContext::open("ovs-renderer", wanted_device().as_deref())?;
     let summary = context.summary();
