@@ -62,8 +62,26 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+      # Annotated the way the Test step below is, and for the same reason: this
+      # builds the whole workspace, `ovs-console` included, which fetches the
+      # Chromium distribution if no copy is on the machine. A failure here is
+      # a missing warning, a missing gigabyte of disc or a download that went
+      # wrong, and from outside all three read as "exit code 101".
       - name: Lint
-        run: cargo clippy --all-targets --workspace -- -D warnings
+        shell: bash
+        run: |
+          status=0
+          cargo clippy --all-targets --workspace -- -D warnings > ci-lint.log 2>&1 || status=$?
+          tail -n 20 ci-lint.log || true
+          if [ "$status" -ne 0 ]; then
+            escape() { sed -e 's/%/%25/g' -e 's/\r$//' | awk '{ printf "%s%%0A", $0 }'; }
+            printf '::error title=%s::%s\n' 'what the lint said' \
+              "$(grep -E '^(error|warning)' ci-lint.log | head -n 30 | escape)"
+            printf '::error title=%s::%s\n' 'the tail of cargo clippy' \
+              "$(tail -n 50 ci-lint.log | escape)"
+            df -h / | tail -1
+          fi
+          exit "$status"
 
       # **The tests, and a failure that names itself.** Reading an Actions log
       # needs somebody signed in and downloading one needs a token; a workflow

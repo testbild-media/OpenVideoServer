@@ -378,6 +378,7 @@ mod tests {
     use super::*;
     use crate::media::SyntheticSource;
     use ovs_types::geometry::SizePx;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{Duration, Instant};
 
     /// A pool whose source takes a known time and needs no file.
@@ -497,30 +498,48 @@ mod tests {
         // per clip; in a pool it is about one delay, and the difference is what an
         // operator sees as the second half of a cue arriving late.
         //
+        // **Counted, not timed.** This used to assert that the whole thing
+        // finished in less than half of one-delay-each, which is a measurement
+        // of the machine: it went red on a CI runner on 2026-10-10 while
+        // passing twenty-five times out of twenty-five on the machine it was
+        // written on, and a test that fails because somebody else's build is
+        // also running says nothing about this code. What the pool promises is
+        // that opens overlap, so that is what this watches -- the most that
+        // were ever in flight at once. The sleep is still there, to give the
+        // others time to arrive; nothing is asserted about how long it took.
+        //
         // Returns early on a machine too small to have a pool, where one after
-        // another is the honest answer and this would be asserting about the
-        // machine rather than about the code.
-        const DELAY: Duration = Duration::from_millis(120);
-        let pool = slow_pool(DELAY);
+        // another is the honest answer and there is nothing here to prove.
+        let inside = Arc::new(AtomicUsize::new(0));
+        let most = Arc::new(AtomicUsize::new(0));
+        let pool = {
+            let inside = Arc::clone(&inside);
+            let most = Arc::clone(&most);
+            Changeover::with_source(Arc::new(move |_what: &OpeningFor, _path: &Path| {
+                let now = inside.fetch_add(1, Ordering::SeqCst) + 1;
+                most.fetch_max(now, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(120));
+                inside.fetch_sub(1, Ordering::SeqCst);
+                Ok(
+                    Box::new(SyntheticSource::new(SizePx::new(64, 64), 1000, 25))
+                        as Box<dyn FrameSource>,
+                )
+            }))
+        };
         let workers = pool.workers.len();
         if workers < 2 {
             return;
         }
 
-        let began = Instant::now();
         for trigger in 1..=workers as u64 {
             assert!(pool.open(what(trigger), PathBuf::from("anything")));
         }
         let all = wait_for(&pool, workers);
-        let elapsed = began.elapsed();
 
         assert_eq!(all.len(), workers, "all of them opened");
-        // Generous, because this is a timing test on a machine that may be doing
-        // something else: the point is that it is nearer one delay than it is to
-        // one delay per clip.
         assert!(
-            elapsed < DELAY * workers as u32 / 2,
-            "{workers} clips took {elapsed:?}, which is no better than one at a time"
+            most.load(Ordering::SeqCst) > 1,
+            "{workers} clips opened one after another; never two at once"
         );
     }
 
