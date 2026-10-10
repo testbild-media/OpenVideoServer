@@ -66,7 +66,34 @@ jobs:
         run: cargo clippy --all-targets --workspace -- -D warnings
 
       - name: Test
-        run: cargo test --workspace
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --workspace 2>&1 | tee "$RUNNER_TEMP/test.log"
+
+      # **So a failing test names itself.** Reading an Actions log needs
+      # somebody signed in and downloading one needs a token; a workflow
+      # command comes back through the public API as an annotation on the run.
+      # Without this, a test that fails only on a runner is a job that says
+      # "exit code 101" and nothing else -- which is where this one stood for
+      # three runs on 2026-10-10.
+      - name: Say which test failed
+        if: failure()
+        shell: bash
+        run: |
+          log="$RUNNER_TEMP/test.log"
+          if [ ! -f "$log" ]; then
+            echo '::error title=cargo test::The step wrote no log, so it died before the tests ran.'
+            exit 0
+          fi
+          # The failure list and the panics, which is what names the test, and
+          # then the tail for whatever else was on the way out. Per cents and
+          # newlines escaped the way the runner wants them.
+          escape() { sed -e 's/%/%25/g' -e 's/\r$//' | awk '{ printf "%s%%0A", $0 }'; }
+          named=$(grep -E '^(test .* FAILED|failures:|\s+[a-z_:]+)$|panicked at' "$log" | head -n 60 | escape)
+          printf '::error title=%s::%s\n' 'the tests that failed' "$named"
+          printf '::error title=%s::%s\n' 'the tail of cargo test' "$(tail -n 60 "$log" | escape)"
+          exit 0
 
       # What it cost, so that the next time this fills there is a number to
       # compare against rather than a job that produced nothing.
@@ -133,7 +160,35 @@ jobs:
       # connector, which is a Debian rack display and nothing a Windows machine
       # has. Fetching CEF here to prove a Linux-only crate still compiles for a
       # platform it never runs on is a long download for no answer.
-      - run: cargo test --workspace --exclude ovs-console
+      - name: Test
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --workspace --exclude ovs-console 2>&1 | tee "$RUNNER_TEMP/test.log"
+
+      # **So a failing test names itself.** Reading an Actions log needs
+      # somebody signed in and downloading one needs a token; a workflow
+      # command comes back through the public API as an annotation on the run.
+      # Without this, a test that fails only on a runner is a job that says
+      # "exit code 101" and nothing else -- which is where this one stood for
+      # three runs on 2026-10-10.
+      - name: Say which test failed
+        if: failure()
+        shell: bash
+        run: |
+          log="$RUNNER_TEMP/test.log"
+          if [ ! -f "$log" ]; then
+            echo '::error title=cargo test::The step wrote no log, so it died before the tests ran.'
+            exit 0
+          fi
+          # The failure list and the panics, which is what names the test, and
+          # then the tail for whatever else was on the way out. Per cents and
+          # newlines escaped the way the runner wants them.
+          escape() { sed -e 's/%/%25/g' -e 's/\r$//' | awk '{ printf "%s%%0A", $0 }'; }
+          named=$(grep -E '^(test .* FAILED|failures:|\s+[a-z_:]+)$|panicked at' "$log" | head -n 60 | escape)
+          printf '::error title=%s::%s\n' 'the tests that failed' "$named"
+          printf '::error title=%s::%s\n' 'the tail of cargo test' "$(tail -n 60 "$log" | escape)"
+          exit 0
 
   package:
     # A server is installed from the `.deb`, so a break in the packaging is a
