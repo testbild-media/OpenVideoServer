@@ -147,7 +147,13 @@ be able to make the second.
 
   **Installing it.** The renderer opens `libndi.so.6` by name when something
   first asks for it, so all that is needed is that library, somewhere the loader
-  looks. From the Linux SDK:
+  looks.
+
+  The SDK comes from NDI — <https://ndi.video/for-developers/ndi-sdk/> — and
+  not from here. It is not in this repository, not in the package, and not on
+  the server: the same licence that stops the package carrying the runtime
+  stops it carrying the SDK. Download *NDI SDK for Linux*, put the archive on
+  the machine, and:
 
   ```bash
   tar xzf Install_NDI_SDK_v6_Linux.tar.gz && sh ./Install_NDI_SDK_v6_Linux.sh
