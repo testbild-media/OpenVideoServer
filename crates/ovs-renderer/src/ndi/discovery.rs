@@ -121,10 +121,15 @@ fn look(
         return;
     };
 
-    let mut last: Vec<String> = Vec::new();
+    // **Nothing, rather than an empty list.** Started as `Vec::new()`, the
+    // first look at a network with no senders on it matched and said nothing —
+    // so a journal showed the runtime loading and then silence, which reads
+    // exactly like a discovery thread that never ran (owner, 2026-10-10). The
+    // first answer is always a change now, and is always said.
+    let mut last: Option<Vec<String>> = None;
     while !stop.load(Ordering::Acquire) {
         let now = finder.look(LOOK_MS);
-        if now == last {
+        if last.as_ref() == Some(&now) {
             continue;
         }
 
@@ -139,6 +144,6 @@ fn look(
         );
         found.store(Arc::new(now.clone()));
         changed(now.clone());
-        last = now;
+        last = Some(now);
     }
 }
