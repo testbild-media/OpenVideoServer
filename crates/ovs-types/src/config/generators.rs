@@ -179,6 +179,66 @@ pub const TEST_PATTERN_V1: GeneratorManifest = GeneratorManifest {
     ],
 };
 
+/// The slowest flash that is still a flash, in hertz.
+///
+/// **My choice, not a measurement.** Below this it is a light being switched
+/// rather than a strobe, and a parameter has to have a bottom.
+pub const MIN_STROBE_HZ: f64 = 0.5;
+
+/// The fastest flash any supported output can actually show, in hertz.
+///
+/// Derived rather than picked: a flash needs one frame lit and one frame dark,
+/// so the most an output can show is half its own rate, and the fastest mode
+/// this server drives is sixty. Above half of whatever the output is really
+/// running at the picture aliases -- a 25p wall asked for twenty hertz shows
+/// something, but not twenty flashes -- and that is a fact about the wall
+/// rather than a rule this can enforce.
+pub const MAX_STROBE_HZ: f64 = 30.0;
+
+/// A flash at a rate.
+///
+/// The one generator here that is about time rather than about a picture: two
+/// pictures, the colour and nothing, alternating. An operator reaches for it to
+/// punch a chorus, and it is the thing they would otherwise build out of a
+/// solid colour and a lot of pad pressing.
+///
+/// Published at ten hertz because that is unmistakably a strobe and is still
+/// below half of every rate this server drives -- 25p, 50p and 60p all show ten
+/// flashes a second honestly. **The number itself is mine**; the operator moves
+/// it and the show remembers where they left it.
+///
+/// Worth knowing rather than enforced here: flashing light between roughly
+/// three and thirty hertz is the band photosensitive epilepsy is triggered in,
+/// and venues often have a house limit. That is a decision for whoever is
+/// running the room, so this publishes the range and says so instead of
+/// quietly refusing part of it.
+pub const STROBE_V1: GeneratorManifest = GeneratorManifest {
+    type_id: "ovs.strobe",
+    version: 1,
+    name: "Strobe",
+    description: "Flashes one colour at a rate.",
+    parameters: &[
+        ParameterDefinition {
+            key: "colour",
+            name: "Colour",
+            kind: ParameterKind::Colour {
+                default: [1.0, 1.0, 1.0, 1.0],
+            },
+            dmx: Some(DmxChannel::Coarse),
+        },
+        ParameterDefinition {
+            key: "hz",
+            name: "Rate",
+            kind: ParameterKind::Number {
+                min: MIN_STROBE_HZ,
+                max: MAX_STROBE_HZ,
+                default: 10.0,
+            },
+            dmx: Some(DmxChannel::Coarse),
+        },
+    ],
+};
+
 /// A linear gradient between two colours.
 ///
 /// The background this business actually asks for. A flat wash reads
@@ -759,9 +819,10 @@ pub const TEXT_V1: GeneratorManifest = GeneratorManifest {
 };
 
 /// Every generator this build publishes.
-pub const PUBLISHED: [GeneratorManifest; 9] = [
+pub const PUBLISHED: [GeneratorManifest; 10] = [
     SOLID_COLOUR_V1,
     TEST_PATTERN_V1,
+    STROBE_V1,
     GRADIENT_V1,
     GRID_V1,
     SHAPE_V1,

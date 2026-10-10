@@ -69,7 +69,9 @@
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use ovs_types::config::generators::{manifest, GeneratorManifest, ParameterDefinition};
+use ovs_types::config::generators::{
+    manifest, GeneratorManifest, ParameterDefinition, MAX_STROBE_HZ, MIN_STROBE_HZ,
+};
 use ovs_types::config::slot::{ParameterMap, ParameterValue};
 use ovs_types::geometry::SizePx;
 
@@ -168,6 +170,8 @@ enum Kind {
     SolidColour { colour: [f32; 4] },
     /// A grid, optional colour bars and a centre cross.
     TestPattern { grid: u32, bars: bool },
+    /// A flash at a rate: the colour, then nothing, then the colour.
+    Strobe { colour: [f32; 4], hz: f32 },
     /// A linear ramp between two colours, along an angle.
     Gradient {
         from: [f32; 4],
@@ -299,7 +303,7 @@ impl Kind {
     /// clock without seconds changes 1 440 times a day and a clock with them
     /// 86 400 times, and asking for a finer index than that would be redrawing a
     /// composition for a result identical to the last one.
-    const fn length(&self) -> SourceLength {
+    fn length(&self) -> SourceLength {
         match *self {
             Self::Clock { show_seconds, .. } => SourceLength {
                 duration_ms: SECONDS_IN_A_DAY as u64 * 1_000,
@@ -320,6 +324,16 @@ impl Kind {
                     frame_count: frames,
                 }
             }
+            // Two pictures -- lit and dark -- and one cycle to show them in.
+            // The frame count is the granularity of the picture here as it is
+            // everywhere else in this match; a strobe simply has only two.
+            Self::Strobe { hz, .. } => {
+                let rate = clamp_rate(hz);
+                SourceLength {
+                    duration_ms: (1_000.0 / rate) as u64,
+                    frame_count: 2,
+                }
+            }
             // No duration: a still has no timeline, so there is nothing for a
             // playhead to run along.
             _ => SourceLength {
@@ -331,8 +345,21 @@ impl Kind {
 
     /// Whether the picture depends on the time as well as on the position.
     const fn changes_over_time(&self) -> bool {
-        matches!(*self, Self::Clock { .. } | Self::Countdown { .. })
+        matches!(
+            *self,
+            Self::Clock { .. } | Self::Countdown { .. } | Self::Strobe { .. }
+        )
     }
+}
+
+/// The rate a strobe actually runs at.
+///
+/// Held inside the published range rather than trusted: a show written against
+/// another build can name anything, and a rate of zero would be a division by
+/// it. The ceiling is what an output can show rather than what somebody can
+/// type -- see `MAX_STROBE_HZ`.
+fn clamp_rate(hz: f32) -> f64 {
+    f64::from(hz).clamp(MIN_STROBE_HZ, MAX_STROBE_HZ)
 }
 
 /// How many frames a countdown holds.
@@ -389,6 +416,10 @@ impl GeneratorSource {
             "ovs.test_pattern" => Kind::TestPattern {
                 grid: number_of(manifest, parameters, "grid_px") as u32,
                 bars: flag_of(manifest, parameters, "bars"),
+            },
+            "ovs.strobe" => Kind::Strobe {
+                colour: colour_of(manifest, parameters, "colour"),
+                hz: number_of(manifest, parameters, "hz") as f32,
             },
             "ovs.gradient" => Kind::Gradient {
                 from: colour_of(manifest, parameters, "colour_a"),
@@ -499,6 +530,14 @@ impl GeneratorSource {
                 let second = second_of_day(moment.wall, *offset_minutes);
                 Some(if *show_seconds { second } else { second / 60 })
             }
+            Kind::Strobe { hz, .. } => {
+                // The parity of the half-cycle, and nothing more: a strobe has
+                // two pictures, so that is the whole index. Counting
+                // half-cycles would be a number climbing all evening to pick
+                // between two things, and it would eventually run out.
+                let halves = moment.since_anchor.as_secs_f64() * clamp_rate(*hz) * 2.0;
+                Some(u32::from(halves as u64 % 2 == 1))
+            }
             Kind::Countdown { .. } => {
                 let last = self.kind.length().frame_count.saturating_sub(1);
                 let elapsed = moment.since_anchor.as_secs();
@@ -584,6 +623,21 @@ fn draw_kind(kind: &Kind, size: SizePx, pixels: &mut [u8], tick: u32) {
             }
         }
         Kind::TestPattern { grid, bars } => draw_test_pattern(pixels, width, height, *grid, *bars),
+        Kind::Strobe { colour, .. } => {
+            // Lit on one half of the cycle and clear on the other. Clear
+            // rather than black: a strobe belongs over whatever is under it,
+            // and filling with black would make it a blackout with a flash in
+            // it. The layer's own opacity still scales the flash.
+            let lit = tick % 2 == 0;
+            let rgba = to_bytes(if lit {
+                *colour
+            } else {
+                [colour[0], colour[1], colour[2], 0.0]
+            });
+            for pixel in pixels.as_chunks_mut::<4>().0 {
+                *pixel = rgba;
+            }
+        }
         Kind::Gradient {
             from,
             to,
@@ -1543,8 +1597,8 @@ mod tests {
         "ovs.noise",
     ];
 
-    /// The two whose picture is a function of position and time.
-    const TIMEPIECES: [&str; 2] = ["ovs.clock", "ovs.countdown"];
+    /// The three whose picture is a function of time.
+    const TIMEPIECES: [&str; 3] = ["ovs.clock", "ovs.countdown", "ovs.strobe"];
 
     #[test]
     fn a_still_generator_has_one_frame_and_no_timeline() {
@@ -1574,6 +1628,112 @@ mod tests {
             assert!(source.length().frame_count > 1, "{type_id}");
             assert!(source.length().duration_ms > 0, "{type_id}");
         }
+    }
+
+    /// What a strobe is showing at a moment, as its top-left pixel.
+    fn strobe_at(source: &mut GeneratorSource, seconds: f64) -> [u8; 4] {
+        let tick = source
+            .tick_at(Moment {
+                wall: UNIX_EPOCH,
+                since_anchor: Duration::from_secs_f64(seconds),
+            })
+            .expect("a strobe knows which half of its cycle it is in");
+        // Forgotten first: `redraw_at` answers `None` for a tick it has
+        // already drawn, and this asks about moments out of order.
+        source.forget_drawn();
+        let image = source.redraw_at(tick).expect("a picture");
+        pixel(image, 0, 0)
+    }
+
+    fn strobe(hz: f64) -> GeneratorSource {
+        GeneratorSource::new(
+            "ovs.strobe",
+            1,
+            &ParameterMap::from([
+                (
+                    "colour".to_owned(),
+                    ParameterValue::Color([1.0, 0.0, 0.0, 1.0]),
+                ),
+                ("hz".to_owned(), ParameterValue::Float(hz)),
+            ]),
+            size(),
+        )
+        .expect("published")
+    }
+
+    #[test]
+    fn a_strobe_is_lit_for_half_of_each_cycle() {
+        // Ten hertz: a cycle is a tenth of a second, lit for the first
+        // twentieth of it and clear for the second.
+        let mut source = strobe(10.0);
+
+        assert_eq!(strobe_at(&mut source, 0.00), [255, 0, 0, 255], "lit");
+        assert_eq!(strobe_at(&mut source, 0.04), [255, 0, 0, 255], "still lit");
+        assert_eq!(strobe_at(&mut source, 0.06)[3], 0, "clear");
+        assert_eq!(strobe_at(&mut source, 0.10), [255, 0, 0, 255], "lit again");
+        assert_eq!(strobe_at(&mut source, 0.16)[3], 0, "and clear again");
+    }
+
+    #[test]
+    fn the_dark_half_is_clear_rather_than_black() {
+        // A strobe belongs over whatever is under it. Filling with black would
+        // make it a blackout with a flash in it, and the colour is kept so the
+        // layer does not flicker through a hue on its way out.
+        let mut source = strobe(10.0);
+        let dark = strobe_at(&mut source, 0.06);
+
+        assert_eq!(dark[3], 0, "nothing of it is drawn");
+        assert_eq!(
+            [dark[0], dark[1], dark[2]],
+            [255, 0, 0],
+            "and it is still red"
+        );
+    }
+
+    #[test]
+    fn a_strobe_flashes_as_many_times_a_second_as_it_was_asked_to() {
+        // Counted off the passes the render loop actually makes rather than
+        // asserted about the arithmetic: a rate that was out by a factor of
+        // two would satisfy every test that only looks at one moment.
+        let source = strobe(10.0);
+
+        let mut flashes = 0;
+        let mut was_lit = false;
+        for frame in 0..60 {
+            let lit = source
+                .tick_at(Moment {
+                    wall: UNIX_EPOCH,
+                    since_anchor: Duration::from_secs_f64(f64::from(frame) / 60.0),
+                })
+                .expect("a tick")
+                % 2
+                == 0;
+            if lit && !was_lit {
+                flashes += 1;
+            }
+            was_lit = lit;
+        }
+
+        assert_eq!(flashes, 10, "ten flashes in a second at ten hertz");
+    }
+
+    #[test]
+    fn a_strobe_from_another_build_cannot_divide_by_its_rate() {
+        // A show written against something else can name any number, and zero
+        // would be a division by it. The published floor is the answer.
+        let source = strobe(0.0);
+
+        assert_eq!(
+            source.length().duration_ms,
+            2_000,
+            "held at the slowest published rate"
+        );
+        assert!(source
+            .tick_at(Moment {
+                wall: UNIX_EPOCH,
+                since_anchor: Duration::from_secs(1),
+            })
+            .is_some());
     }
 
     #[test]

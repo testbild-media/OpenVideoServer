@@ -190,6 +190,17 @@ Footprint: **4 channels**. Patch to: **one effect instance in a chain**.
 | 1–2 | Radius | `radius_px` | 0 at 0, 64 at 65535 | 0 |
 | 3–4 | Amount | `amount` | 0 at 0, 1 at 65535 | 65535 |
 
+## Crop — `ovs.crop` v1
+
+Footprint: **8 channels**. Patch to: **one effect instance in a chain**.
+
+| Channel | Name | Control | Values | Home |
+|---|---|---|---|---|
+| 1–2 | Left | `left_px` | 0 at 0, 8192 at 65535 | 0 |
+| 3–4 | Right | `right_px` | 0 at 0, 8192 at 65535 | 0 |
+| 5–6 | Top | `top_px` | 0 at 0, 8192 at 65535 | 0 |
+| 7–8 | Bottom | `bottom_px` | 0 at 0, 8192 at 65535 | 0 |
+
 ## Solid Colour — `ovs.solid_colour` v1
 
 Footprint: **4 channels**. Patch to: **one generator instance in a slot**.
@@ -209,6 +220,18 @@ Footprint: **2 channels**. Patch to: **one generator instance in a slot**.
 |---|---|---|---|---|
 | 1 | Grid size | `grid_px` | 8 at 0, 512 at 255 | 28 |
 | 2 | Colour bars | `bars` | on at 128 and above | 255 |
+
+## Strobe — `ovs.strobe` v1
+
+Footprint: **5 channels**. Patch to: **one generator instance in a slot**.
+
+| Channel | Name | Control | Values | Home |
+|---|---|---|---|---|
+| 1 | Colour Red | `colour` | 0 at 0, 1 at 255 | 255 |
+| 2 | Colour Green | `colour` | 0 at 0, 1 at 255 | 255 |
+| 3 | Colour Blue | `colour` | 0 at 0, 1 at 255 | 255 |
+| 4 | Colour Alpha | `colour` | 0 at 0, 1 at 255 | 255 |
+| 5 | Rate | `hz` | 0.5 at 0, 30 at 255 | 82 |
 
 ## Gradient — `ovs.gradient` v1
 

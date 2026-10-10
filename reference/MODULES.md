@@ -30,6 +30,15 @@ A grid, colour bars and a centre cross, for lining a wall up.
 | Grid size | `grid_px` | a number from 8 to 512 | 64 |
 | Colour bars | `bars` | on or off | on |
 
+### Strobe — `ovs.strobe` v1
+
+Flashes one colour at a rate.
+
+| Parameter | Key | Takes | Default |
+|---|---|---|---|
+| Colour | `colour` | a colour, linear RGBA | 1.00, 1.00, 1.00, 1.00 |
+| Rate | `hz` | a number from 0.5 to 30 | 10 |
+
 ### Gradient — `ovs.gradient` v1
 
 A linear gradient between two colours, at an angle.
@@ -161,4 +170,15 @@ Softens the picture, horizontally and vertically.
 |---|---|---|---|
 | Radius | `radius_px` | a number from 0 to 64 | 0 |
 | Amount | `amount` | a number from 0 to 1 | 1 |
+
+### Crop — `ovs.crop` v1
+
+Cuts a number of pixels off each edge.
+
+| Parameter | Key | Takes | Default |
+|---|---|---|---|
+| Left | `left_px` | a number from 0 to 8192 | 0 |
+| Right | `right_px` | a number from 0 to 8192 | 0 |
+| Top | `top_px` | a number from 0 to 8192 | 0 |
+| Bottom | `bottom_px` | a number from 0 to 8192 | 0 |
 
