@@ -17,6 +17,7 @@
 // should not first be told to install a video toolkit.
 
 import { build } from 'esbuild';
+import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { chmod, cp, mkdir, rm, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -28,6 +29,45 @@ const require = createRequire(import.meta.url);
 const here = dirname(fileURLToPath(import.meta.url));
 const dist = join(here, 'dist');
 
+/**
+ * Which commit this build came from.
+ *
+ * **Every build is `OpenVideoServer-0.2.0-setup.exe`**, because the version
+ * comes out of package.json. Two installers with the same name can be
+ * different software, and on 2026-10-10 that cost an install and an hour: a
+ * fix was shipped, the installer was run, the fix was not in it, and the only
+ * symptom was the error it was meant to replace.
+ *
+ * The environment first, because a workflow knows the commit without asking
+ * git — and git in a container often refuses a checkout it does not own, which
+ * would make every built client say `unknown` without saying why.
+ */
+function buildCommit() {
+  const given = (process.env.OVS_BUILD_COMMIT ?? '').trim();
+  if (given !== '') {
+    return given;
+  }
+  try {
+    const at = execFileSync('git', ['rev-parse', '--short=12', 'HEAD'], {
+      cwd: here,
+      encoding: 'utf8',
+    }).trim();
+    const dirty = execFileSync('git', ['status', '--porcelain', '--untracked-files=no'], {
+      cwd: here,
+      encoding: 'utf8',
+    }).trim();
+    // A build with uncommitted changes is not the commit it names, and that is
+    // exactly the build somebody is holding when a fix seems to be missing.
+    return dirty === '' ? at : `${at}-modified`;
+  } catch {
+    // A source tarball has no history to ask. An ordinary state, not a failure.
+    return 'unknown';
+  }
+}
+
+const COMMIT = buildCommit();
+console.log(`building ${COMMIT}`);
+
 await rm(dist, { recursive: true, force: true });
 await mkdir(join(dist, 'ui'), { recursive: true });
 
@@ -37,6 +77,9 @@ const common = {
   sourcemap: true,
   logLevel: 'info',
   target: 'es2022',
+  // Into all three bundles, so the main process can log it and the page can
+  // show it without either of them reading a file at runtime.
+  define: { OVS_BUILD_COMMIT: JSON.stringify(COMMIT) },
 };
 
 await build({

@@ -57,6 +57,7 @@ const ui = {
   disconnect: element<HTMLButtonElement>('disconnect'),
   live: element('live'),
   connect: element('connect'),
+  buildNote: element('build-note'),
   found: element('found'),
   foundList: element('found-list'),
   foundNote: element('found-note'),
@@ -456,6 +457,11 @@ for (const [choice, node] of [
 }
 
 ovs.onStatus(drawStatus);
+// On the first screen, under the button, because that is where somebody is
+// standing when they wonder whether they are running the build they just
+// installed.
+ui.buildNote.textContent = `build ${OVS_BUILD_COMMIT}`;
+
 ovs.onServers(drawServers);
 ovs.onView(drawView);
 ovs.onFault((fault) => note(fault.message));

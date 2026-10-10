@@ -70,6 +70,12 @@ const openSocket: OpenSocket = (url, handlers): RealtimeSocket => {
 
 let lastSocketError = '';
 
+// **Before anything else.** Every build is `OpenVideoServer-0.2.0-setup.exe`,
+// so this is the only thing that tells one from another — and the question it
+// answers, "is the fix I just installed in this one", cost an install and an
+// hour on 2026-10-10 because nothing could answer it.
+console.log(`OpenVideoServer client ${app.getVersion()} (${OVS_BUILD_COMMIT})`);
+
 const session = new Session(
   {
     fetch: (url, init) => fetch(url, init),
