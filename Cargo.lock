@@ -1564,14 +1564,14 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "ovs-clock"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "ovs-types",
 ]
 
 [[package]]
 name = "ovs-console"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "cef",
  "ovs-console-wire",
@@ -1581,11 +1581,11 @@ dependencies = [
 
 [[package]]
 name = "ovs-console-wire"
-version = "0.2.5"
+version = "0.2.6"
 
 [[package]]
 name = "ovs-core"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "argon2",
  "axum",
@@ -1619,7 +1619,7 @@ dependencies = [
 
 [[package]]
 name = "ovs-db"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "ovs-types",
  "rusqlite",
@@ -1631,7 +1631,7 @@ dependencies = [
 
 [[package]]
 name = "ovs-dmx"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "ovs-types",
  "socket2",
@@ -1641,7 +1641,7 @@ dependencies = [
 
 [[package]]
 name = "ovs-ipc"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "ovs-proto",
  "ovs-types",
@@ -1652,7 +1652,7 @@ dependencies = [
 
 [[package]]
 name = "ovs-media"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "ffmpeg-next",
  "ovs-types",
@@ -1661,7 +1661,7 @@ dependencies = [
 
 [[package]]
 name = "ovs-proto"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "ovs-types",
  "schemars",
@@ -1672,7 +1672,7 @@ dependencies = [
 
 [[package]]
 name = "ovs-renderer"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "arc-swap",
  "ash",
@@ -1696,7 +1696,7 @@ dependencies = [
 
 [[package]]
 name = "ovs-types"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "schemars",
  "serde",
