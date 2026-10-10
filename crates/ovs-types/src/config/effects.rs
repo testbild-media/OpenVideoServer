@@ -390,8 +390,81 @@ pub const BLUR_V1: EffectManifest = EffectManifest {
     ],
 };
 
+/// Four edges off the picture.
+///
+/// What somebody reaches for when a camera feed has a letterbox in it, when a
+/// capture carries a strip of somebody's desktop along one edge, or when a
+/// piece of content has to be made to fit a panel it was not cut for. The
+/// alternative in the room is asking whoever sent it to send it again.
+///
+/// Sized in composition pixels and running to 8192, which is the same range
+/// and the same reason as the shape generator's size: a look set up on one
+/// composition means the same thing after the pieces are mapped onto a wall of
+/// another size, and an edge measured as a fraction would be the one element
+/// that moved when somebody resized the composition.
+///
+/// What is cut away is cleared rather than blacked, so whatever is behind the
+/// layer shows through there. Trimming a layer is about letting the layer
+/// under it be seen; a black bar would be a second piece of content.
+///
+/// All four at zero is the published default, and it runs its pass anyway --
+/// one full-screen read and write that returns its own input. Skipping it was
+/// tried and taken back out: the renderer proves every published effect
+/// neutral at its defaults by rendering it and comparing the picture, and an
+/// effect that appends no pass is never asked. The blur pays the same at a
+/// radius of zero, so this is the house price rather than a new one.
+pub const CROP_V1: EffectManifest = EffectManifest {
+    type_id: "ovs.crop",
+    version: 1,
+    name: "Crop",
+    description: "Cuts a number of pixels off each edge.",
+    parameters: &[
+        ParameterDefinition {
+            key: "left_px",
+            name: "Left",
+            kind: ParameterKind::Number {
+                min: 0.0,
+                max: 8192.0,
+                default: 0.0,
+            },
+            dmx: Some(DmxChannel::Fine),
+        },
+        ParameterDefinition {
+            key: "right_px",
+            name: "Right",
+            kind: ParameterKind::Number {
+                min: 0.0,
+                max: 8192.0,
+                default: 0.0,
+            },
+            dmx: Some(DmxChannel::Fine),
+        },
+        ParameterDefinition {
+            key: "top_px",
+            name: "Top",
+            kind: ParameterKind::Number {
+                min: 0.0,
+                max: 8192.0,
+                default: 0.0,
+            },
+            dmx: Some(DmxChannel::Fine),
+        },
+        ParameterDefinition {
+            key: "bottom_px",
+            name: "Bottom",
+            kind: ParameterKind::Number {
+                min: 0.0,
+                max: 8192.0,
+                default: 0.0,
+            },
+            dmx: Some(DmxChannel::Fine),
+        },
+    ],
+};
+
 /// Every effect this build publishes.
-pub const PUBLISHED: [EffectManifest; 4] = [COLOUR_CORRECT_V1, TINT_V1, PIXELATE_V1, BLUR_V1];
+pub const PUBLISHED: [EffectManifest; 5] =
+    [COLOUR_CORRECT_V1, TINT_V1, PIXELATE_V1, BLUR_V1, CROP_V1];
 
 /// Returns a published effect by type and version.
 ///

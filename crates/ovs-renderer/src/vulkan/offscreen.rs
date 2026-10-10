@@ -7489,6 +7489,45 @@ mod tests {
     }
 
     #[test]
+    fn a_crop_takes_exactly_as_many_pixels_off_each_edge_as_it_was_given() {
+        let _gpu = crate::vulkan::one_gpu_at_a_time();
+        // Counted on the card rather than reasoned about: an edge out by one,
+        // or one measuring a fraction of the surface instead of pixels, would
+        // still look exactly like a crop.
+        let Some(mut canvas) = backend(32, 32) else {
+            return;
+        };
+        let media = MediaItemId::new();
+        let layer = LayerId::new();
+        canvas
+            .set_media_texture(media, &rgba(&pattern(32, |_, _| [255, 0, 0, 255]), 32, 32))
+            .expect("uploads");
+
+        // Four different numbers, because four edges reading one of them would
+        // pass a test that used the same value twice.
+        let passes = effect(
+            "ovs.crop",
+            &[
+                ("left_px", ParameterValue::Float(4.0)),
+                ("right_px", ParameterValue::Float(2.0)),
+                ("top_px", ParameterValue::Float(6.0)),
+                ("bottom_px", ParameterValue::Float(0.0)),
+            ],
+        );
+        let frame = composed_frame(&mut canvas, &effected(layer, media, &passes), 32);
+        let red = |x: usize, y: usize| frame[(y * 32 + x) * 4];
+
+        close_to(red(3, 20), 0, "the column before the left edge is gone");
+        close_to(red(4, 20), 255, "and the column at it is kept");
+        close_to(red(20, 5), 0, "the row above the top edge is gone");
+        close_to(red(20, 6), 255, "and the row at it is kept");
+        close_to(red(29, 20), 255, "the last column the right edge keeps");
+        close_to(red(30, 20), 0, "and the two beyond it are gone");
+        close_to(red(31, 20), 0, "both of them");
+        close_to(red(20, 31), 255, "nothing taken off the bottom");
+    }
+
+    #[test]
     fn a_blur_spreads_a_bright_block_into_its_neighbours_and_keeps_the_light() {
         let _gpu = crate::vulkan::one_gpu_at_a_time();
         // Both halves matter. A blur that spread light without conserving it

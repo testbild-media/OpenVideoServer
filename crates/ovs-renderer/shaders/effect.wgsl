@@ -70,6 +70,7 @@ const KIND_PIXELATE_ACROSS: u32 = 2u;
 const KIND_PIXELATE_DOWN: u32 = 3u;
 const KIND_BLUR_ACROSS: u32 = 4u;
 const KIND_BLUR_DOWN: u32 = 5u;
+const KIND_CROP: u32 = 6u;
 
 // Rec. 709, because that is what the content is graded in and what every panel
 // downstream of this expects.
@@ -228,6 +229,30 @@ fn blur(uv: vec2<f32>, down: bool) -> vec4<f32> {
     );
 }
 
+/// Cuts the edges off, in composition pixels.
+///
+/// One pass for all four edges: the test is a rectangle and there is no
+/// kernel, so there is nothing to separate into two passes the way the blur
+/// and the pixelate are.
+///
+/// Cleared rather than blacked. Straight alpha throughout this shader, so
+/// clearing is an alpha of zero and the colour behind it stops mattering --
+/// what shows through is the layer underneath, which is what trimming a layer
+/// is for.
+///
+/// The comparison is against the pixel's centre, which is what makes the count
+/// exact: with `left` at four, the pixel at three sits at 3.5 and is cut, the
+/// pixel at four sits at 4.5 and is kept, and four pixels have gone.
+fn crop(uv: vec2<f32>, source: vec4<f32>) -> vec4<f32> {
+    let left = max(effect.values.x, 0.0) * effect.texel.x;
+    let right = max(effect.values.y, 0.0) * effect.texel.x;
+    let top = max(effect.values.z, 0.0) * effect.texel.y;
+    let bottom = max(effect.values.w, 0.0) * effect.texel.y;
+
+    let inside = uv.x >= left && uv.x <= 1.0 - right && uv.y >= top && uv.y <= 1.0 - bottom;
+    return select(vec4<f32>(0.0, 0.0, 0.0, 0.0), source, inside);
+}
+
 @fragment
 fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // Straight alpha throughout, never premultiplied. What comes out of the
@@ -254,6 +279,9 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         }
         case KIND_BLUR_DOWN: {
             return blur(input.uv, true);
+        }
+        case KIND_CROP: {
+            return crop(input.uv, source);
         }
         // Unreachable: the renderer only ever writes a kind it has a branch
         // for. Returning the picture untouched is the one answer that cannot

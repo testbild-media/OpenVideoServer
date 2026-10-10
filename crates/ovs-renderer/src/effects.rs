@@ -58,6 +58,8 @@ pub enum PassKind {
     BlurAcross,
     /// The down half of a separable Gaussian.
     BlurDown,
+    /// Four edges cleared, in composition pixels.
+    Crop,
 }
 
 impl PassKind {
@@ -71,6 +73,7 @@ impl PassKind {
             Self::PixelateDown => 3,
             Self::BlurAcross => 4,
             Self::BlurDown => 5,
+            Self::Crop => 6,
         }
     }
 }
@@ -183,6 +186,20 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
                 });
             }
         }
+        // One pass for all four edges: the test is a rectangle and there is no
+        // kernel, so there is nothing to separate the way the blur and the
+        // pixelate are. Appended even when nothing is cut, which is what lets
+        // the renderer prove it neutral at its defaults by rendering it.
+        ("ovs.crop", 1) => into.push(EffectPass {
+            kind: PassKind::Crop,
+            values: [
+                number("left_px"),
+                number("right_px"),
+                number("top_px"),
+                number("bottom_px"),
+            ],
+            colour: [0.0; 4],
+        }),
         // A manifest this build publishes but the renderer cannot draw. Nothing
         // is in this state today — the four published effects are the four
         // above — and the day one is, it is a layer drawn without it and a line
@@ -457,6 +474,28 @@ mod tests {
         // state; one that arrives from elsewhere draws the layer without it.
         assert!(passes(&[EffectInstance::new("ovs.kaleidoscope", 1)]).is_empty());
         assert!(passes(&[EffectInstance::new("ovs.blur", 99)]).is_empty());
+    }
+
+    #[test]
+    fn a_crop_passes_its_four_edges_in_the_order_the_shader_reads_them() {
+        // Left, right, top, bottom. Four numbers in one vector and nothing to
+        // name them by the time they reach the card, so the order is the whole
+        // contract -- and swapping two of them would crop the wrong edges
+        // while every other test still passed.
+        let chain = [instance(
+            "ovs.crop",
+            &[
+                ("left_px", ParameterValue::Float(1.0)),
+                ("right_px", ParameterValue::Float(2.0)),
+                ("top_px", ParameterValue::Float(3.0)),
+                ("bottom_px", ParameterValue::Float(4.0)),
+            ],
+        )];
+        let passes = passes(&chain);
+
+        assert_eq!(passes.len(), 1, "one pass for all four edges");
+        assert_eq!(passes[0].kind, PassKind::Crop);
+        assert_eq!(passes[0].values, [1.0, 2.0, 3.0, 4.0]);
     }
 
     #[test]
