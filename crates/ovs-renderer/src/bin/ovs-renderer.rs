@@ -644,7 +644,10 @@ fn list_ndi_sources() -> ExitCode {
         println!("  {name}");
     }
     println!();
-    println!("{} source(s). A server that is running will offer these.", sources.len());
+    println!(
+        "{} source(s). A server that is running will offer these.",
+        sources.len()
+    );
     ExitCode::SUCCESS
 }
 
