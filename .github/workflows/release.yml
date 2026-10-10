@@ -163,7 +163,17 @@ jobs:
         shell: bash
         run: |
           upstream=$(node -p "require('./clients/desktop/package.json').version")
-          npm run client:dist:win -- \
+          # **The workspace script, not the root alias.** `npm run
+          # client:dist:win -- <arg>` appends the argument to the root script,
+          # which is itself an `npm run` -- so npm reads `--config...` as one
+          # of its own options and electron-builder never sees it. v0.2.4 came
+          # out as `OpenVideoServer-0.2.4-setup.exe` with the revision nowhere
+          # in it, and the client reported `0.2.4` to the server as well.
+          #
+          # Called this way the argument lands at the end of
+          # `node build.mjs --release && electron-builder --win`, which is
+          # where electron-builder is.
+          npm run dist:win --workspace @ovs/desktop -- \
             --config.extraMetadata.version="$upstream-$OVS_PACKAGE_REVISION"
 
       - name: Say what it is called
