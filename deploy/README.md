@@ -174,6 +174,53 @@ be able to make the second.
   else about the server changes: a machine without it loses NDI and nothing
   else, which is why this is not part of installing one.
 
+  **A sender that discovery does not find.** Not every NDI sender announces
+  itself over mDNS, and some that do are not heard across a particular switch
+  or VLAN. A PTZ camera on 2026-10-10 was on the server's own segment, answered
+  ping in 0.35 ms and had its sender ports open — and was invisible to
+  discovery. NDI's own reference finder, built from the SDK's
+  `examples/C++/NDIlib_Find` and run on that machine, found nothing either,
+  which is how we knew the server was not at fault.
+
+  Such a sender is named by address. NDI's runtime reads its own configuration
+  and nothing here parses it:
+
+  ```bash
+  sudo install -d -m 0755 /etc/openvideoserver/ndi
+  sudo tee /etc/openvideoserver/ndi/ndi-config.v1.json > /dev/null <<'JSON'
+  { "ndi": { "networks": { "ips": "10.110.0.33,10.110.0.34", "discovery": "" } } }
+  JSON
+  ```
+
+  ```bash
+  # /etc/systemd/system/ovs-renderer.service.d/ndi.conf
+  [Service]
+  Environment=NDI_CONFIG_DIR=/etc/openvideoserver/ndi
+  ```
+
+  ```bash
+  sudo systemctl daemon-reload && sudo systemctl restart ovs-renderer
+  ```
+
+  `ips` is a comma-separated list. `discovery` names an NDI Discovery Server
+  instead, which is the better answer for a rig that has one: one setting rather
+  than a list that goes stale the day a camera is readdressed.
+
+  **Proving it before changing the service**, which is how the above was
+  arrived at rather than guessed:
+
+  ```bash
+  cd "$HOME/NDI SDK for Linux"
+  g++ -std=c++17 -I include examples/C++/NDIlib_Find/NDIlib_Find.cpp \
+    -o /tmp/ndi-find -L lib/x86_64-linux-gnu -lndi \
+    -Wl,-rpath,"$PWD/lib/x86_64-linux-gnu"
+  NDI_CONFIG_DIR=/etc/openvideoserver/ndi timeout 12 stdbuf -oL /tmp/ndi-find
+  ```
+
+  `stdbuf -oL` is not decoration: without it the output is block buffered and
+  `timeout` kills the process before any of it is flushed, so a finder that
+  worked looks like one that found nothing.
+
 ### What is in the package
 
 The three binaries, **their own FFmpeg**, **the Chromium the System screen
