@@ -129,6 +129,44 @@ be able to make the second.
   an installer on a machine that has just been given a driver means to finish the
   job, while `apt upgrade` may be running unattended on the afternoon of one.
   `--no-reboot` declines it.
+- **It carries no NDI runtime, and cannot.** The NDI SDK's licence does not let
+  this project redistribute it. So a machine without one has no network sources
+  and no network outputs, and says so once at startup and nowhere else — which
+  is exactly how it was met: a server that "sees no NDI on the network", and one
+  INFO line in the journal that nobody had been told to look for.
+
+  ```bash
+  journalctl -u ovs-renderer -b | grep -i ndi
+  ```
+
+  ```text
+  the NDI runtime is not installed on this machine (tried libndi.so.6,
+  libndi.so, Processing.NDI.Lib.x64.dll); no network sources or outputs
+  will be offered
+  ```
+
+  **Installing it.** The renderer opens `libndi.so.6` by name when something
+  first asks for it, so all that is needed is that library, somewhere the loader
+  looks. From the Linux SDK:
+
+  ```bash
+  tar xzf Install_NDI_SDK_v6_Linux.tar.gz && sh ./Install_NDI_SDK_v6_Linux.sh
+  ```
+
+  It shows the licence and will not go on until you type `y`, which is a
+  decision for whoever runs the machine and not for an installer — this is the
+  reason none of it can be automated here. It unpacks into `NDI SDK for Linux`
+  in the current directory, and the library is under `lib/`:
+
+  ```bash
+  sudo install -m 0644 "NDI SDK for Linux"/lib/x86_64-linux-gnu/libndi.so.* /usr/local/lib/
+  sudo ldconfig
+  sudo systemctl restart ovs-renderer
+  ```
+
+  The same `journalctl` line then names the sources it can see instead. Nothing
+  else about the server changes: a machine without it loses NDI and nothing
+  else, which is why this is not part of installing one.
 
 ### What is in the package
 
