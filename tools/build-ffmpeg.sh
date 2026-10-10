@@ -555,6 +555,15 @@ echo "configuring"
     > "$work/configure.log" 2>&1 || {
       echo "configure failed; the tail of its log:" >&2
       tail -30 "$work/configure.log" >&2
+      # **And configure's own log**, which is the only file that says *why* a
+      # check failed: the compiler line it ran and what came back. Without it
+      # a library that is installed, with its `.pc` file right there, reads as
+      # "not found" and there is nothing to go on. Printed rather than kept,
+      # because the work directory is a `mktemp -d` the exit trap removes.
+      if [ -f ffbuild/config.log ]; then
+        echo "--- the tail of ffbuild/config.log ---" >&2
+        tail -40 ffbuild/config.log >&2
+      fi
       exit 1
     }
 

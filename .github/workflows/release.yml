@@ -124,10 +124,10 @@ jobs:
         run: |
           note() {
             # Newlines and per cents escaped the way the runner wants them, and
-            # the last thirty lines only: an annotation has a size limit and
+            # the last eighty lines only: an annotation has a size limit, and
             # the end of a build log is the part that says what went wrong.
             printf '::error title=%s::%s\n' "$1" \
-              "$(sed -e 's/%/%25/g' -e 's/\r$//' "$2" | tail -n 30 | awk '{ printf "%s%%0A", $0 }')"
+              "$(sed -e 's/%/%25/g' -e 's/\r$//' "$2" | tail -n 80 | awk '{ printf "%s%%0A", $0 }')"
           }
           if [ -f /tmp/ffmpeg.log ]; then
             note 'build-ffmpeg.sh' /tmp/ffmpeg.log
