@@ -52,14 +52,35 @@ import {
 /**
  * A way of producing HEVC, in the order they are preferred.
  *
- * NVIDIA first because it is the fastest by a wide margin and the machines this
- * runs on mostly have one; Media Foundation second because every Windows
- * machine has it whether or not it has a card. There is deliberately no
- * software encoder here: the client ships without libx265 (owner, 2026-09-23),
- * both because of what it would do to the licence and because a software HEVC
- * encode of a show's worth of material is not something anybody waits for.
+ * NVIDIA first because it is the fastest by a wide margin. Then the other two
+ * vendors' own encoders — Quick Sync on an Intel machine, AMF on an AMD one.
+ * Media Foundation after those, because it is Windows' own wrapper around
+ * whichever of them the machine has, and the vendor's encoder is the shorter
+ * path to the same silicon. Software last, and only ever last.
+ *
+ * **Quick Sync and AMF were in the binary all along and nothing asked for
+ * them.** `tools/build-ffmpeg.sh` configures this client's FFmpeg
+ * `--enable-libvpl --enable-amf`, so `hevc_qsv` and `hevc_amf` have been in it
+ * since September. This list named two encoders, so a machine with an Intel
+ * iGPU or an AMD card was told it had no way to make HEVC — and since every
+ * file that is not already conforming has to be made so, that machine could
+ * upload nothing at all (owner, 2026-10-10: "Ich konnte bisher kein Medium
+ * hochladen, weil der Client nicht transcodiert").
+ *
+ * **Software last, which is new.** There was deliberately none (owner,
+ * 2026-09-23), for two reasons: what it would do to the licence, and that
+ * nobody waits for a software HEVC encode. The first is answered — libx265 is
+ * GPL-2.0-or-later and cannot go inside an Apache-2.0 client, but Kvazaar is
+ * BSD-3-Clause and can. The second stands, which is why it sits at the end of
+ * this list and why the owner's own words for it were "zur Not".
  */
-export const HEVC_BACKENDS = ['hevc_nvenc', 'hevc_mf'] as const;
+export const HEVC_BACKENDS = [
+  'hevc_nvenc',
+  'hevc_qsv',
+  'hevc_amf',
+  'hevc_mf',
+  'libkvazaar',
+] as const;
 
 /** One of the ways of producing HEVC. */
 export type HevcBackend = (typeof HEVC_BACKENDS)[number];
@@ -188,7 +209,7 @@ export function hevcArguments(
     ...common(from),
     '-c:v',
     backend,
-    ...qualityArguments(backend, MOST_BITS_PER_SECOND),
+    ...qualityArguments(backend, MOST_BITS_PER_SECOND, rate),
     '-pix_fmt',
     PIXEL_FORMAT[depth],
     ...keyframes,
@@ -299,16 +320,28 @@ function ratePerSecond(rate: FrameRate): number {
   return Number.isFinite(perSecond) && perSecond > 0 ? perSecond : 25;
 }
 
+/** How many frames a second, as a whole number, which is the keyframe period. */
+function framesPerKeyframe(rate: FrameRate): string {
+  return String(Math.max(1, Math.round(ratePerSecond(rate))));
+}
+
 /**
- * The keyframe flags, which the two backends spell differently.
+ * The keyframe flags, which the backends spell differently.
  *
- * NVENC takes `-no-scenecut`; Media Foundation has no scene-cut detector to
- * switch off and takes the GOP size alone. Both take `-g`, and both are given
+ * NVENC takes `-no-scenecut`; the rest have no scene-cut detector to switch off
+ * and take the GOP size alone. All of them take `-g`, and all are given
  * `-keyint_min` so that an encoder cannot decide a scene is dull enough to skip
  * one — which is exactly the file that seeks badly on the night.
+ *
+ * Kvazaar is the exception and gets nothing here: it takes every setting it has
+ * as one string, the keyframe period included, and `-g` beside that string
+ * would be a second way of saying the same thing that could disagree with it.
  */
 function keyframeArguments(backend: HevcBackend, rate: FrameRate): string[] {
-  const every = String(Math.max(1, Math.round(ratePerSecond(rate))));
+  if (backend === 'libkvazaar') {
+    return [];
+  }
+  const every = framesPerKeyframe(rate);
   const shared = ['-g', every, '-keyint_min', every];
   return backend === 'hevc_nvenc' ? [...shared, '-no-scenecut', '1'] : shared;
 }
@@ -329,7 +362,11 @@ function keyframeArguments(backend: HevcBackend, rate: FrameRate): string[] {
  * result over the ceiling is the probe `ingest.ts` runs on every prepared file
  * before it is sent.
  */
-function qualityArguments(backend: HevcBackend, ceiling: number): string[] {
+function qualityArguments(
+  backend: HevcBackend,
+  ceiling: number,
+  rate: FrameRate,
+): string[] {
   if (backend === 'hevc_nvenc') {
     return [
       '-preset',
@@ -345,6 +382,34 @@ function qualityArguments(backend: HevcBackend, ceiling: number): string[] {
       String(ceiling),
       '-bufsize',
       String(ceiling),
+    ];
+  }
+  if (backend === 'hevc_qsv') {
+    // Intel's constant-quality mode, and the zero matters for the same reason
+    // it does on NVENC: a bitrate that is set beats the quality target.
+    return ['-global_quality', String(CONSTANT_QUALITY), '-b:v', '0'];
+  }
+  if (backend === 'hevc_amf') {
+    // AMF's constant quantiser, given to both frame kinds so that a quiet
+    // stretch is not held to a different standard from a busy one.
+    return [
+      '-rc',
+      'cqp',
+      '-qp_i',
+      String(CONSTANT_QUALITY),
+      '-qp_p',
+      String(CONSTANT_QUALITY),
+    ];
+  }
+  if (backend === 'libkvazaar') {
+    // Everything Kvazaar takes, in the one string it takes it in: the preset,
+    // the quantiser and the keyframe period. `veryfast` because this is the
+    // path a machine with no encoder at all goes down, where what an operator
+    // cares about is whether it finishes before doors — a slower preset buys
+    // picture quality nobody is comparing against anything.
+    return [
+      '-kvazaar-params',
+      `preset=veryfast,qp=${CONSTANT_QUALITY},period=${framesPerKeyframe(rate)}`,
     ];
   }
   return ['-rate_control', 'quality', '-quality', String(MEDIA_FOUNDATION_QUALITY)];

@@ -483,6 +483,22 @@ export type PrepareOutcome =
   /** It was stopped part way, because nobody wants the file any more. */
   | { kind: 'stopped' };
 
+/**
+ * What one backend's attempt at a file came to.
+ *
+ * The distinction the loop needs and PrepareOutcome does not draw: whether
+ * another backend is worth trying. A backend that failed is not the file
+ * failing, and on a machine with two encoders that difference is the whole
+ * question.
+ */
+type Attempt =
+  /** It wrote a file, and this is what a fresh probe says that file is. */
+  | { kind: 'prepared'; probe: Probe }
+  /** This one could not do it. Another one still might. */
+  | { kind: 'failed'; reason: string }
+  /** Nothing else will help: stopped, cancelled, or no FFmpeg at all. */
+  | { kind: 'over' };
+
 /** A file an operator dropped or picked. */
 export interface DroppedFile {
   path: string;
@@ -691,7 +707,7 @@ export class IngestQueue {
     from: Probe,
     to: OvsProfile,
     backend: HevcBackend | null,
-  ): Promise<Probe | null> {
+  ): Promise<Attempt> {
     const rate = from.frameRate ?? { numerator: 25, denominator: 1 };
     const ofSeconds = from.durationMs === null ? null : from.durationMs / 1000;
     const tags = tagsFor(from.video ?? {});
@@ -720,7 +736,7 @@ export class IngestQueue {
     if (outcome.kind === 'stopped') {
       // Asked to stop, so there is nothing to say about it: whoever asked is
       // the one who already knows.
-      return null;
+      return { kind: 'over' };
     }
     if (!this.#holds(item)) {
       // Cancelled while it was running. Whatever the encoder wrote is this
@@ -728,7 +744,7 @@ export class IngestQueue {
       if (outcome.kind === 'prepared') {
         item.prepared = outcome.path;
       }
-      return null;
+      return { kind: 'over' };
     }
 
     if (outcome.kind === 'unavailable') {
@@ -737,11 +753,13 @@ export class IngestQueue {
         reason:
           'This file is not in a form the server plays, and nothing on this machine answered to “ffmpeg” to convert it. Install it so it is on the path, or point OVS_FFMPEG at it — then this file prepares itself. Otherwise convert it to HEVC or HAP elsewhere, or say what it is and it will be sent as that.',
       });
-      return null;
+      // No encoder on the machine will help, so there is no next backend.
+      return { kind: 'over' };
     }
     if (outcome.kind === 'failed') {
-      this.#set(item, { at: 'stopped', reason: outcome.reason, resumable: false });
-      return null;
+      // Said by the caller if every backend fails, rather than here, so that
+      // the first one's failure does not become the item's.
+      return { kind: 'failed', reason: outcome.reason };
     }
 
     item.prepared = outcome.path;
@@ -749,20 +767,23 @@ export class IngestQueue {
     // Read again, because what the encoder produced is what the server checks.
     const read = await this.ports.probe(outcome.path);
     if (!this.#holds(item)) {
-      return null;
+      return { kind: 'over' };
+    }
+    if (read.kind === 'failed') {
+      // Whatever this backend wrote cannot be read, which is this backend's
+      // answer and not the file's.
+      return { kind: 'failed', reason: `what it wrote could not be read back: ${read.reason}` };
     }
     if (read.kind !== 'read') {
       this.#set(item, {
         at: 'stopped',
         reason:
-          read.kind === 'failed'
-            ? `The prepared file could not be read back: ${read.reason}`
-            : 'The prepared file could not be read back, because the prober went away between preparing it and checking it.',
+          'The prepared file could not be read back, because the prober went away between preparing it and checking it.',
         resumable: false,
       });
-      return null;
+      return { kind: 'over' };
     }
-    return read.probe;
+    return { kind: 'prepared', probe: read.probe };
   }
 
   /**
@@ -844,15 +865,31 @@ export class IngestQueue {
     // actually conforms.
     const attempts: (HevcBackend | null)[] =
       decided.to === 'hap' ? [null] : decided.backends;
+    // Two different endings, kept apart because they read differently to the
+    // person holding the file: `lastFault` is a backend that produced
+    // something the server would refuse, `lastFailure` is one that produced
+    // nothing at all and said why.
     let lastFault = '';
+    let lastFailure = '';
 
     for (const backend of attempts) {
-      const prepared = await this.#prepare(item, probe, decided.to, backend);
-      if (prepared === null) {
-        // Stopped, cancelled, or failed outright. `#prepare` has already said.
+      const attempt = await this.#prepare(item, probe, decided.to, backend);
+      if (attempt.kind === 'over') {
+        // Stopped, cancelled, or no FFmpeg at all. `#prepare` has already said
+        // so where there was anything to say, and no other backend changes it.
         return null;
       }
-      const check = await this.#measure(item, prepared.video);
+      if (attempt.kind === 'failed') {
+        // **This backend could not do it; the next one still might.** A wrong
+        // flag, a depth an encoder does not have, a driver that is not really
+        // there: all of them end here, and on a machine with two encoders this
+        // is the difference between a file an operator can upload and one they
+        // cannot. It used to end the item.
+        lastFailure = attempt.reason;
+        await this.#discardWorking(item);
+        continue;
+      }
+      const check = await this.#measure(item, attempt.probe.video);
       if (check === null) {
         return null;
       }
@@ -862,7 +899,7 @@ export class IngestQueue {
         if (!this.#holds(item)) {
           return null;
         }
-        return { ...prepared, video: check };
+        return { ...attempt.probe, video: check };
       }
 
       lastFault = problems
@@ -870,22 +907,32 @@ export class IngestQueue {
         .join('; ');
       // This backend produced something the server would refuse. Throw it away
       // and try the next one; the source is still where it was.
-      const working = item.prepared;
-      item.prepared = null;
-      if (working !== null) {
-        await this.ports.discard(working).catch(() => undefined);
-      }
+      await this.#discardWorking(item);
     }
 
     this.#set(item, {
       at: 'stopped',
       reason:
-        lastFault === ''
-          ? 'This file could not be prepared into anything the server will take.'
-          : `This file was prepared, and what came out is still not something the server will take (${lastFault}). Nothing on this machine can produce it.`,
+        lastFault !== ''
+          ? `This file was prepared, and what came out is still not something the server will take (${lastFault}). Nothing on this machine can produce it.`
+          : lastFailure !== ''
+            ? // The encoder's own last words, unwrapped. Nothing was produced,
+              // so a sentence about what came out would be describing a file
+              // that does not exist.
+              lastFailure
+            : 'This file could not be prepared into anything the server will take.',
       resumable: false,
     });
     return null;
+  }
+
+  /** Throws away whatever the last attempt wrote. The source is untouched. */
+  async #discardWorking(item: QueueItem): Promise<void> {
+    const working = item.prepared;
+    item.prepared = null;
+    if (working !== null) {
+      await this.ports.discard(working).catch(() => undefined);
+    }
   }
 
   /**

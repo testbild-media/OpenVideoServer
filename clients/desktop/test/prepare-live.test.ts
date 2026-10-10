@@ -28,7 +28,7 @@ import { promisify } from 'node:util';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { CONVENTIONAL_TAGS, planFor, tagsFor } from '../src/shared/encoder.js';
+import { backendsAvailable, CONVENTIONAL_TAGS, planFor, tagsFor } from '../src/shared/encoder.js';
 import { faults, type OvsProfile, type ProbedVideo } from '../src/shared/profile.js';
 
 const run = promisify(execFile);
@@ -111,13 +111,21 @@ describe.skipIf(!available)('preparing a file with the FFmpeg on this machine', 
     expect(faults(video, 'hevc_8').map((fault) => fault.what)).toEqual(['codec']);
 
     const decided = planFor(video, encoders);
-    if (encoders.has('hevc_nvenc') || encoders.has('hevc_mf')) {
+    if (backendsAvailable(encoders).length > 0) {
       expect(decided).toMatchObject({ kind: 'encode', to: 'hevc_8' });
     } else {
       expect(decided.kind).toBe('unavailable');
     }
   });
 
+  // **Only the two that can be trusted to run where they are listed.**
+  // `ffmpeg -encoders` names `hevc_qsv` and `hevc_amf` on any machine whose
+  // FFmpeg was built with them, hardware or no hardware -- measured here on
+  // 2026-10-10, on a machine with one NVIDIA card and neither of the other two
+  // vendors. Encoding with them here would be a test of what card this
+  // happens to have. What protects an operator from the same gap is that a
+  // backend which fails is followed by the next one, which `ingest.test.ts`
+  // covers without needing the silicon.
   for (const backend of ['hevc_nvenc', 'hevc_mf'] as const) {
     it.skipIf(!encoders.has(backend))(
       `produces a file the server accepts, with ${backend}`,
@@ -254,7 +262,7 @@ describe.skipIf(!available)('preparing a file with the FFmpeg on this machine', 
     expect(names).toContain('mjpeg');
   });
 
-  it.skipIf(encoders.has('hevc_nvenc') || encoders.has('hevc_mf'))(
+  it.skipIf(backendsAvailable(encoders).length > 0)(
     'says so rather than producing something else, on a machine with no HEVC encoder',
     async () => {
       const source = await makeSource('no-backend.mp4', ['-c:v', 'libx264', '-pix_fmt', 'yuv420p']);

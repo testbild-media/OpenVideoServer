@@ -228,10 +228,19 @@ describe('which encoder, and what it is told', () => {
     expect(plan.kind).toBe('unavailable');
   });
 
-  it('only offers backends the binary actually has', () => {
+  it('only offers backends the binary actually has, in preference order', () => {
     expect(backendsAvailable(new Set())).toEqual([]);
     expect(backendsAvailable(new Set(['hevc_nvenc']))).toEqual(['hevc_nvenc']);
-    expect(backendsAvailable(new Set(['hevc_mf', 'hevc_nvenc']))).toEqual(HEVC_BACKENDS.slice());
+    // Named in the wrong order on purpose: the order is this list's, not the
+    // binary's, and a set has none of its own to borrow.
+    expect(backendsAvailable(new Set([...HEVC_BACKENDS].reverse()))).toEqual(HEVC_BACKENDS.slice());
+    // A vendor's own encoder before Windows' wrapper around the same silicon,
+    // and software behind all of them.
+    expect(backendsAvailable(new Set(['libkvazaar', 'hevc_mf', 'hevc_amf']))).toEqual([
+      'hevc_amf',
+      'hevc_mf',
+      'libkvazaar',
+    ]);
   });
 });
 

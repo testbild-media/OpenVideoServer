@@ -340,6 +340,8 @@ function harness(
     afterPreparing?: ProbeOutcome;
     byteSize?: number;
     prepare?: PrepareOutcome;
+    /** What each backend in turn comes to, for a test about falling through. */
+    prepareByBackend?: Readonly<Record<string, PrepareOutcome>>;
     /** Whether preparing hangs until it is told to stop. */
     prepareSlowly?: boolean;
     /** What the server says it can decode. Everything, unless a test narrows it. */
@@ -384,8 +386,10 @@ function harness(
           stop.addEventListener('abort', () => resolve({ kind: 'stopped' }), { once: true });
         });
       }
+      const named = options.prepareByBackend?.[backend ?? ''];
       return Promise.resolve(
-        options.prepare ?? { kind: 'prepared', path: '/tmp/ovs-prepare-x/clip.hevc.mp4' },
+        named ??
+          options.prepare ?? { kind: 'prepared', path: '/tmp/ovs-prepare-x/clip.hevc.mp4' },
       );
     },
     discard: (path) => {
@@ -677,6 +681,48 @@ describe('the ingest queue', () => {
     });
     // Nothing was made, so nothing is removed.
     expect(discarded).toEqual([]);
+  });
+
+  it('tries the next backend when one fails outright', async () => {
+    // **The behaviour that makes listing an encoder safe.** `ffmpeg -encoders`
+    // names `hevc_qsv` and `hevc_amf` on any FFmpeg built with them, silicon
+    // or no silicon, so the first backend failing to open a device is an
+    // ordinary evening rather than a fault. It used to end the file.
+    const { queue, prepared } = harness({
+      probe: { kind: 'read', probe: needsPreparing({ container: 'mov,mp4' }) },
+      // What the second backend wrote, read back: this one the server takes.
+      afterPreparing: { kind: 'read', probe: prores({ container: 'mov,mp4' }) },
+      encoders: ['hevc_nvenc', 'hevc_mf'],
+      prepareByBackend: {
+        hevc_nvenc: { kind: 'failed', reason: 'Cannot load nvcuda.dll' },
+        hevc_mf: { kind: 'prepared', path: '/tmp/ovs-prepare-x/clip.hevc.mp4' },
+      },
+    });
+    queue.add([{ path: '/media/opener.mp4', name: 'opener.mp4' }]);
+
+    const items = await settled(queue);
+
+    expect(prepared.map((attempt) => attempt.backend)).toEqual(['hevc_nvenc', 'hevc_mf']);
+    expect(items[0]?.stage.at).not.toBe('stopped');
+  });
+
+  it('says the encoder\u2019s own words when every backend fails', async () => {
+    // Nothing was produced, so the sentence must not be about what came out.
+    const { queue, prepared } = harness({
+      probe: { kind: 'read', probe: needsPreparing({ container: 'mov,mp4' }) },
+      encoders: ['hevc_nvenc', 'hevc_mf'],
+      prepare: { kind: 'failed', reason: 'Preparing this file failed: Invalid data found' },
+    });
+    queue.add([{ path: '/media/opener.mp4', name: 'opener.mp4' }]);
+
+    const items = await settled(queue);
+
+    expect(prepared).toHaveLength(2);
+    expect(items[0]?.stage).toEqual({
+      at: 'stopped',
+      reason: 'Preparing this file failed: Invalid data found',
+      resumable: false,
+    });
   });
 
   it('refuses a picture too large for the server before preparing it', async () => {
