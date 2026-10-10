@@ -536,7 +536,7 @@ impl GeneratorSource {
                 // half-cycles would be a number climbing all evening to pick
                 // between two things, and it would eventually run out.
                 let halves = moment.since_anchor.as_secs_f64() * clamp_rate(*hz) * 2.0;
-                Some(u32::from(halves as u64 % 2 == 1))
+                Some((halves as u64 % 2) as u32)
             }
             Kind::Countdown { .. } => {
                 let last = self.kind.length().frame_count.saturating_sub(1);
@@ -628,7 +628,7 @@ fn draw_kind(kind: &Kind, size: SizePx, pixels: &mut [u8], tick: u32) {
             // rather than black: a strobe belongs over whatever is under it,
             // and filling with black would make it a blackout with a flash in
             // it. The layer's own opacity still scales the flash.
-            let lit = tick % 2 == 0;
+            let lit = tick.is_multiple_of(2);
             let rgba = to_bytes(if lit {
                 *colour
             } else {
@@ -1706,8 +1706,7 @@ mod tests {
                     since_anchor: Duration::from_secs_f64(f64::from(frame) / 60.0),
                 })
                 .expect("a tick")
-                % 2
-                == 0;
+                .is_multiple_of(2);
             if lit && !was_lit {
                 flashes += 1;
             }
