@@ -104,7 +104,40 @@ jobs:
 
       - name: Build the FFmpeg that may be shipped
         shell: msys2 {0}
-        run: ./tools/build-ffmpeg.sh --profile client
+        run: |
+          set -o pipefail
+          ./tools/build-ffmpeg.sh --profile client 2>&1 | tee /tmp/ffmpeg.log
+
+      # **So a failure says why without an account.** Reading an Actions log
+      # needs somebody signed in and downloading one needs a token, but a
+      # workflow command comes back through the public API as an annotation on
+      # the run. On 2026-10-10 this step failed in under three minutes and the
+      # only thing legible from outside was "exit code 1", which cost a whole
+      # release cycle to a fault nobody could name.
+      #
+      # `config.log` as well as the build output: configure writes the reason a
+      # library or a header was missing there and nowhere else, and that is
+      # usually the whole answer.
+      - name: Say why it failed
+        if: failure()
+        shell: msys2 {0}
+        run: |
+          note() {
+            # Newlines and per cents escaped the way the runner wants them, and
+            # the last thirty lines only: an annotation has a size limit and
+            # the end of a build log is the part that says what went wrong.
+            printf '::error title=%s::%s\n' "$1" \
+              "$(sed -e 's/%/%25/g' -e 's/\r$//' "$2" | tail -n 30 | awk '{ printf "%s%%0A", $0 }')"
+          }
+          if [ -f /tmp/ffmpeg.log ]; then
+            note 'build-ffmpeg.sh' /tmp/ffmpeg.log
+          else
+            echo '::error title=build-ffmpeg.sh::The step wrote no log at all, so it died before the script started.'
+          fi
+          find . -name config.log 2>/dev/null | while read -r log; do
+            note 'configure' "$log"
+          done
+          exit 0
 
       # Separately from the build that produced it, because what matters is
       # what came out: the check reads `ffmpeg -version` and fails on
@@ -147,6 +180,19 @@ jobs:
   package:
     needs: windows-client
     runs-on: ubuntu-latest
+
+    # **Built even when the Windows client is not.** The two halves are
+    # independent: everything in the `.deb` except the installer comes from
+    # this repository's Rust, and the renderer is where a fault that stops a
+    # show gets fixed. Making a server wait for a Windows toolchain to come
+    # back is how a fix that was ready and tested sat in a failed run instead
+    # (2026-10-10).
+    #
+    # What that costs is said out loud by the step below rather than left to be
+    # discovered: a package with no installer in it still owns the client
+    # directory, so installing it over an older one takes away the installer
+    # the server's download page was offering.
+    if: always() && needs.windows-client.result != 'cancelled'
 
     # **Debian, not the Ubuntu runner.** `dpkg-shlibdeps` reads the binaries and
     # asks the local dpkg which package owns each library, so a package built on
@@ -202,12 +248,18 @@ jobs:
       # Into `dist/client`, which is the one place `tools/package.sh` looks.
       - name: Take the Windows installer from the job before
         uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           name: windows-client
           path: dist/client
 
       - name: Say what the package will carry
-        run: ls -l dist/client/
+        shell: bash
+        run: |
+          ls -l dist/client/ 2>/dev/null || true
+          if ! ls dist/client/* > /dev/null 2>&1; then
+            echo '::warning title=No Windows client::This package carries no installer, so installing it over an older one takes the download page'"'"'s installer away with it. Put one back by hand, or run this workflow again once the client builds.'
+          fi
 
       - name: Install the pinned toolchain
         run: |
