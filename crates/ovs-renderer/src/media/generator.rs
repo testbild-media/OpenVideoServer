@@ -528,6 +528,17 @@ impl GeneratorSource {
         Some(&live.image)
     }
 
+    /// Forgets which tick is on the GPU, so the next redraw draws again.
+    ///
+    /// For when something other than this generator has written the layer's
+    /// texture. The kept buffer is still right; what is on the GPU is not, and
+    /// `redraw_at` compares against the former.
+    pub fn forget_drawn(&mut self) {
+        if let Some(live) = self.live.as_mut() {
+            live.drawn = None;
+        }
+    }
+
     /// Draws the frame at an index.
     fn draw(&self, index: u32) -> DecodedImage {
         let mut image = blank(self.size);

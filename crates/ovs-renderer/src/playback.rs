@@ -64,6 +64,32 @@ pub struct PlaybackReport {
     pub failed: u32,
 }
 
+/// What last drew into a layer's texture.
+///
+/// Three sources write `TextureKey::Layer(layer_id)` -- a generator, a network
+/// receiver and a clip's player -- and each keeps its own record of what it
+/// last put there, so each can decide it has nothing to do. None of the three
+/// knew about the other two, and all three records are about the *source*
+/// while the texture is shared between them.
+///
+/// The owner found it from the desk, 2026-10-10: "Slot3 NDI und Slot1+2
+/// Generator", switching between slot 1 and slot 3 and back. What a generator
+/// is built from includes its slot, so pendling between the same two slots
+/// leaves it unchanged: the generator decided it had already drawn, drew
+/// nothing, and the NDI frame that had overwritten its texture in between
+/// stayed on the wall -- with the layer's effects following the show, which is
+/// why the effect visibly went away. Rotating 3-2-3-1 changed the slot on
+/// every switch, rebuilt every time, and looked perfectly fine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Drawn {
+    /// A generator drew it.
+    Generator,
+    /// A frame from a network sender.
+    Ndi,
+    /// A frame of a clip.
+    Clip,
+}
+
 /// What a layer's generator was built from.
 ///
 /// Everything that changes which generator this is: the slot, what it is and
@@ -223,6 +249,12 @@ pub struct Playback {
     /// the map entirely would make the scene fall back to a shared texture that
     /// a clip never has, which is a white rectangle where the picture should be.
     showing: BTreeMap<LayerId, bool>,
+    /// Which kind of source last wrote each layer's texture.
+    ///
+    /// The one fact none of the three per-source records held; see [`Drawn`].
+    /// Written where an upload succeeded rather than where a source was
+    /// chosen, so a pass on which nothing changed still costs one comparison.
+    drawn: BTreeMap<LayerId, Drawn>,
     /// Each layer's generator, and what it was built from.
     ///
     /// Held so that a generator is drawn when its picture changes and not
@@ -313,6 +345,7 @@ impl Playback {
             complained_ndi: BTreeSet::new(),
             strained: BTreeSet::new(),
             showing: BTreeMap::new(),
+            drawn: BTreeMap::new(),
             failed: BTreeMap::new(),
             errors: 0,
             late_frames: 0,
@@ -652,7 +685,15 @@ impl Playback {
                 }
 
                 if let Some(frame) = playing.player.frame(playhead.frame) {
-                    if playing.uploaded != Some(frame.index) {
+                    // The same frame index is only still on the GPU if nothing
+                    // else has written this layer's texture since. A clip
+                    // paused or holding its last frame, switched away to a
+                    // generator and switched back, is the video half of the
+                    // same fault -- which the owner had seen before he found
+                    // it with a generator: "Das hatte ich aber auch schon mit
+                    // Videos das Phaenomen".
+                    let ours = self.drawn.get(&layer.id) == Some(&Drawn::Clip);
+                    if playing.uploaded != Some(frame.index) || !ours {
                         // Queued rather than copied here: every layer's
                         // picture goes over the bus in the same breath, which
                         // one core cannot do alone.
@@ -662,6 +703,7 @@ impl Playback {
                         ) {
                             Ok(()) => {
                                 playing.uploaded = Some(frame.index);
+                                self.drawn.insert(layer.id, Drawn::Clip);
                                 report.uploaded += 1;
                             }
                             Err(error) => {
@@ -760,6 +802,13 @@ impl Playback {
         for layer_id in std::mem::take(&mut self.generated).into_keys() {
             compositor.drop_texture(TextureKey::Layer(layer_id));
         }
+        // Dropping a receiver closes a connection, which is the one of these
+        // three that costs somebody else something: a sender left feeding a
+        // receiver nobody reads is bandwidth spent on a show that is closed.
+        for layer_id in std::mem::take(&mut self.receiving).into_keys() {
+            compositor.drop_texture(TextureKey::Layer(layer_id));
+        }
+        self.drawn.clear();
         self.complained_generators.clear();
         self.strained.clear();
         self.showing.clear();
@@ -883,6 +932,10 @@ impl Playback {
             .generated
             .get(&layer_id)
             .is_some_and(|generated| generated.from == from);
+        // `built` says this generator was made from the same inputs as last
+        // pass. It was being read as "and so its picture is still on the GPU",
+        // which is a different fact and the one that was wrong; see [`Drawn`].
+        let ours = self.drawn.get(&layer_id) == Some(&Drawn::Generator);
 
         if !built {
             let Some(source) = GeneratorSource::new(type_id, *version, &effective, size) else {
@@ -927,8 +980,16 @@ impl Playback {
             generated.trigger = trigger;
         }
 
+        // Somebody else has written this layer's texture. The buffer a moving
+        // generator keeps is still right, so only its belief about the GPU is
+        // dropped -- and dropping it here is what lets the `None` arm below go
+        // on returning `built`, because a forgotten buffer always redraws.
+        if !ours {
+            generated.source.forget_drawn();
+        }
+
         if !generated.source.changes_over_time() {
-            if built {
+            if built && ours {
                 // Drawn already, and it draws the same thing every time.
                 return true;
             }
@@ -940,6 +1001,7 @@ impl Playback {
             return match compositor.upload_texture(TextureKey::Layer(layer_id), &frame.image) {
                 Ok(()) => {
                     self.complained_generators.remove(&layer_id);
+                    self.drawn.insert(layer_id, Drawn::Generator);
                     report.uploaded += 1;
                     true
                 }
@@ -967,6 +1029,7 @@ impl Playback {
         match uploaded {
             Ok(()) => {
                 self.complained_generators.remove(&layer_id);
+                self.drawn.insert(layer_id, Drawn::Generator);
                 report.uploaded += 1;
                 true
             }
@@ -1340,6 +1403,13 @@ impl Playback {
             }
         };
 
+        // Whether the layer's texture still holds this receiver's own frame. A
+        // live source with nothing new to send is where this matters: its own
+        // record is of arrivals, and no arrival means no upload, so switching
+        // to a generator and back showed the generator until the sender
+        // happened to produce a frame.
+        let ours = self.drawn.get(&layer_id) == Some(&Drawn::Ndi);
+
         // A different name is a different connection. A new *trigger* is not:
         // there is nothing to start over in a live source, and reconnecting on
         // it would put a gap on the wall every time an operator hit the pad.
@@ -1364,7 +1434,7 @@ impl Playback {
 
         // The whole per-frame cost of a network layer when nothing has changed.
         let arrived = holding.receiver.arrived();
-        if arrived == holding.uploaded {
+        if arrived == holding.uploaded && ours {
             // `uploaded` starts at zero and arrivals count from one, so this is
             // also "nothing has arrived yet" — a layer waiting for a sender
             // somebody has not switched on, whose placeholder is the right
@@ -1372,12 +1442,16 @@ impl Playback {
             return holding.uploaded > 0;
         }
         let Some(frame) = holding.receiver.frame() else {
-            return holding.uploaded > 0;
+            // Nothing to put there. With somebody else's picture on the
+            // texture, saying this layer is showing would claim it as this
+            // source's; the placeholder is the honest thing to draw.
+            return holding.uploaded > 0 && ours;
         };
 
         match compositor.upload_texture(TextureKey::Layer(layer_id), &frame) {
             Ok(()) => {
                 holding.uploaded = arrived;
+                self.drawn.insert(layer_id, Drawn::Ndi);
                 self.complained_ndi.remove(&(layer_id, slot_index));
                 report.uploaded += 1;
                 true
@@ -1387,7 +1461,7 @@ impl Playback {
                 // — with whatever the newest frame is by then, which for a live
                 // source is the only one worth having.
                 tracing::warn!("{error}");
-                holding.uploaded > 0
+                holding.uploaded > 0 && ours
             }
         }
     }
@@ -1415,6 +1489,7 @@ impl Playback {
             }
             self.generated.remove(&layer_id);
             self.receiving.remove(&layer_id);
+            self.drawn.remove(&layer_id);
             compositor.drop_texture(TextureKey::Layer(layer_id));
         }
 
@@ -2436,6 +2511,93 @@ mod tests {
     }
 
     /// A show playing `item` in the given mode and direction.
+    /// One layer with a generator on slot 1 and a clip on slot 2.
+    fn show_two_slots(media_item_id: MediaItemId, generator: SourceRef) -> (ShowState, LayerId) {
+        let mut show = Show::new("Show");
+        show.composition.size = SizePx::new(32, 32);
+        let mut layer = Layer::new("Layer 1", 0);
+        layer.slots.push(Slot {
+            index: 1,
+            source: generator,
+            sync: ovs_types::config::slot::SlotSync::default(),
+            speed: 1.0,
+            playback_mode: ovs_types::config::PlaybackMode::Loop,
+            direction: ovs_types::config::PlaybackDirection::Forward,
+            transform: ovs_types::geometry::Transform2D::IDENTITY,
+            effects: Vec::new(),
+        });
+        layer.slots.push(Slot::media(2, media_item_id));
+        let layer_id = layer.id;
+        show.layers.push(layer);
+
+        let mut live = LayerLive::black(layer_id);
+        live.active_slot = 1;
+
+        let state = ShowState {
+            show: Some(Box::new(show)),
+            master: MasterLive::default(),
+            layers: vec![live],
+            ..ShowState::default()
+        };
+        (state, layer_id)
+    }
+
+    #[test]
+    fn switching_back_to_a_generator_draws_it_again() {
+        // The owner, from the desk on 2026-10-10: "Slot3 NDI und Slot1+2
+        // Generator.. es passiert nur wenn ich zwischen Slot 1 und Slot3 bzw.
+        // Slot 2 und Slot3 wechsle hin und her". What a generator was built
+        // from includes its slot, so going back to the slot it was last built
+        // for leaves that unchanged and it decides it has already drawn --
+        // while something else has had the layer's texture in between, and
+        // that is what stays on the wall. Rotating through three slots changes
+        // it every time, which is why "Slot 3 > Slot 2 > Slot 3 > Slot 1"
+        // looked perfectly fine.
+        //
+        // A clip stands in for the network source he found it with. Both write
+        // `TextureKey::Layer` and the fault is in that sharing, not in either
+        // of them; NDI needs a runtime a test cannot have, and this is the
+        // half he had already seen it in: "Das hatte ich aber auch schon mit
+        // Videos das Phaenomen".
+        let item = MediaItemId::new();
+        let (mut state, layer_id) = show_two_slots(item, solid([1.0, 0.0, 0.0, 1.0]));
+        let catalogue = catalogue(item, MediaKind::Video);
+        let mut compositor = HeadlessCompositor::sized(SizePx::new(32, 32));
+        let mut playback = Playback::new(Instant::now(), true);
+        let red = Some([255, 0, 0, 255]);
+
+        let first = playback.update(&state, &catalogue, &mut compositor, Instant::now());
+        assert_eq!(first.uploaded, 1, "the generator drew itself");
+        assert_eq!(compositor.texture(layer_id).map(|(_, pixel)| pixel), red);
+
+        // On to the clip, and wait for a frame of it to land: the decoder is on
+        // its own thread, so the pass that switches has nothing to show yet.
+        state.layers[0].active_slot = 2;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline
+            && compositor.texture(layer_id).map(|(_, pixel)| pixel) == red
+        {
+            playback.update(&state, &catalogue, &mut compositor, Instant::now());
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert_ne!(
+            compositor.texture(layer_id).map(|(_, pixel)| pixel),
+            red,
+            "the clip has the layer's texture now"
+        );
+
+        // And back to the generator that has already drawn once.
+        state.layers[0].active_slot = 1;
+        let back = playback.update(&state, &catalogue, &mut compositor, Instant::now());
+
+        assert_eq!(back.uploaded, 1, "drawn again, because the texture moved on");
+        assert_eq!(
+            compositor.texture(layer_id).map(|(_, pixel)| pixel),
+            red,
+            "and the wall shows the generator rather than the clip"
+        );
+    }
+
     fn show_playing(
         media_item_id: MediaItemId,
         mode: ovs_types::config::PlaybackMode,
