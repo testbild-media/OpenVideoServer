@@ -2590,7 +2590,10 @@ mod tests {
         state.layers[0].active_slot = 1;
         let back = playback.update(&state, &catalogue, &mut compositor, Instant::now());
 
-        assert_eq!(back.uploaded, 1, "drawn again, because the texture moved on");
+        assert_eq!(
+            back.uploaded, 1,
+            "drawn again, because the texture moved on"
+        );
         assert_eq!(
             compositor.texture(layer_id).map(|(_, pixel)| pixel),
             red,
