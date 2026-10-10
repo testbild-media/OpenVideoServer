@@ -254,3 +254,20 @@ jobs:
 
       - name: Say what came out
         run: dpkg-deb --info target/package/*.deb
+
+      # So a push that proved itself leaves something to install. The package
+      # is already on the disc at this point and keeping it costs the upload.
+      #
+      # **Not the same package a release publishes.** Nothing has built the
+      # Windows client by this point, so `dist/client` is empty and this one
+      # carries no installer for the server's download page to offer — which
+      # is the whole reason the release workflow runs its two jobs in order.
+      # Good for putting a server build on a machine; not for handing a client
+      # to somebody on a second laptop.
+      - name: Keep the package
+        uses: actions/upload-artifact@v4
+        with:
+          name: debian-package
+          path: |
+            target/package/*.deb
+            target/package/*.sha256
