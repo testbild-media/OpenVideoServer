@@ -468,6 +468,20 @@ if [ "$profile" = server ]; then
 else
   sharing="--disable-shared --enable-static"
   sharing="$sharing --extra-ldflags=-static"
+  # **The C++ runtime, named rather than left to luck.** `libvpl.a` carries
+  # C++ objects as of libvpl 2.17 (MSYS2 moved to it on 2026-10-10, mid
+  # evening), and FFmpeg links its configure check for libvpl with the C
+  # compiler -- so a library that was installed, with its `vpl.pc` right
+  # there, came back as "libvpl >= 2.6 not found" while `config.log` showed
+  # `__cxa_begin_catch` and `__gxx_personality_seh0` undefined. FFmpeg names
+  # `-lstdc++` itself for snappy, which is why that half has always worked,
+  # and does not for libvpl.
+  #
+  # Nothing new ends up in the binary: snappy is C++ and already brings
+  # libstdc++ in, which the comment above this says in as many words. And
+  # libstdc++ carries the GCC Runtime Library Exception, which exists so that
+  # a program under any licence may link it.
+  sharing="$sharing --extra-libs=-lstdc++"
   decoders="$DECODERS"
 fi
 readonly sharing decoders
