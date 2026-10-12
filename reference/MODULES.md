@@ -99,6 +99,9 @@ Value noise at a scale, monochrome or coloured.
 
 The time of day, drawn large.
 
+**Retired.** Not offered when adding one, and still served to a show that already
+             names it, so nothing that was saved with it loses a layer.
+
 | Parameter | Key | Takes | Default |
 |---|---|---|---|
 | 24-hour | `hour_24` | on or off | on |
@@ -110,6 +113,9 @@ The time of day, drawn large.
 ### Countdown — `ovs.countdown` v1
 
 Time remaining, counting down to zero.
+
+**Retired.** Not offered when adding one, and still served to a show that already
+             names it, so nothing that was saved with it loses a layer.
 
 | Parameter | Key | Takes | Default |
 |---|---|---|---|
@@ -172,6 +178,9 @@ Brightness, contrast, saturation, gamma, and the white point.
 ### Tint — `ovs.tint` v1
 
 Mixes the picture towards one colour.
+
+**Retired.** Not offered when adding one, and still served to a show that already
+             names it, so nothing that was saved with it loses a layer.
 
 | Parameter | Key | Takes | Default |
 |---|---|---|---|

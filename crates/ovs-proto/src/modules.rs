@@ -45,6 +45,7 @@ pub fn markdown() -> String {
             manifest.version,
             manifest.description,
             manifest.parameters,
+            ovs_types::config::generators::RETIRED.contains(&manifest.type_id),
         );
     }
 
@@ -66,6 +67,7 @@ pub fn markdown() -> String {
             manifest.version,
             manifest.description,
             manifest.parameters,
+            ovs_types::config::effects::RETIRED.contains(&manifest.type_id),
         );
     }
 
@@ -80,11 +82,17 @@ fn module(
     version: u32,
     description: &str,
     parameters: &[ParameterDefinition],
+    retired: bool,
 ) {
     use std::fmt::Write as _;
 
     let _ = writeln!(out, "### {name} — `{type_id}` v{version}\n");
     let _ = writeln!(out, "{description}\n");
+    if retired {
+        out.push_str(
+            "**Retired.** Not offered when adding one, and still served to a show that already\n             names it, so nothing that was saved with it loses a layer.\n\n",
+        );
+    }
 
     if parameters.is_empty() {
         out.push_str("Takes no parameters.\n\n");
