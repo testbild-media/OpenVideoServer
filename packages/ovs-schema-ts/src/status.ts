@@ -475,6 +475,14 @@ export interface OutputTelemetry {
    */
   refresh: FrameRate;
   /**
+   * Whether this output is drawing the pieces a show cut for it.
+   *
+   * False means it is showing the whole composition instead, which is what an output the show says nothing about falls back to — right for a panel nobody has patched yet, and wrong in a way nothing announced for one that was patched and has quietly lost its assignment.
+   *
+   * It decides the masked preview too: an unmapped output puts the whole surface into the mask, so the "Pieces" picture becomes the plain composition. An operator seeing that had no way to tell which of the two had happened (owner, 2026-10-12: "Wann das passiert und weggefallen ist kann ich nicht sagen"), because this was reported nowhere.
+   */
+  showing_pieces?: boolean;
+  /**
    * Resolution actually in use.
    */
   size: SizePx;

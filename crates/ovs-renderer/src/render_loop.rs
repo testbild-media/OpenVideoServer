@@ -461,6 +461,10 @@ impl RenderLoop {
                 // cable, which is the truth until it is brought up.
                 composition_depth: backend.composition_depth(),
                 output_depth: backend.output_depth(),
+                // Nothing is mapped until a show is loaded and the planner has
+                // matched this socket to one of its outputs. Refreshed every
+                // pass below, where the answer is known.
+                showing_pieces: false,
             });
             driven.push(DrivenOutput {
                 backend,
@@ -2147,6 +2151,9 @@ impl RenderLoop {
             // the moment this list is built and can change afterwards.
             entry.composition_depth = output.backend.composition_depth();
             entry.output_depth = output.backend.output_depth();
+            // Every pass, because a show being opened or closed changes it and
+            // nothing else announces that it has.
+            entry.showing_pieces = output.mapped;
         }
 
         // **The System screen is not one of the show's outputs.** It was

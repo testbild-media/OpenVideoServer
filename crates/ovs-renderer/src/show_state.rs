@@ -1160,6 +1160,7 @@ mod tests {
             // depth at all on the cable.
             composition_depth: ovs_types::depth::CompositionDepth::Eight,
             output_depth: ovs_types::depth::OutputDepth::Unknown,
+            showing_pieces: true,
         };
         shared.publish_telemetry(vec![entry.clone()]);
 

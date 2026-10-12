@@ -1403,6 +1403,7 @@ mod tests {
             composition_depth: ovs_types::depth::CompositionDepth::Eight,
             output_depth: ovs_types::depth::OutputDepth::Unknown,
             connector: Some("HDMI-0".to_owned()),
+            showing_pieces: true,
         }
     }
 

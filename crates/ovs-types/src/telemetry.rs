@@ -434,6 +434,20 @@ pub struct OutputTelemetry {
     /// The socket it is forced onto: `HDMI-0`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connector: Option<String>,
+    /// Whether this output is drawing the pieces a show cut for it.
+    ///
+    /// False means it is showing the whole composition instead, which is what
+    /// an output the show says nothing about falls back to — right for a panel
+    /// nobody has patched yet, and wrong in a way nothing announced for one
+    /// that was patched and has quietly lost its assignment.
+    ///
+    /// It decides the masked preview too: an unmapped output puts the whole
+    /// surface into the mask, so the "Pieces" picture becomes the plain
+    /// composition. An operator seeing that had no way to tell which of the
+    /// two had happened (owner, 2026-10-12: "Wann das passiert und weggefallen
+    /// ist kann ich nicht sagen"), because this was reported nowhere.
+    #[serde(default)]
+    pub showing_pieces: bool,
     /// Dropped frame counters.
     pub dropped_frames: DroppedFrames,
     /// How many bits a channel carries inside the compositor.
@@ -692,6 +706,7 @@ mod tests {
             dropped_frames: frames,
             display: None,
             connector: None,
+            showing_pieces: true,
             // A stand-in output composes through nothing and is plugged
             // into nothing, so it reports the default pipeline and no
             // depth at all on the cable.
