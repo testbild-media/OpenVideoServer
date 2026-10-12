@@ -72,6 +72,10 @@ const KIND_BLUR_ACROSS: u32 = 4u;
 const KIND_BLUR_DOWN: u32 = 5u;
 const KIND_CROP: u32 = 6u;
 const KIND_WHITE_BALANCE: u32 = 7u;
+const KIND_MIRROR: u32 = 8u;
+const KIND_COLORIZE: u32 = 9u;
+const KIND_RGB_CORRECT: u32 = 10u;
+const KIND_RGB_SPLIT: u32 = 11u;
 
 /// The temperature at which the white point is left alone, in kelvin.
 ///
@@ -342,6 +346,106 @@ fn white_balance(source: vec4<f32>) -> vec4<f32> {
     return vec4<f32>(source.rgb * gain, source.a);
 }
 
+/// Folds one half of the picture onto the other, on either axis or both.
+///
+/// A fold is a reflection of where the picture is *read* from, not of what is
+/// written: `min` keeps the low side and sends the high side to its mirror,
+/// `max` does the opposite. With both axes folded a quadrant is mirrored twice,
+/// which is the kaleidoscope this is for.
+fn mirror(uv: vec2<f32>) -> vec4<f32> {
+    var at = uv;
+
+    let horizontal = u32(max(effect.values.x, 0.0));
+    if horizontal == 1u {
+        at.x = min(at.x, 1.0 - at.x);
+    } else if horizontal == 2u {
+        at.x = max(at.x, 1.0 - at.x);
+    }
+
+    let vertical = u32(max(effect.values.y, 0.0));
+    if vertical == 1u {
+        at.y = min(at.y, 1.0 - at.y);
+    } else if vertical == 2u {
+        at.y = max(at.y, 1.0 - at.y);
+    }
+
+    return read(at);
+}
+
+/// The fully saturated colour at a hue, in degrees.
+///
+/// The three channels as three triangles a third of the wheel apart, which is
+/// the whole of a hue-to-RGB conversion once the value and the saturation are
+/// taken out of it — and they are, here, because the picture supplies one and
+/// a control supplies the other.
+fn rgb_from_hue(degrees: f32) -> vec3<f32> {
+    let hue = fract(degrees / 360.0) * 6.0;
+    return clamp(
+        vec3<f32>(
+            abs(hue - 3.0) - 1.0,
+            2.0 - abs(hue - 2.0),
+            2.0 - abs(hue - 4.0),
+        ),
+        vec3<f32>(0.0),
+        vec3<f32>(1.0),
+    );
+}
+
+/// Throws the colour away and paints the brightness back in.
+///
+/// The picture's luma is the value and the controls are the hue and the
+/// saturation, which is what "colour the luma in" means: saturation at zero is
+/// the picture in monochrome, and that is a useful place to stop rather than a
+/// dead end of the control.
+///
+/// `amount` mixes it back against what came in, so the published default of
+/// zero changes nothing.
+fn colorize(source: vec4<f32>) -> vec4<f32> {
+    let saturation = clamp(effect.values.y, 0.0, 1.0);
+    let amount = clamp(effect.values.z, 0.0, 1.0);
+
+    let luma = dot(source.rgb, LUMA_WEIGHTS);
+    let hue = mix(vec3<f32>(1.0), rgb_from_hue(effect.values.x), saturation);
+
+    return vec4<f32>(mix(source.rgb, hue * luma, amount), source.a);
+}
+
+/// A black level and a white level, per channel.
+///
+/// Black goes to the lift, white goes to the gain, and everything between
+/// follows the straight line joining them — which is what those two words mean
+/// on a desk. Lift at zero and gain at one is the identity, so the published
+/// defaults change nothing.
+///
+/// The lift arrives in the colour slot because it is a colour: a per-channel
+/// offset at black. See the comment beside the pass this is built from.
+fn rgb_correct(source: vec4<f32>) -> vec4<f32> {
+    let lift = effect.colour.rgb;
+    let gain = effect.values.rgb;
+    return vec4<f32>(lift + source.rgb * (gain - lift), source.a);
+}
+
+/// Pulls the channels apart along a line.
+///
+/// Red one way, blue the other, green where it was. The offset is in
+/// composition pixels, so a look set up on one composition is the same look
+/// after the pieces are mapped onto a wall of another size.
+///
+/// The alpha is the middle sample's: the coverage belongs to the layer, and
+/// three different coverages would put a fringe on the edge of every shape
+/// that the channels themselves do not have.
+fn rgb_split(uv: vec2<f32>) -> vec4<f32> {
+    let offset = max(effect.values.x, 0.0);
+    let angle = radians(effect.values.y);
+    let step = vec2<f32>(cos(angle), sin(angle)) * offset * effect.texel;
+
+    let red = read(uv + step);
+    let green = read(uv);
+    let blue = read(uv - step);
+
+    return vec4<f32>(red.r, green.g, blue.b, green.a);
+}
+
 @fragment
 fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // Straight alpha throughout, never premultiplied. What comes out of the
@@ -374,6 +478,18 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         }
         case KIND_WHITE_BALANCE: {
             return white_balance(source);
+        }
+        case KIND_MIRROR: {
+            return mirror(input.uv);
+        }
+        case KIND_COLORIZE: {
+            return colorize(source);
+        }
+        case KIND_RGB_CORRECT: {
+            return rgb_correct(source);
+        }
+        case KIND_RGB_SPLIT: {
+            return rgb_split(input.uv);
         }
         // Unreachable: the renderer only ever writes a kind it has a branch
         // for. Returning the picture untouched is the one answer that cannot

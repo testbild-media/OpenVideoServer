@@ -214,6 +214,63 @@ Footprint: **8 channels**. Patch to: **one effect instance in a chain**.
 | 5–6 | Top | `top_px` | 0 at 0, 8192 at 65535 | 0 |
 | 7–8 | Bottom | `bottom_px` | 0 at 0, 8192 at 65535 | 0 |
 
+## Mirror — `ovs.mirror` v1
+
+Footprint: **2 channels**. Patch to: **one effect instance in a chain**.
+
+| Channel | Name | Control | Values | Home |
+|---|---|---|---|---|
+| 1 | Horizontal | `horizontal` | 3 steps, listed below | 42 |
+| 2 | Vertical | `vertical` | 3 steps, listed below | 42 |
+
+### Horizontal (channel 1)
+
+| DMX | Step |
+|---|---|
+| 0–85 | `off` |
+| 86–170 | `left` |
+| 171–255 | `right` |
+
+### Vertical (channel 2)
+
+| DMX | Step |
+|---|---|
+| 0–85 | `off` |
+| 86–170 | `top` |
+| 171–255 | `bottom` |
+
+## Colorize — `ovs.colorize` v1
+
+Footprint: **6 channels**. Patch to: **one effect instance in a chain**.
+
+| Channel | Name | Control | Values | Home |
+|---|---|---|---|---|
+| 1–2 | Hue | `hue` | 0 at 0, 360 at 65535 | 0 |
+| 3–4 | Saturation | `saturation` | 0 at 0, 1 at 65535 | 65535 |
+| 5–6 | Amount | `amount` | 0 at 0, 1 at 65535 | 0 |
+
+## RGB Correct — `ovs.rgb_correct` v1
+
+Footprint: **12 channels**. Patch to: **one effect instance in a chain**.
+
+| Channel | Name | Control | Values | Home |
+|---|---|---|---|---|
+| 1–2 | Red black | `lift_r` | -1 at 0, 1 at 65535 | 32768 |
+| 3–4 | Green black | `lift_g` | -1 at 0, 1 at 65535 | 32768 |
+| 5–6 | Blue black | `lift_b` | -1 at 0, 1 at 65535 | 32768 |
+| 7–8 | Red white | `gain_r` | 0 at 0, 4 at 65535 | 16384 |
+| 9–10 | Green white | `gain_g` | 0 at 0, 4 at 65535 | 16384 |
+| 11–12 | Blue white | `gain_b` | 0 at 0, 4 at 65535 | 16384 |
+
+## RGB Split — `ovs.rgb_split` v1
+
+Footprint: **4 channels**. Patch to: **one effect instance in a chain**.
+
+| Channel | Name | Control | Values | Home |
+|---|---|---|---|---|
+| 1–2 | Offset | `offset_px` | 0 at 0, 256 at 65535 | 0 |
+| 3–4 | Angle | `angle_deg` | 0 at 0, 360 at 65535 | 0 |
+
 ## Solid Colour — `ovs.solid_colour` v1
 
 Footprint: **4 channels**. Patch to: **one generator instance in a slot**.

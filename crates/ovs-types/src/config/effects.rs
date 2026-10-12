@@ -26,7 +26,7 @@
 //! and nothing that silently scales what an operator set.
 
 use crate::config::fixtures::{FixtureDefinition, ParameterSlot};
-use crate::config::manifest::{DmxChannel, ParameterDefinition, ParameterKind};
+use crate::config::manifest::{Choice, DmxChannel, ParameterDefinition, ParameterKind};
 use crate::config::slot::{ParameterMap, ParameterValue};
 
 /// A published effect.
@@ -123,6 +123,18 @@ impl EffectManifest {
     #[must_use]
     pub fn flag(&self, values: &ParameterMap, key: &str) -> bool {
         matches!(self.value(values, key), Some(ParameterValue::Bool(true)))
+    }
+
+    /// Returns the value for a key as a choice's id, or an empty string.
+    ///
+    /// Empty only where the key is not a choice at all: a choice always has a
+    /// default, so a show that validated against this manifest has an answer.
+    #[must_use]
+    pub fn choice(&self, values: &ParameterMap, key: &str) -> String {
+        match self.value(values, key) {
+            Some(ParameterValue::Choice(id)) => id,
+            _ => String::new(),
+        }
     }
 
     /// Returns every problem with a set of values.
@@ -236,6 +248,15 @@ impl<'a> EffectValues<'a> {
     #[must_use]
     pub fn flag(&self, key: &str) -> bool {
         matches!(self.value(key), Some(ParameterValue::Bool(true)))
+    }
+
+    /// Returns the value for a key as a choice's id, or an empty string.
+    #[must_use]
+    pub fn choice(&self, key: &str) -> String {
+        match self.value(key) {
+            Some(ParameterValue::Choice(id)) => id,
+            _ => String::new(),
+        }
     }
 }
 
@@ -560,7 +581,7 @@ pub const CROP_V1: EffectManifest = EffectManifest {
 };
 
 /// Every effect this build publishes.
-pub const PUBLISHED: [EffectManifest; 6] = [
+pub const PUBLISHED: [EffectManifest; 10] = [
     // Both versions, and the catalogue offers the newer: a show saved against
     // version one opens with the four controls it was saved with.
     COLOUR_CORRECT_V1,
@@ -569,7 +590,243 @@ pub const PUBLISHED: [EffectManifest; 6] = [
     PIXELATE_V1,
     BLUR_V1,
     CROP_V1,
+    MIRROR_V1,
+    COLORIZE_V1,
+    RGB_CORRECT_V1,
+    RGB_SPLIT_V1,
 ];
+
+/// Folds one half of the picture onto the other.
+///
+/// An artistic effect, in the owner's words, and the one on this list with no
+/// corrective use at all: what it makes is a kaleidoscope, and with both axes
+/// on it is a quadrant mirrored twice.
+///
+/// Each axis says which half to keep rather than merely whether to fold,
+/// because the two answers are different pictures and an operator wants both:
+/// a logo in the left third and a logo in the right third survive opposite
+/// choices.
+pub const MIRROR_V1: EffectManifest = EffectManifest {
+    type_id: "ovs.mirror",
+    version: 1,
+    name: "Mirror",
+    description: "Folds one half of the picture onto the other.",
+    parameters: &[
+        ParameterDefinition {
+            key: "horizontal",
+            name: "Horizontal",
+            kind: ParameterKind::Choice {
+                choices: &[
+                    Choice {
+                        id: "off",
+                        name: "Off",
+                    },
+                    Choice {
+                        id: "left",
+                        name: "Keep left",
+                    },
+                    Choice {
+                        id: "right",
+                        name: "Keep right",
+                    },
+                ],
+                default: "off",
+            },
+            dmx: Some(DmxChannel::Coarse),
+        },
+        ParameterDefinition {
+            key: "vertical",
+            name: "Vertical",
+            kind: ParameterKind::Choice {
+                choices: &[
+                    Choice {
+                        id: "off",
+                        name: "Off",
+                    },
+                    Choice {
+                        id: "top",
+                        name: "Keep top",
+                    },
+                    Choice {
+                        id: "bottom",
+                        name: "Keep bottom",
+                    },
+                ],
+                default: "off",
+            },
+            dmx: Some(DmxChannel::Coarse),
+        },
+    ],
+};
+
+/// Throws away the colour and paints the brightness back in.
+///
+/// The picture's own luma carries the picture; a hue and a saturation carry
+/// the colour. This is where the Tint effect's job went when it was retired —
+/// pushing a whole picture towards one colour is an artistic choice, and this
+/// is the control for it (owner, 2026-10-12).
+///
+/// Saturation at zero is the picture in monochrome, which is worth having on
+/// its own and is the honest bottom end of "colour it in" rather than a dead
+/// position on the control.
+///
+/// `amount` starts at zero, so adding this and touching nothing changes
+/// nothing — the promise every effect here makes.
+pub const COLORIZE_V1: EffectManifest = EffectManifest {
+    type_id: "ovs.colorize",
+    version: 1,
+    name: "Colorize",
+    description: "Keeps the brightness and paints one colour over it.",
+    parameters: &[
+        ParameterDefinition {
+            key: "hue",
+            name: "Hue",
+            kind: ParameterKind::Number {
+                min: 0.0,
+                max: 360.0,
+                default: 0.0,
+            },
+            dmx: Some(DmxChannel::Fine),
+        },
+        ParameterDefinition {
+            key: "saturation",
+            name: "Saturation",
+            kind: ParameterKind::Number {
+                min: 0.0,
+                max: 1.0,
+                default: 1.0,
+            },
+            dmx: Some(DmxChannel::Fine),
+        },
+        ParameterDefinition {
+            key: "amount",
+            name: "Amount",
+            kind: ParameterKind::Number {
+                min: 0.0,
+                max: 1.0,
+                default: 0.0,
+            },
+            dmx: Some(DmxChannel::Fine),
+        },
+    ],
+};
+
+/// A black level and a white level, per channel.
+///
+/// Six controls: where each channel's black sits and where its white sits,
+/// which is the oldest correction there is and the one that matches two panel
+/// batches to each other. Black to `lift`, white to `gain`, and a straight line
+/// between — so lift at zero and gain at one is the picture it was given.
+///
+/// Separate from Colour Correct because it is a different question. That one
+/// asks what the picture should look like; this one asks what the panel is
+/// doing to it.
+pub const RGB_CORRECT_V1: EffectManifest = EffectManifest {
+    type_id: "ovs.rgb_correct",
+    version: 1,
+    name: "RGB Correct",
+    description: "A black level and a white level for each channel.",
+    parameters: &[
+        ParameterDefinition {
+            key: "lift_r",
+            name: "Red black",
+            kind: ParameterKind::Number {
+                min: -1.0,
+                max: 1.0,
+                default: 0.0,
+            },
+            dmx: Some(DmxChannel::Fine),
+        },
+        ParameterDefinition {
+            key: "lift_g",
+            name: "Green black",
+            kind: ParameterKind::Number {
+                min: -1.0,
+                max: 1.0,
+                default: 0.0,
+            },
+            dmx: Some(DmxChannel::Fine),
+        },
+        ParameterDefinition {
+            key: "lift_b",
+            name: "Blue black",
+            kind: ParameterKind::Number {
+                min: -1.0,
+                max: 1.0,
+                default: 0.0,
+            },
+            dmx: Some(DmxChannel::Fine),
+        },
+        ParameterDefinition {
+            key: "gain_r",
+            name: "Red white",
+            kind: ParameterKind::Number {
+                min: 0.0,
+                max: 4.0,
+                default: 1.0,
+            },
+            dmx: Some(DmxChannel::Fine),
+        },
+        ParameterDefinition {
+            key: "gain_g",
+            name: "Green white",
+            kind: ParameterKind::Number {
+                min: 0.0,
+                max: 4.0,
+                default: 1.0,
+            },
+            dmx: Some(DmxChannel::Fine),
+        },
+        ParameterDefinition {
+            key: "gain_b",
+            name: "Blue white",
+            kind: ParameterKind::Number {
+                min: 0.0,
+                max: 4.0,
+                default: 1.0,
+            },
+            dmx: Some(DmxChannel::Fine),
+        },
+    ],
+};
+
+/// Pulls the channels apart along a line.
+///
+/// Red one way, blue the other, green where it was: what a lens does at its
+/// edges and what a misaligned tube did all the time, and a look somebody
+/// reaches for deliberately now.
+///
+/// In composition pixels and at an angle, so the same look survives being
+/// mapped onto a wall of another size — the reason every size in this system
+/// is in those pixels.
+pub const RGB_SPLIT_V1: EffectManifest = EffectManifest {
+    type_id: "ovs.rgb_split",
+    version: 1,
+    name: "RGB Split",
+    description: "Offsets the red and blue channels in opposite directions.",
+    parameters: &[
+        ParameterDefinition {
+            key: "offset_px",
+            name: "Offset",
+            kind: ParameterKind::Number {
+                min: 0.0,
+                max: 256.0,
+                default: 0.0,
+            },
+            dmx: Some(DmxChannel::Fine),
+        },
+        ParameterDefinition {
+            key: "angle_deg",
+            name: "Angle",
+            kind: ParameterKind::Number {
+                min: 0.0,
+                max: 360.0,
+                default: 0.0,
+            },
+            dmx: Some(DmxChannel::Fine),
+        },
+    ],
+};
 
 /// The types an effect list no longer offers.
 ///

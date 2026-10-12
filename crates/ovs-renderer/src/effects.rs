@@ -62,6 +62,14 @@ pub enum PassKind {
     Crop,
     /// The white point: temperature in kelvin, then the green–magenta axis.
     WhiteBalance,
+    /// One half of the picture folded onto the other, on either axis.
+    Mirror,
+    /// The brightness kept and one colour painted over it.
+    Colorize,
+    /// A black level and a white level, per channel.
+    RgbCorrect,
+    /// The channels pulled apart along a line.
+    RgbSplit,
 }
 
 impl PassKind {
@@ -77,6 +85,10 @@ impl PassKind {
             Self::BlurDown => 5,
             Self::Crop => 6,
             Self::WhiteBalance => 7,
+            Self::Mirror => 8,
+            Self::Colorize => 9,
+            Self::RgbCorrect => 10,
+            Self::RgbSplit => 11,
         }
     }
 }
@@ -227,11 +239,60 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
             ],
             colour: [0.0; 4],
         }),
+        ("ovs.mirror", 1) => into.push(EffectPass {
+            kind: PassKind::Mirror,
+            // Which half each axis keeps, as a number the shader branches on:
+            // nothing, the low side, or the high side. A choice crosses as a
+            // code rather than as a string because a pass is four floats and a
+            // colour, and this is the one place the two vocabularies meet.
+            values: [
+                fold(&values.choice("horizontal")),
+                fold(&values.choice("vertical")),
+                0.0,
+                0.0,
+            ],
+            colour: [0.0; 4],
+        }),
+        ("ovs.colorize", 1) => into.push(EffectPass {
+            kind: PassKind::Colorize,
+            values: [number("hue"), number("saturation"), number("amount"), 0.0],
+            colour: [0.0; 4],
+        }),
+        // **The lift travels in the colour slot, because it is one.** A pass
+        // carries four numbers and this effect has six, and a black level per
+        // channel is an RGB triple in every sense that matters. The
+        // alternative is a second full-screen read and write for arithmetic
+        // that fits in one.
+        ("ovs.rgb_correct", 1) => into.push(EffectPass {
+            kind: PassKind::RgbCorrect,
+            values: [number("gain_r"), number("gain_g"), number("gain_b"), 0.0],
+            colour: [number("lift_r"), number("lift_g"), number("lift_b"), 0.0],
+        }),
+        ("ovs.rgb_split", 1) => into.push(EffectPass {
+            kind: PassKind::RgbSplit,
+            values: [number("offset_px"), number("angle_deg"), 0.0, 0.0],
+            colour: [0.0; 4],
+        }),
         // A manifest this build publishes but the renderer cannot draw. Nothing
         // is in this state today — the four published effects are the four
         // above — and the day one is, it is a layer drawn without it and a line
         // in the log rather than a guess.
         _ => warn_once(manifest.type_id, manifest.version),
+    }
+}
+
+/// Which half an axis of the mirror keeps, as the shader's own number.
+///
+/// Zero is off, and the two sides are told apart rather than folded together:
+/// a logo in the left third and one in the right third survive opposite
+/// choices, which is why this is a choice and not a switch.
+fn fold(choice: &str) -> f32 {
+    match choice {
+        "left" | "top" => 1.0,
+        "right" | "bottom" => 2.0,
+        // Including the empty string, which is what a key that is not a choice
+        // answers: off is the one value that cannot be wrong.
+        _ => 0.0,
     }
 }
 
@@ -537,6 +598,25 @@ mod tests {
             passes.iter().map(|pass| pass.kind).collect::<Vec<_>>(),
             vec![PassKind::ColourCorrect, PassKind::WhiteBalance]
         );
+    }
+
+    #[test]
+    fn a_mirror_tells_the_two_sides_apart() {
+        // Off, the low side, the high side. A switch would have collapsed the
+        // last two into one and made half the pictures unreachable.
+        let fold = |axis: &str, side: &str| {
+            let chain = [instance(
+                "ovs.mirror",
+                &[(axis, ParameterValue::Choice(side.to_owned()))],
+            )];
+            passes(&chain)[0].values
+        };
+
+        assert_eq!(fold("horizontal", "off")[0], 0.0);
+        assert_eq!(fold("horizontal", "left")[0], 1.0);
+        assert_eq!(fold("horizontal", "right")[0], 2.0);
+        assert_eq!(fold("vertical", "top")[1], 1.0);
+        assert_eq!(fold("vertical", "bottom")[1], 2.0);
     }
 
     #[test]

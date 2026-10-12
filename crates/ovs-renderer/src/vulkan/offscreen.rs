@@ -7507,6 +7507,151 @@ mod tests {
     }
 
     #[test]
+    fn mirroring_folds_the_half_it_was_told_to_keep() {
+        let _gpu = crate::vulkan::one_gpu_at_a_time();
+        // Which half is kept is the whole of the control: a logo in the left
+        // third and one in the right third survive opposite choices, so "fold"
+        // on its own would be half an answer.
+        let Some(mut canvas) = backend(32, 32) else {
+            return;
+        };
+        let media = MediaItemId::new();
+        let layer = LayerId::new();
+        // A ramp across, so a fold reads as a mirrored ramp rather than as
+        // nothing happening.
+        canvas
+            .set_media_texture(
+                media,
+                &rgba(&pattern(32, |x, _| [(x * 8) as u8, 0, 0, 255]), 32, 32),
+            )
+            .expect("uploads");
+
+        let folded = |canvas: &mut VulkanOffscreenBackend, side: &str| {
+            let passes = effect_at(
+                "ovs.mirror",
+                1,
+                &[("horizontal", ParameterValue::Choice(side.to_owned()))],
+            );
+            composed_frame(canvas, &effected(layer, media, &passes), 32)
+        };
+        let red = |frame: &[u8], x: usize| frame[(16 * 32 + x) * 4];
+
+        let keep_left = folded(&mut canvas, "left");
+        close_to(red(&keep_left, 0), 0, "the kept edge is where it was");
+        close_to(red(&keep_left, 31), 0, "and the far edge is its mirror");
+
+        let keep_right = folded(&mut canvas, "right");
+        close_to(
+            red(&keep_right, 31),
+            248,
+            "the other choice keeps the other half",
+        );
+        close_to(red(&keep_right, 0), 248, "and folds it the other way");
+    }
+
+    #[test]
+    fn colorize_with_no_saturation_leaves_the_picture_in_monochrome() {
+        let _gpu = crate::vulkan::one_gpu_at_a_time();
+        // The bottom of the control, and a useful place to stop rather than a
+        // dead position: the luma is kept and no colour is painted back.
+        let Some(mut canvas) = backend(16, 16) else {
+            return;
+        };
+        let media = MediaItemId::new();
+        let layer = LayerId::new();
+        canvas
+            .set_media_texture(media, &rgba(&pattern(16, |_, _| [255, 0, 0, 255]), 16, 16))
+            .expect("uploads");
+
+        let passes = effect_at(
+            "ovs.colorize",
+            1,
+            &[
+                ("amount", ParameterValue::Float(1.0)),
+                ("saturation", ParameterValue::Float(0.0)),
+            ],
+        );
+        let frame = composed_frame(&mut canvas, &effected(layer, media, &passes), 16);
+        let at = (8 * 16 + 8) * 4;
+
+        // Rec. 709: a full red is a little over a fifth of the brightness of
+        // white, and all three channels come back carrying that.
+        close_to(frame[at], 54, "red becomes its own luma");
+        close_to(frame[at + 1], 54, "and so does green");
+        close_to(frame[at + 2], 54, "and blue");
+    }
+
+    #[test]
+    fn an_rgb_white_level_moves_one_channel_and_leaves_the_others() {
+        let _gpu = crate::vulkan::one_gpu_at_a_time();
+        // Six controls that each touch one channel. One that reached two would
+        // be useless for the thing this exists for, which is matching two
+        // panel batches to each other.
+        let Some(mut canvas) = backend(16, 16) else {
+            return;
+        };
+        let media = MediaItemId::new();
+        let layer = LayerId::new();
+        canvas
+            .set_media_texture(media, &rgba(&pattern(16, |_, _| [64, 64, 64, 255]), 16, 16))
+            .expect("uploads");
+
+        let passes = effect_at(
+            "ovs.rgb_correct",
+            1,
+            &[("gain_r", ParameterValue::Float(2.0))],
+        );
+        let frame = composed_frame(&mut canvas, &effected(layer, media, &passes), 16);
+        let at = (8 * 16 + 8) * 4;
+
+        close_to(frame[at], 128, "the red white level doubled the red");
+        close_to(frame[at + 1], 64, "and left the green alone");
+        close_to(frame[at + 2], 64, "and the blue");
+    }
+
+    #[test]
+    fn splitting_the_channels_moves_red_and_blue_opposite_ways() {
+        let _gpu = crate::vulkan::one_gpu_at_a_time();
+        // An edge is where this is visible at all: either side of one, red has
+        // already crossed and blue has not.
+        let Some(mut canvas) = backend(32, 32) else {
+            return;
+        };
+        let media = MediaItemId::new();
+        let layer = LayerId::new();
+        // Black on the left, white on the right, with the edge at sixteen.
+        canvas
+            .set_media_texture(
+                media,
+                &rgba(
+                    &pattern(32, |x, _| {
+                        if x < 16 {
+                            [0, 0, 0, 255]
+                        } else {
+                            [255, 255, 255, 255]
+                        }
+                    }),
+                    32,
+                    32,
+                ),
+            )
+            .expect("uploads");
+
+        let passes = effect_at(
+            "ovs.rgb_split",
+            1,
+            &[("offset_px", ParameterValue::Float(4.0))],
+        );
+        let frame = composed_frame(&mut canvas, &effected(layer, media, &passes), 32);
+        // Two pixels left of the edge: red reads from four to the right, which
+        // is across it; blue reads from four to the left, which is not.
+        let at = (16 * 32 + 14) * 4;
+
+        close_to(frame[at], 255, "red has crossed the edge");
+        close_to(frame[at + 2], 0, "and blue has not");
+    }
+
+    #[test]
     fn warming_a_picture_lifts_the_red_and_drops_the_blue_without_dimming_it() {
         let _gpu = crate::vulkan::one_gpu_at_a_time();
         // What temperature means, measured on the card rather than argued

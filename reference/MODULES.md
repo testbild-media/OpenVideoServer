@@ -216,3 +216,44 @@ Cuts a number of pixels off each edge.
 | Top | `top_px` | a number from 0 to 8192 | 0 |
 | Bottom | `bottom_px` | a number from 0 to 8192 | 0 |
 
+### Mirror — `ovs.mirror` v1
+
+Folds one half of the picture onto the other.
+
+| Parameter | Key | Takes | Default |
+|---|---|---|---|
+| Horizontal | `horizontal` | one of `off` (Off), `left` (Keep left), `right` (Keep right) | `off` |
+| Vertical | `vertical` | one of `off` (Off), `top` (Keep top), `bottom` (Keep bottom) | `off` |
+
+### Colorize — `ovs.colorize` v1
+
+Keeps the brightness and paints one colour over it.
+
+| Parameter | Key | Takes | Default |
+|---|---|---|---|
+| Hue | `hue` | a number from 0 to 360 | 0 |
+| Saturation | `saturation` | a number from 0 to 1 | 1 |
+| Amount | `amount` | a number from 0 to 1 | 0 |
+
+### RGB Correct — `ovs.rgb_correct` v1
+
+A black level and a white level for each channel.
+
+| Parameter | Key | Takes | Default |
+|---|---|---|---|
+| Red black | `lift_r` | a number from -1 to 1 | 0 |
+| Green black | `lift_g` | a number from -1 to 1 | 0 |
+| Blue black | `lift_b` | a number from -1 to 1 | 0 |
+| Red white | `gain_r` | a number from 0 to 4 | 1 |
+| Green white | `gain_g` | a number from 0 to 4 | 1 |
+| Blue white | `gain_b` | a number from 0 to 4 | 1 |
+
+### RGB Split — `ovs.rgb_split` v1
+
+Offsets the red and blue channels in opposite directions.
+
+| Parameter | Key | Takes | Default |
+|---|---|---|---|
+| Offset | `offset_px` | a number from 0 to 256 | 0 |
+| Angle | `angle_deg` | a number from 0 to 360 | 0 |
+
