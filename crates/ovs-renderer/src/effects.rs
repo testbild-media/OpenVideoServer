@@ -70,6 +70,8 @@ pub enum PassKind {
     RgbCorrect,
     /// The channels pulled apart along a line.
     RgbSplit,
+    /// Line jumps, snow and a rolling error. The one pass that reads the clock.
+    TvGlitch,
 }
 
 impl PassKind {
@@ -89,6 +91,7 @@ impl PassKind {
             Self::Colorize => 9,
             Self::RgbCorrect => 10,
             Self::RgbSplit => 11,
+            Self::TvGlitch => 12,
         }
     }
 }
@@ -271,6 +274,16 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
         ("ovs.rgb_split", 1) => into.push(EffectPass {
             kind: PassKind::RgbSplit,
             values: [number("offset_px"), number("angle_deg"), 0.0, 0.0],
+            colour: [0.0; 4],
+        }),
+        ("ovs.tv_glitch", 1) => into.push(EffectPass {
+            kind: PassKind::TvGlitch,
+            values: [
+                number("amount"),
+                number("tear"),
+                number("noise"),
+                number("roll"),
+            ],
             colour: [0.0; 4],
         }),
         // A manifest this build publishes but the renderer cannot draw. Nothing

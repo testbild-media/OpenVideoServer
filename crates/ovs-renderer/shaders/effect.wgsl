@@ -60,6 +60,10 @@ struct Effect {
     texel: vec2<f32>,
     // Which branch below runs.
     kind: u32,
+    // The clock, in seconds, for the passes that move. Free-running and the
+    // same for every pass in a frame: two layers carrying one effect have to
+    // move together.
+    seconds: f32,
 }
 
 var<immediate> effect: Effect;
@@ -76,6 +80,20 @@ const KIND_MIRROR: u32 = 8u;
 const KIND_COLORIZE: u32 = 9u;
 const KIND_RGB_CORRECT: u32 = 10u;
 const KIND_RGB_SPLIT: u32 = 11u;
+const KIND_TV_GLITCH: u32 = 12u;
+
+/// How often the line jumps are re-rolled, a second.
+///
+/// **Mine.** Twelve: fast enough to read as a fault rather than as a pattern,
+/// slow enough that a jump lasts long enough to see. Every frame would be a
+/// shimmer, and once a second would be a slideshow.
+const GLITCH_ROLLS_A_SECOND: f32 = 12.0;
+
+/// How long the rolling error takes to cross the picture, in seconds.
+///
+/// **Mine**, and the one number here anybody will argue with: slow enough to
+/// watch travel, quick enough to come round while somebody is looking at it.
+const GLITCH_ROLL_SECONDS: f32 = 2.8;
 
 /// The temperature at which the white point is left alone, in kelvin.
 ///
@@ -446,6 +464,67 @@ fn rgb_split(uv: vec2<f32>) -> vec4<f32> {
     return vec4<f32>(red.r, green.g, blue.b, green.a);
 }
 
+/// A repeatable number in `0.0..1.0` from a point.
+///
+/// The usual sine-and-fract hash. It is not a good random number generator and
+/// does not need to be: what it has to do is look unrelated to its neighbours,
+/// and it is the same on every card given the same input, which is what keeps
+/// two outputs showing one composition from glitching differently.
+fn hash21(point: vec2<f32>) -> f32 {
+    return fract(sin(dot(point, vec2<f32>(127.1, 311.7))) * 43758.5453123);
+}
+
+/// A picture coming apart the way a tube did.
+///
+/// Three faults, each with its own amount and all under the master, which is
+/// the control an operator rides. With the master at zero nothing is read from
+/// anywhere but the pixel itself, so the published default is exactly the
+/// picture that came in.
+///
+/// Where the time comes from: the clock a pass now carries, which is
+/// free-running and shared across the frame. Two layers carrying this move
+/// together, and nothing in the show reaches it.
+fn tv_glitch(uv: vec2<f32>, source: vec4<f32>) -> vec4<f32> {
+    let master = clamp(effect.values.x, 0.0, 1.0);
+    let tear = clamp(effect.values.y, 0.0, 1.0) * master;
+    let snow = clamp(effect.values.z, 0.0, 1.0) * master;
+    let roll = clamp(effect.values.w, 0.0, 1.0) * master;
+
+    let seconds = effect.seconds;
+    let lines = 1.0 / max(effect.texel.y, 0.000001);
+    let line = floor(uv.y * lines);
+
+    var at = uv;
+
+    // **Lines that jump, and only some of them.** A displacement every line
+    // would be a texture; a few lines at a time is a fault. Re-rolled a dozen
+    // times a second rather than every frame, so a jump lasts long enough to
+    // be seen.
+    let roll_index = floor(seconds * GLITCH_ROLLS_A_SECOND);
+    let picked = hash21(vec2<f32>(line, roll_index));
+    if picked > 1.0 - tear * 0.35 {
+        let shift = hash21(vec2<f32>(line, roll_index + 7.0)) - 0.5;
+        at.x = at.x + shift * tear * 0.15;
+    }
+
+    // **An error travelling down the picture**, which is what a mistimed field
+    // looked like: a band that drags the lines sideways and lifts them.
+    let head = fract(seconds / GLITCH_ROLL_SECONDS);
+    let distance = abs(fract(uv.y - head + 0.5) - 0.5);
+    let band = smoothstep(0.06, 0.0, distance) * roll;
+    at.x = at.x + band * 0.04;
+
+    var colour = read(at);
+
+    // **Snow**, which is the only one of the three that is per pixel rather
+    // than per line, and the reason this is called artefacts rather than
+    // noise: it sits on top of the picture instead of replacing it.
+    let grain = hash21(vec2<f32>(uv.x * lines, uv.y * lines + seconds * 60.0)) - 0.5;
+    let lifted = colour.rgb + vec3<f32>(grain * snow * 0.5) + vec3<f32>(band * 0.12);
+
+    return vec4<f32>(clamp(lifted, vec3<f32>(0.0), vec3<f32>(1.0)), source.a);
+}
+
 @fragment
 fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // Straight alpha throughout, never premultiplied. What comes out of the
@@ -490,6 +569,9 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         }
         case KIND_RGB_SPLIT: {
             return rgb_split(input.uv);
+        }
+        case KIND_TV_GLITCH: {
+            return tv_glitch(input.uv, source);
         }
         // Unreachable: the renderer only ever writes a kind it has a branch
         // for. Returning the picture untouched is the one answer that cannot

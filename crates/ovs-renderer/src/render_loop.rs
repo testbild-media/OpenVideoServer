@@ -967,6 +967,20 @@ impl RenderLoop {
             // A failure here leaves the previous composition on the GPU, so the
             // outputs present a held frame rather than a black one — the right
             // way round for a transient fault.
+            // **Free-running, and the same for every pass in this frame.** An
+            // effect that moves is moving against a clock, and two layers
+            // carrying one effect have to move together. Nothing about the
+            // show reaches it -- not the trigger, not the transport, not the
+            // master speed -- for the reason the test pattern's own clock is
+            // free: a glitch is a look, not a cue.
+            //
+            // The wall clock, folded into a day so that the float keeps its
+            // precision. At a day's worth of seconds an f32 still resolves
+            // about a hundredth of a second, which is finer than anything this
+            // drives; a float carrying seconds since 1970 would be quantised
+            // to several seconds and nothing would move at all.
+            self.compositor.set_effect_time(effect_seconds());
+
             let compose_began = Instant::now();
             match self.compositor.compose(FrameRequest { index }, &self.scene) {
                 Ok(()) => {
@@ -2342,6 +2356,24 @@ fn fill_wanted(
             into.push(media_item_id);
         }
     }
+}
+
+/// The clock an effect pass reads, in seconds within a day.
+///
+/// Folded into a day on purpose. An `f32` has twenty-four bits of mantissa, so
+/// seconds since 1970 -- about 1.8 billion of them -- would quantise to
+/// hundreds of seconds and every moving effect would stand perfectly still. A
+/// day's worth still resolves about a hundredth of a second.
+///
+/// The fold shows once a day as a jump in whatever is moving. In a glitch that
+/// is indistinguishable from the effect, and nothing else reads this.
+fn effect_seconds() -> f32 {
+    let since_epoch = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    const A_DAY: u64 = 24 * 60 * 60;
+    let seconds = since_epoch.as_secs() % A_DAY;
+    seconds as f32 + since_epoch.subsec_nanos() as f32 / 1_000_000_000.0
 }
 
 #[cfg(test)]

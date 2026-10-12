@@ -262,6 +262,21 @@ pub trait Compositor: Send {
     /// held frame rather than a black one.
     fn compose(&mut self, frame: FrameRequest, scene: &Scene) -> Result<(), BackendError>;
 
+    /// Tells the effect passes what time it is, in seconds.
+    ///
+    /// Free-running and shared by every pass in the frame: an effect that
+    /// moves is moving against a clock, and two layers carrying the same
+    /// effect have to move together. Nothing about the show reaches it — not
+    /// the trigger, not the transport, not the master speed — for the same
+    /// reason the test pattern's clock is its own: a glitch is a look, not a
+    /// cue.
+    ///
+    /// Does nothing by default, because a backend with no effect passes has
+    /// nothing to tell.
+    fn set_effect_time(&mut self, seconds: f32) {
+        let _ = seconds;
+    }
+
     /// Makes `image` available to every quad that names `key`.
     ///
     /// Replaces whatever was held under that key.

@@ -257,3 +257,14 @@ Offsets the red and blue channels in opposite directions.
 | Offset | `offset_px` | a number from 0 to 256 | 0 |
 | Angle | `angle_deg` | a number from 0 to 360 | 0 |
 
+### TV Glitch — `ovs.tv_glitch` v1
+
+Line jumps, snow and a rolling error, under one master.
+
+| Parameter | Key | Takes | Default |
+|---|---|---|---|
+| Amount | `amount` | a number from 0 to 1 | 0 |
+| Line jumps | `tear` | a number from 0 to 1 | 0.5 |
+| Snow | `noise` | a number from 0 to 1 | 0.5 |
+| Rolling error | `roll` | a number from 0 to 1 | 0.5 |
+

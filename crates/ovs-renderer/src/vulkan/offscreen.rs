@@ -275,20 +275,22 @@ struct EffectPush {
     colour: [f32; 4],
     texel: [f32; 2],
     kind: u32,
-    /// What WGSL pads its own structure out to. Named rather than implied, so
-    /// that the two layouts can be compared by reading them.
-    padding: u32,
+    /// The clock an effect that moves reads, in seconds.
+    ///
+    /// In the four bytes WGSL was padding this structure out to anyway, so it
+    /// costs nothing: the layout was already forty-eight bytes and still is.
+    seconds: f32,
 }
 
 impl EffectPush {
     /// The push constants for one pass on a canvas of the given texel size.
-    const fn new(pass: &EffectPass, texel: [f32; 2]) -> Self {
+    const fn new(pass: &EffectPass, texel: [f32; 2], seconds: f32) -> Self {
         Self {
             values: pass.values,
             colour: pass.colour,
             texel,
             kind: pass.kind.code(),
-            padding: 0,
+            seconds,
         }
     }
 
@@ -336,6 +338,13 @@ pub struct OffscreenTarget {
     graphics_family: u32,
     readback: vk::Buffer,
     readback_memory: vk::DeviceMemory,
+    /// What every effect pass in the next frame is told the time is.
+    ///
+    /// Held here rather than passed through `compose`, because a frame request
+    /// is built in ninety places and the time belongs to none of them. Set
+    /// once a frame by the render loop; zero until it is, which is a legal
+    /// moment like any other.
+    effect_seconds: f32,
     /// The finished frame, shrunk, on the card.
     ///
     /// Previews and streams want a small picture, and the cheapest way to get
@@ -940,6 +949,7 @@ impl OffscreenTarget {
             fence,
             readback,
             readback_memory,
+            effect_seconds: 0.0,
             readback_wanted: true,
             preview_image,
             preview_memory,
@@ -1776,7 +1786,9 @@ impl OffscreenTarget {
 
         let first = upload.passes.len();
         for pass in passes {
-            upload.passes.push(EffectPush::new(pass, texel));
+            upload
+                .passes
+                .push(EffectPush::new(pass, texel, self.effect_seconds));
         }
 
         // The composite quad: the whole canvas, because the scratch already
@@ -4420,6 +4432,10 @@ impl OutputBackend for VulkanOffscreenBackend {
 }
 
 impl Compositor for VulkanOffscreenBackend {
+    fn set_effect_time(&mut self, seconds: f32) {
+        self.target.effect_seconds = seconds;
+    }
+
     fn compose(&mut self, _frame: FrameRequest, scene: &Scene) -> Result<(), BackendError> {
         // Not the same pass as an output's. A composition is three buses drawn
         // into three images and then combined, because that is what a bus is
@@ -7504,6 +7520,45 @@ mod tests {
                 &format!("({x}, {y}) is the mean of the right block"),
             );
         }
+    }
+
+    #[test]
+    fn a_glitch_moves_because_a_pass_can_read_the_clock() {
+        let _gpu = crate::vulkan::one_gpu_at_a_time();
+        // **The whole of what the clock bought.** Without it every effect here
+        // is a function of position alone and nothing can travel, flicker or
+        // roll. This proves the chain end to end: a field on the target, the
+        // four bytes of the push constant that used to be padding, and a
+        // shader branch that reads them.
+        let Some(mut canvas) = backend(64, 64) else {
+            return;
+        };
+        let media = MediaItemId::new();
+        let layer = LayerId::new();
+        canvas
+            .set_media_texture(
+                media,
+                &rgba(&pattern(64, |_, _| [128, 128, 128, 255]), 64, 64),
+            )
+            .expect("uploads");
+
+        let passes = effect_at(
+            "ovs.tv_glitch",
+            1,
+            &[("amount", ParameterValue::Float(1.0))],
+        );
+
+        canvas.set_effect_time(0.0);
+        let first = composed_frame(&mut canvas, &effected(layer, media, &passes), 64);
+        canvas.set_effect_time(1.0);
+        let later = composed_frame(&mut canvas, &effected(layer, media, &passes), 64);
+
+        assert_ne!(first, later, "a second later and not one pixel moved");
+
+        // And it is doing something at all, rather than two identical
+        // nothings: the flat grey it was given is not what came back.
+        let untouched = composed_frame(&mut canvas, &effected(layer, media, &[]), 64);
+        assert_ne!(first, untouched, "the glitch left the picture alone");
     }
 
     #[test]

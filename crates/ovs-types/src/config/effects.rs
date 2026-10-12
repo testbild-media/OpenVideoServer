@@ -581,7 +581,7 @@ pub const CROP_V1: EffectManifest = EffectManifest {
 };
 
 /// Every effect this build publishes.
-pub const PUBLISHED: [EffectManifest; 10] = [
+pub const PUBLISHED: [EffectManifest; 11] = [
     // Both versions, and the catalogue offers the newer: a show saved against
     // version one opens with the four controls it was saved with.
     COLOUR_CORRECT_V1,
@@ -594,6 +594,7 @@ pub const PUBLISHED: [EffectManifest; 10] = [
     COLORIZE_V1,
     RGB_CORRECT_V1,
     RGB_SPLIT_V1,
+    TV_GLITCH_V1,
 ];
 
 /// Folds one half of the picture onto the other.
@@ -822,6 +823,71 @@ pub const RGB_SPLIT_V1: EffectManifest = EffectManifest {
                 min: 0.0,
                 max: 360.0,
                 default: 0.0,
+            },
+            dmx: Some(DmxChannel::Fine),
+        },
+    ],
+};
+
+/// A picture coming apart the way a tube did.
+///
+/// Three faults an old set had, each with its own control, under one master:
+/// lines that jump sideways now and then, snow over the picture, and an error
+/// band travelling down it. The master is what an operator rides during a
+/// show; the three underneath are how the look is set up beforehand.
+///
+/// **The first effect here that moves on its own.** It reads the clock a pass
+/// now carries — free-running, shared by every pass in a frame, and reached by
+/// nothing in the show. A glitch is a look rather than a cue, so the transport
+/// and the master speed do not touch it, and two layers carrying it move
+/// together.
+///
+/// The master starts at zero, so adding it changes nothing until somebody asks
+/// for it; the three faults start half up, so that one control brings the
+/// whole look in at once.
+pub const TV_GLITCH_V1: EffectManifest = EffectManifest {
+    type_id: "ovs.tv_glitch",
+    version: 1,
+    name: "TV Glitch",
+    description: "Line jumps, snow and a rolling error, under one master.",
+    parameters: &[
+        ParameterDefinition {
+            key: "amount",
+            name: "Amount",
+            kind: ParameterKind::Number {
+                min: 0.0,
+                max: 1.0,
+                default: 0.0,
+            },
+            dmx: Some(DmxChannel::Fine),
+        },
+        ParameterDefinition {
+            key: "tear",
+            name: "Line jumps",
+            kind: ParameterKind::Number {
+                min: 0.0,
+                max: 1.0,
+                default: 0.5,
+            },
+            dmx: Some(DmxChannel::Fine),
+        },
+        ParameterDefinition {
+            key: "noise",
+            name: "Snow",
+            kind: ParameterKind::Number {
+                min: 0.0,
+                max: 1.0,
+                default: 0.5,
+            },
+            dmx: Some(DmxChannel::Fine),
+        },
+        ParameterDefinition {
+            key: "roll",
+            name: "Rolling error",
+            kind: ParameterKind::Number {
+                min: 0.0,
+                max: 1.0,
+                default: 0.5,
             },
             dmx: Some(DmxChannel::Fine),
         },

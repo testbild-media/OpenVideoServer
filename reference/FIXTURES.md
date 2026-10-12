@@ -271,6 +271,17 @@ Footprint: **4 channels**. Patch to: **one effect instance in a chain**.
 | 1–2 | Offset | `offset_px` | 0 at 0, 256 at 65535 | 0 |
 | 3–4 | Angle | `angle_deg` | 0 at 0, 360 at 65535 | 0 |
 
+## TV Glitch — `ovs.tv_glitch` v1
+
+Footprint: **8 channels**. Patch to: **one effect instance in a chain**.
+
+| Channel | Name | Control | Values | Home |
+|---|---|---|---|---|
+| 1–2 | Amount | `amount` | 0 at 0, 1 at 65535 | 0 |
+| 3–4 | Line jumps | `tear` | 0 at 0, 1 at 65535 | 32768 |
+| 5–6 | Snow | `noise` | 0 at 0, 1 at 65535 | 32768 |
+| 7–8 | Rolling error | `roll` | 0 at 0, 1 at 65535 | 32768 |
+
 ## Solid Colour — `ovs.solid_colour` v1
 
 Footprint: **4 channels**. Patch to: **one generator instance in a slot**.
