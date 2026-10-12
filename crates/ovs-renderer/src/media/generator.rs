@@ -159,6 +159,14 @@ pub struct GeneratorSource {
     kind: Kind,
     size: SizePx,
     live: Option<Live>,
+    /// What makes this instance's noise its own.
+    ///
+    /// Two noise layers on one wall must not draw the same field, and they
+    /// would: the field is a function of position and time, and two layers
+    /// share both. A number per instance is the cheapest thing that separates
+    /// them, and noise is the one kind here where "which number" cannot
+    /// matter.
+    seed: u64,
     /// The service pattern, built the first time it is asked for.
     ///
     /// Built there rather than here because it needs the rate of the surface
@@ -337,6 +345,13 @@ impl Kind {
                     frame_count: frames,
                 }
             }
+            // Noise has no period at all: every index is an independent
+            // field. The index is milliseconds, as the service pattern's is,
+            // and this is the span it runs for before coming round.
+            Self::Noise { .. } => SourceLength {
+                duration_ms: u32::MAX as u64,
+                frame_count: u32::MAX,
+            },
             // **The index is milliseconds, and the picture never repeats.**
             // The drift wraps over the width — about nineteen seconds across
             // and twenty-seven down at 1920x1080, both of which scale with the
@@ -375,6 +390,7 @@ impl Kind {
                 | Self::Countdown { .. }
                 | Self::Strobe { .. }
                 | Self::ServicePattern { .. }
+                | Self::Noise { .. }
         )
     }
 }
@@ -537,10 +553,16 @@ impl GeneratorSource {
                 }
             });
 
+        // Counted rather than drawn from the system's randomness: this has to
+        // differ between instances and has no reason to differ between runs,
+        // and a counter cannot fail or block.
+        static NEXT_SEED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
         Some(Self {
             kind,
             size,
             live,
+            seed: NEXT_SEED.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             pattern: None,
         })
     }
@@ -583,6 +605,18 @@ impl GeneratorSource {
             } => {
                 let second = second_of_day(moment.wall, *offset_minutes);
                 Some(if *show_seconds { second } else { second / 60 })
+            }
+            Kind::Noise { .. } => {
+                // Free-running, like the pattern below and for a plainer
+                // reason: there is nothing in noise for a trigger to restart.
+                // What keeps two noise layers from drawing the same field as
+                // each other is the seed, not the clock.
+                let ms = moment
+                    .wall
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis();
+                Some((ms % u128::from(u32::MAX)) as u32)
             }
             Kind::ServicePattern { .. } => {
                 // **Free-running, on a clock of its own** (owner, 2026-10-12:
@@ -645,14 +679,18 @@ impl GeneratorSource {
         }
 
         let Self {
-            kind, size, live, ..
+            kind,
+            size,
+            live,
+            seed,
+            ..
         } = self;
         let live = live.as_mut()?;
         if live.drawn == Some(tick) {
             return None;
         }
 
-        draw_kind(kind, *size, live.image.pixels_mut(), tick);
+        draw_kind(kind, *size, live.image.pixels_mut(), tick, *seed);
         live.drawn = Some(tick);
         Some(&live.image)
     }
@@ -697,7 +735,7 @@ impl GeneratorSource {
     /// Draws the frame at an index.
     fn draw(&self, index: u32) -> DecodedImage {
         let mut image = blank(self.size);
-        draw_kind(&self.kind, self.size, image.pixels_mut(), index);
+        draw_kind(&self.kind, self.size, image.pixels_mut(), index, self.seed);
         image
     }
 }
@@ -740,7 +778,7 @@ fn blank(size: SizePx) -> DecodedImage {
 ///
 /// `tick` is which frame of the source this is. Every still ignores it, because
 /// every still has one frame.
-fn draw_kind(kind: &Kind, size: SizePx, pixels: &mut [u8], tick: u32) {
+fn draw_kind(kind: &Kind, size: SizePx, pixels: &mut [u8], tick: u32, seed: u64) {
     let width = size.width as usize;
     let height = size.height as usize;
 
@@ -803,7 +841,7 @@ fn draw_kind(kind: &Kind, size: SizePx, pixels: &mut [u8], tick: u32) {
             scale,
             coloured,
             amount,
-        } => draw_noise(pixels, width, *scale, *coloured, *amount),
+        } => draw_noise(pixels, width, *scale, *coloured, *amount, tick, seed),
         Kind::Text {
             lines,
             cap_px,
@@ -1420,7 +1458,20 @@ fn triangle_distance(x: f32, y: f32, half_width: f32, half_height: f32) -> f32 {
 ///
 /// `amount` fades towards mid grey rather than towards black, so taking the
 /// texture out of a bed under a key does not also take the light out of it.
-fn draw_noise(pixels: &mut [u8], width: usize, scale: u32, coloured: bool, amount: f32) {
+fn draw_noise(
+    pixels: &mut [u8],
+    width: usize,
+    scale: u32,
+    coloured: bool,
+    amount: f32,
+    tick: u32,
+    seed: u64,
+) {
+    // Four independent fields per frame, so the three colour channels keep the
+    // separation they always had and the next frame starts past all of them.
+    let field = seed
+        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        .wrapping_add(u64::from(tick).wrapping_mul(4));
     let scale = (scale as f32).max(1.0);
     let amount = if amount.is_finite() {
         amount.clamp(0.0, 1.0)
@@ -1432,12 +1483,12 @@ fn draw_noise(pixels: &mut [u8], width: usize, scale: u32, coloured: bool, amoun
         let x = (index % width) as f32 / scale;
         let y = (index / width) as f32 / scale;
 
-        let grey = 0.5 + (value_noise(x, y, 0) - 0.5) * amount;
+        let grey = 0.5 + (value_noise(x, y, field) - 0.5) * amount;
         let rgb = if coloured {
             [
-                0.5 + (value_noise(x, y, 1) - 0.5) * amount,
-                0.5 + (value_noise(x, y, 2) - 0.5) * amount,
-                0.5 + (value_noise(x, y, 3) - 0.5) * amount,
+                0.5 + (value_noise(x, y, field.wrapping_add(1)) - 0.5) * amount,
+                0.5 + (value_noise(x, y, field.wrapping_add(2)) - 0.5) * amount,
+                0.5 + (value_noise(x, y, field.wrapping_add(3)) - 0.5) * amount,
             ]
         } else {
             [grey, grey, grey]
@@ -1722,17 +1773,16 @@ mod tests {
     }
 
     /// The six generators whose picture is a function of position alone.
-    const STILLS: [&str; 6] = [
+    const STILLS: [&str; 5] = [
         "ovs.solid_colour",
         "ovs.test_pattern",
         "ovs.gradient",
         "ovs.grid",
         "ovs.shape",
-        "ovs.noise",
     ];
 
-    /// The three whose picture is a function of time.
-    const TIMEPIECES: [&str; 3] = ["ovs.clock", "ovs.countdown", "ovs.strobe"];
+    /// The ones whose picture is a function of time as well as position.
+    const TIMEPIECES: [&str; 4] = ["ovs.clock", "ovs.countdown", "ovs.strobe", "ovs.noise"];
 
     #[test]
     fn a_still_generator_has_one_frame_and_no_timeline() {
@@ -1869,6 +1919,67 @@ mod tests {
                 since_anchor: Duration::from_secs(1),
             })
             .is_some());
+    }
+
+    fn noise() -> GeneratorSource {
+        GeneratorSource::new("ovs.noise", 1, &ParameterMap::new(), size()).expect("published")
+    }
+
+    #[test]
+    fn noise_is_a_different_field_every_frame() {
+        // The owner, 2026-10-12: "Ist aktuell Static, sollte aber wirklich
+        // zufälliger Noise sein jedes Frame." A field that stood still was a
+        // texture with a grain, which is not what the word means.
+        let mut source = noise();
+
+        let first = source
+            .redraw_at(0, FrameRate::FPS_60)
+            .expect("a picture")
+            .pixels()
+            .to_vec();
+        let next = source
+            .redraw_at(17, FrameRate::FPS_60)
+            .expect("a picture")
+            .pixels()
+            .to_vec();
+
+        assert_ne!(first, next, "one frame later and the same grain");
+    }
+
+    #[test]
+    fn two_noise_layers_do_not_draw_the_same_field() {
+        // The field is a function of position and time, and two layers share
+        // both — so without something of their own they would be the same
+        // picture twice, which is the one thing noise must never be.
+        let mut one = noise();
+        let mut other = noise();
+
+        let at = |source: &mut GeneratorSource| {
+            source
+                .redraw_at(1_000, FrameRate::FPS_60)
+                .expect("a picture")
+                .pixels()
+                .to_vec()
+        };
+
+        assert_ne!(at(&mut one), at(&mut other), "the same moment, one picture");
+    }
+
+    #[test]
+    fn noise_runs_free_rather_than_from_when_the_layer_started() {
+        // Nothing in noise restarts, so nothing about the layer reaches it.
+        let source = noise();
+        let at = |wall_seconds: u64, layer_seconds: u64| {
+            source
+                .tick_at(Moment {
+                    wall: UNIX_EPOCH + Duration::from_secs(wall_seconds),
+                    since_anchor: Duration::from_secs(layer_seconds),
+                })
+                .expect("a tick")
+        };
+
+        assert_eq!(at(7, 0), at(7, 600), "the layer's age does not reach it");
+        assert_ne!(at(7, 0), at(8, 0), "and the clock does");
     }
 
     fn service_pattern() -> GeneratorSource {
@@ -3073,22 +3184,29 @@ mod tests {
     }
 
     #[test]
-    fn noise_is_the_same_picture_every_time_it_is_drawn() {
-        // A show that looked different every night is a show nobody can
-        // check in the afternoon. There is no seed and no clock in it.
-        let mut first =
-            GeneratorSource::new("ovs.noise", 1, &ParameterMap::new(), size()).expect("published");
-        let mut second =
+    fn noise_asked_twice_for_one_moment_draws_it_twice_the_same() {
+        // **This used to say the opposite**, and said why: a show that looked
+        // different every night is a show nobody can check in the afternoon.
+        // The owner decided otherwise on 2026-10-12 — "sollte aber wirklich
+        // zufälliger Noise sein jedes Frame" — and what that gives up is
+        // exactly that: the field now depends on the wall clock, so the same
+        // show is not the same grain tomorrow.
+        //
+        // What is kept, and has to be, is that one moment is one picture. A
+        // redraw that rolled fresh numbers every time it was asked would make
+        // the buffer comparison in `redraw_at` meaningless and put a different
+        // field on two outputs showing the same composition.
+        let mut source =
             GeneratorSource::new("ovs.noise", 1, &ParameterMap::new(), size()).expect("published");
 
         assert_eq!(
-            first.frame(0).expect("draws").image.pixels(),
-            second.frame(0).expect("draws").image.pixels()
+            source.frame(42).expect("draws").image.pixels().to_vec(),
+            source.frame(42).expect("draws").image.pixels().to_vec(),
         );
-        assert_eq!(
-            first.frame(0).expect("draws").image.pixels(),
-            first.frame(97).expect("draws").image.pixels(),
-            "and the same however far along a playhead has run"
+        assert_ne!(
+            source.frame(42).expect("draws").image.pixels().to_vec(),
+            source.frame(43).expect("draws").image.pixels().to_vec(),
+            "and a different moment is a different field"
         );
     }
 
@@ -3171,14 +3289,15 @@ mod tests {
         // this one refuses it on save. The published default is the only answer
         // that is not invented here — a constant in the renderer would be one
         // generator's number quietly applied to another.
-        let parameters = ParameterMap::from([(
-            "amount".to_owned(),
-            ParameterValue::Color([1.0, 0.0, 0.0, 1.0]),
-        )]);
+        // A still generator, because the question is about parameters and
+        // nothing else: noise now carries a seed of its own, so two instances
+        // of it differ by design and could not answer this.
+        let parameters = ParameterMap::from([("colour".to_owned(), ParameterValue::Float(3.0))]);
         let mut wrong =
-            GeneratorSource::new("ovs.noise", 1, &parameters, size()).expect("published");
+            GeneratorSource::new("ovs.solid_colour", 1, &parameters, size()).expect("published");
         let mut published =
-            GeneratorSource::new("ovs.noise", 1, &ParameterMap::new(), size()).expect("published");
+            GeneratorSource::new("ovs.solid_colour", 1, &ParameterMap::new(), size())
+                .expect("published");
 
         assert_eq!(
             wrong.frame(0).expect("draws").image.pixels(),
