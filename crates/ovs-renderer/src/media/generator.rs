@@ -585,13 +585,34 @@ impl GeneratorSource {
                 Some(if *show_seconds { second } else { second / 60 })
             }
             Kind::ServicePattern { .. } => {
+                // **Free-running, on a clock of its own** (owner, 2026-10-12:
+                // "Das Testbild läuft immer Freerun, es hat seine eigene
+                // Zeit"). The wall clock rather than how long the layer has
+                // been up, which is what everything else here is timed by:
+                // this one must not restart when a slot is switched back to
+                // it, when a caption is edited or when the composition is
+                // resized, and two layers showing it have to be in step. It is
+                // what somebody checks a wall with — "um nicht in die WebGUI
+                // oder an den Server gehen zu müssen" — rather than something
+                // a show is built out of, so nothing about the show reaches
+                // it: not the trigger, not the transport, not the master
+                // speed.
+                //
+                // A clock somebody steps, by hand or by NTP, steps this
+                // picture with it. That is the cost of a time of its own and
+                // it is a jump in a test pattern, which is the cheapest place
+                // in this system for one to land.
+                //
                 // Wrapped rather than held at the end: a test pattern that
                 // stopped moving would be exactly the lie it exists to expose
                 // — a frozen output and a live one showing a still look the
-                // same from across a room. Once in forty-nine days the picture
-                // jumps instead, which is the better of the two.
-                let ms = moment.since_anchor.as_millis() % u128::from(u32::MAX);
-                Some(ms as u32)
+                // same from across a room.
+                let ms = moment
+                    .wall
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis();
+                Some((ms % u128::from(u32::MAX)) as u32)
             }
             Kind::Strobe { hz, .. } => {
                 // The parity of the half-cycle, and nothing more: a strobe has
@@ -1929,24 +1950,28 @@ mod tests {
     }
 
     #[test]
-    fn the_service_pattern_keeps_moving_rather_than_stopping_at_the_end() {
-        // The index is milliseconds and it wraps. Holding the last one instead
-        // would leave the picture frozen, which is exactly the fault it is
-        // there to expose.
+    fn the_service_pattern_runs_free_rather_than_from_when_the_layer_started() {
+        // The owner's rule for this one generator: "Das Testbild läuft immer
+        // Freerun, es hat seine eigene Zeit." So the layer's own age must not
+        // reach it — otherwise it restarts every time the generator is rebuilt
+        // and two layers showing it fall out of step.
         let source = service_pattern();
-        let at = |seconds: u64| {
+        let at = |wall_seconds: u64, layer_seconds: u64| {
             source
                 .tick_at(Moment {
-                    wall: UNIX_EPOCH,
-                    since_anchor: Duration::from_secs(seconds),
+                    wall: UNIX_EPOCH + Duration::from_secs(wall_seconds),
+                    since_anchor: Duration::from_secs(layer_seconds),
                 })
                 .expect("a tick")
         };
 
-        assert_eq!(at(0), 0);
-        assert_eq!(at(2), 2_000, "a millisecond a tick");
-        // Three minutes in, which is still climbing rather than clamped.
-        assert_eq!(at(180), 180_000);
+        assert_eq!(
+            at(100, 0),
+            at(100, 9_999),
+            "the same moment, two layers of different ages, one picture"
+        );
+        assert_eq!(at(100, 0), 100_000, "a millisecond a tick");
+        assert_ne!(at(100, 0), at(102, 0), "and it moves with the clock");
     }
 
     #[test]
