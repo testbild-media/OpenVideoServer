@@ -156,6 +156,19 @@ Brightness, contrast, saturation and gamma.
 | Saturation | `saturation` | a number from 0 to 4 | 1 |
 | Gamma | `gamma` | a number from 0.1 to 4 | 1 |
 
+### Colour Correct — `ovs.colour_correct` v2
+
+Brightness, contrast, saturation, gamma, and the white point.
+
+| Parameter | Key | Takes | Default |
+|---|---|---|---|
+| Brightness | `brightness` | a number from 0 to 4 | 1 |
+| Contrast | `contrast` | a number from 0 to 4 | 1 |
+| Saturation | `saturation` | a number from 0 to 4 | 1 |
+| Gamma | `gamma` | a number from 0.1 to 4 | 1 |
+| Temperature | `temperature_k` | a number from 2000 to 10000 | 6500 |
+| Tint | `tint` | a number from -1 to 1 | 0 |
+
 ### Tint — `ovs.tint` v1
 
 Mixes the picture towards one colour.

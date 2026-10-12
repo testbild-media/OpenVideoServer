@@ -71,6 +71,24 @@ const KIND_PIXELATE_DOWN: u32 = 3u;
 const KIND_BLUR_ACROSS: u32 = 4u;
 const KIND_BLUR_DOWN: u32 = 5u;
 const KIND_CROP: u32 = 6u;
+const KIND_WHITE_BALANCE: u32 = 7u;
+
+/// The temperature at which the white point is left alone, in kelvin.
+///
+/// D65, which is what Rec. 709 is mastered against, so a picture arriving here
+/// is already balanced for it. Every gain below is divided by the gain at this
+/// temperature, which makes the published default exactly neutral rather than
+/// nearly so.
+const NEUTRAL_KELVIN: f32 = 6500.0;
+
+/// How far the ends of the tint control push the green channel.
+///
+/// **Mine, not measured.** Thirty per cent at either end: enough that the
+/// control does something at its extremes and little enough that it stays a
+/// correction rather than a colour wash — which is what the Colorize effect is
+/// for. The red and blue halves move the other way at half the rate, so the
+/// axis runs green to magenta rather than green to grey.
+const TINT_GREEN_RANGE: f32 = 0.3;
 
 // Rec. 709, because that is what the content is graded in and what every panel
 // downstream of this expects.
@@ -253,6 +271,77 @@ fn crop(uv: vec2<f32>, source: vec4<f32>) -> vec4<f32> {
     return select(vec4<f32>(0.0, 0.0, 0.0, 0.0), source, inside);
 }
 
+/// The channel gains of a blackbody at a temperature, unnormalised.
+///
+/// A piecewise fit to the blackbody locus rather than a colorimetric
+/// conversion: within a few per cent across the range this publishes, which is
+/// a long way inside what anybody can see on a wall, and it costs two
+/// logarithms instead of a matrix and a table. The alternative — CIE
+/// chromaticities through a Bradford adaptation — is the right answer for a
+/// grade that has to match another facility's, and this does not.
+fn kelvin_gain(kelvin: f32) -> vec3<f32> {
+    let temperature = clamp(kelvin, 1000.0, 40000.0) / 100.0;
+
+    var red = 255.0;
+    if temperature > 66.0 {
+        red = 329.698727446 * pow(temperature - 60.0, -0.1332047592);
+    }
+
+    var green = 0.0;
+    if temperature <= 66.0 {
+        green = 99.4708025861 * log(temperature) - 161.1195681661;
+    } else {
+        green = 288.1221695283 * pow(temperature - 60.0, -0.0755148492);
+    }
+
+    var blue = 255.0;
+    if temperature < 66.0 {
+        if temperature <= 19.0 {
+            blue = 0.0;
+        } else {
+            blue = 138.5177312231 * log(temperature - 10.0) - 305.0447927307;
+        }
+    }
+
+    return clamp(vec3<f32>(red, green, blue) / 255.0, vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
+/// Moves the white point: warm to cool, and green to magenta.
+///
+/// Runs after brightness, contrast, saturation and gamma, which is where the
+/// owner put it: those three move levels and bend them, and a white point
+/// applied before them would be stretched by them rather than sitting on top
+/// of the picture.
+///
+/// **Brightness is held.** The gains are divided by their own luma, so warming
+/// a picture does not also darken it — an operator reaching for temperature is
+/// not asking about exposure, and two controls that both change brightness are
+/// two controls nobody can set.
+///
+/// The alpha is untouched throughout: this moves colour, and a layer's
+/// coverage is not colour.
+fn white_balance(source: vec4<f32>) -> vec4<f32> {
+    let kelvin = effect.values.x;
+    let tint = clamp(effect.values.y, -1.0, 1.0);
+
+    // Relative to neutral, so 6500 K is the identity by construction rather
+    // than by how good the fit happens to be there.
+    var gain = kelvin_gain(kelvin) / max(kelvin_gain(NEUTRAL_KELVIN), vec3<f32>(0.0001));
+
+    // Green one way, red and blue the other at half the rate: the axis runs
+    // green to magenta, and magenta is what red and blue together are.
+    gain = gain * vec3<f32>(
+        1.0 - tint * TINT_GREEN_RANGE * 0.5,
+        1.0 + tint * TINT_GREEN_RANGE,
+        1.0 - tint * TINT_GREEN_RANGE * 0.5,
+    );
+
+    let luma = dot(gain, LUMA_WEIGHTS);
+    gain = gain / max(luma, 0.0001);
+
+    return vec4<f32>(source.rgb * gain, source.a);
+}
+
 @fragment
 fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // Straight alpha throughout, never premultiplied. What comes out of the
@@ -282,6 +371,9 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         }
         case KIND_CROP: {
             return crop(input.uv, source);
+        }
+        case KIND_WHITE_BALANCE: {
+            return white_balance(source);
         }
         // Unreachable: the renderer only ever writes a kind it has a branch
         // for. Returning the picture untouched is the one answer that cannot

@@ -7182,7 +7182,16 @@ mod tests {
     /// that wrote the numbers itself would pass on a build whose published
     /// defaults had drifted away from what the shader does with them.
     fn effect(type_id: &str, values: &[(&str, ParameterValue)]) -> Vec<EffectPass> {
-        let mut instance = EffectInstance::new(type_id, 1);
+        effect_at(type_id, 1, values)
+    }
+
+    /// The passes one effect runs, at a named version.
+    fn effect_at(
+        type_id: &str,
+        version: u32,
+        values: &[(&str, ParameterValue)],
+    ) -> Vec<EffectPass> {
+        let mut instance = EffectInstance::new(type_id, version);
         for (key, value) in values {
             instance.parameters.insert((*key).to_owned(), value.clone());
         }
@@ -7331,14 +7340,23 @@ mod tests {
         let before = composed_frame(&mut canvas, &effected(layer, media, &[]), 16);
 
         for manifest in ovs_types::config::EFFECTS {
-            let passes = effect(manifest.type_id, &[]);
-            assert!(!passes.is_empty(), "{} runs nothing", manifest.type_id);
+            // The version the manifest is, not version one: a second version
+            // of an effect is a second set of defaults, and this promise is
+            // about each of them. The white point arrived this way, and a
+            // neutral that was only nearly neutral would show up here.
+            let passes = effect_at(manifest.type_id, manifest.version, &[]);
+            assert!(
+                !passes.is_empty(),
+                "{} v{} runs nothing",
+                manifest.type_id,
+                manifest.version
+            );
 
             let after = composed_frame(&mut canvas, &effected(layer, media, &passes), 16);
             assert_eq!(
                 after, before,
-                "{} at its published defaults changed the picture",
-                manifest.type_id
+                "{} v{} at its published defaults changed the picture",
+                manifest.type_id, manifest.version
             );
         }
 
@@ -7484,6 +7502,62 @@ mod tests {
                 red(x, y),
                 188,
                 &format!("({x}, {y}) is the mean of the right block"),
+            );
+        }
+    }
+
+    #[test]
+    fn warming_a_picture_lifts_the_red_and_drops_the_blue_without_dimming_it() {
+        let _gpu = crate::vulkan::one_gpu_at_a_time();
+        // What temperature means, measured on the card rather than argued
+        // about: below the neutral the picture goes warm, above it goes cool,
+        // and neither changes how bright it is — an operator reaching for
+        // temperature is not asking about exposure.
+        let Some(mut canvas) = backend(16, 16) else {
+            return;
+        };
+        let media = MediaItemId::new();
+        let layer = LayerId::new();
+        canvas
+            .set_media_texture(
+                media,
+                &rgba(&pattern(16, |_, _| [128, 128, 128, 255]), 16, 16),
+            )
+            .expect("uploads");
+
+        let at = |canvas: &mut VulkanOffscreenBackend, kelvin: f32| {
+            let passes = effect_at(
+                "ovs.colour_correct",
+                2,
+                &[("temperature_k", ParameterValue::Float(f64::from(kelvin)))],
+            );
+            let frame = composed_frame(canvas, &effected(layer, media, &passes), 16);
+            let at_middle = (8 * 16 + 8) * 4;
+            [frame[at_middle], frame[at_middle + 1], frame[at_middle + 2]]
+        };
+
+        let neutral = at(&mut canvas, 6500.0);
+        let warm = at(&mut canvas, 3000.0);
+        let cool = at(&mut canvas, 9000.0);
+
+        close_to(neutral[0], 128, "neutral leaves the red where it was");
+        close_to(neutral[2], 128, "and the blue");
+
+        assert!(warm[0] > neutral[0], "warm lifts the red: {warm:?}");
+        assert!(warm[2] < neutral[2], "and drops the blue: {warm:?}");
+        assert!(cool[0] < neutral[0], "cool does the opposite: {cool:?}");
+        assert!(cool[2] > neutral[2], "{cool:?}");
+
+        // Luma held, which is what keeps this from being a second brightness
+        // control. Rec. 709 weights, the same ones the shader uses.
+        let luma = |rgb: [u8; 3]| {
+            0.2126 * f32::from(rgb[0]) + 0.7152 * f32::from(rgb[1]) + 0.0722 * f32::from(rgb[2])
+        };
+        for (what, rgb) in [("warm", warm), ("cool", cool)] {
+            let difference = (luma(rgb) - luma(neutral)).abs();
+            assert!(
+                difference < 4.0,
+                "{what} changed the brightness by {difference}"
             );
         }
     }

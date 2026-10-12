@@ -7,7 +7,7 @@
 //! Manifests are immutable once published, so this is a rendering of them rather
 //! than a second source of truth.
 
-use ovs_types::config::generators::PUBLISHED;
+use ovs_types::config::generators::{PUBLISHED, RETIRED};
 use serde::{Deserialize, Serialize};
 
 use crate::parameters::ModuleParameter;
@@ -38,6 +38,8 @@ pub struct GeneratorCatalogueResponse {
 
 /// Whether this is the newest published version of its type.
 ///
+/// A retired type is left out before this is asked; see `RETIRED`.
+///
 /// What a catalogue answers is "what can I put in a slot now", and the answer
 /// is one entry a type. An older version is still served to a show that names
 /// it: that is `manifest(type_id, version)`, and it is why both are published.
@@ -53,6 +55,7 @@ pub fn catalogue() -> GeneratorCatalogueResponse {
     GeneratorCatalogueResponse {
         generators: PUBLISHED
             .iter()
+            .filter(|manifest| !RETIRED.contains(&manifest.type_id))
             .filter(|manifest| is_newest(manifest.type_id, manifest.version))
             .map(|manifest| Generator {
                 type_id: manifest.type_id.to_owned(),
@@ -78,10 +81,13 @@ mod tests {
     fn the_catalogue_offers_the_newest_of_every_published_type() {
         let catalogue = catalogue();
 
-        // One entry a type, not one an entry in `PUBLISHED`. Two rows with the
-        // same name in a source list is a question an operator cannot answer
-        // from the list.
-        let mut types: Vec<&str> = PUBLISHED.iter().map(|manifest| manifest.type_id).collect();
+        // One entry a type that is still offered: the newest version of it,
+        // and nothing that has been retired.
+        let mut types: Vec<&str> = PUBLISHED
+            .iter()
+            .map(|manifest| manifest.type_id)
+            .filter(|type_id| !RETIRED.contains(type_id))
+            .collect();
         types.sort_unstable();
         types.dedup();
         assert_eq!(catalogue.generators.len(), types.len());
@@ -97,6 +103,26 @@ mod tests {
 
             let manifest = manifest(&rendered.type_id, rendered.version).expect("published");
             assert_eq!(rendered.parameters.len(), manifest.parameters.len());
+        }
+    }
+
+    #[test]
+    fn a_retired_generator_is_still_served_to_a_show_that_has_one() {
+        // The whole of why these are retired rather than deleted: a show saved
+        // with a clock on a layer opens with the clock it was saved with, and
+        // nobody finds a hole where a layer used to be.
+        for type_id in RETIRED {
+            assert!(
+                manifest(type_id, 1).is_some(),
+                "{type_id} is retired, which is not the same as gone"
+            );
+            assert!(
+                !catalogue()
+                    .generators
+                    .iter()
+                    .any(|generator| generator.type_id == type_id),
+                "{type_id} is offered after being retired"
+            );
         }
     }
 

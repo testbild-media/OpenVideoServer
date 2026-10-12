@@ -60,6 +60,8 @@ pub enum PassKind {
     BlurDown,
     /// Four edges cleared, in composition pixels.
     Crop,
+    /// The white point: temperature in kelvin, then the green–magenta axis.
+    WhiteBalance,
 }
 
 impl PassKind {
@@ -74,6 +76,7 @@ impl PassKind {
             Self::BlurAcross => 4,
             Self::BlurDown => 5,
             Self::Crop => 6,
+            Self::WhiteBalance => 7,
         }
     }
 }
@@ -145,6 +148,30 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
     let number = |key: &str| values.number(key) as f32;
 
     match (manifest.type_id, manifest.version) {
+        // **Two passes, because the white point comes after.** A pass carries
+        // four numbers and version two has six, and splitting them is not a
+        // workaround for that: the owner put temperature and tint after
+        // saturation and gamma, so they belong in a pass that runs after the
+        // one which does those. Appended even at their defaults, for the same
+        // reason every other effect is — the renderer proves an effect neutral
+        // by rendering it.
+        ("ovs.colour_correct", 2) => {
+            into.push(EffectPass {
+                kind: PassKind::ColourCorrect,
+                values: [
+                    number("brightness"),
+                    number("contrast"),
+                    number("saturation"),
+                    number("gamma"),
+                ],
+                colour: [0.0; 4],
+            });
+            into.push(EffectPass {
+                kind: PassKind::WhiteBalance,
+                values: [number("temperature_k"), number("tint"), 0.0, 0.0],
+                colour: [0.0; 4],
+            });
+        }
         ("ovs.colour_correct", 1) => into.push(EffectPass {
             kind: PassKind::ColourCorrect,
             values: [
@@ -496,6 +523,20 @@ mod tests {
         assert_eq!(passes.len(), 1, "one pass for all four edges");
         assert_eq!(passes[0].kind, PassKind::Crop);
         assert_eq!(passes[0].values, [1.0, 2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn the_white_point_runs_after_the_levels_rather_than_before_them() {
+        // The owner's order, 2026-10-12: "beides passiert erst nach Saturation
+        // und Gamma". The compositor runs a flat list and does not know which
+        // pass belongs to which effect, so the order has to be right here.
+        let mut version_two = instance("ovs.colour_correct", &[]);
+        version_two.version = 2;
+        let passes = passes(&[version_two]);
+        assert_eq!(
+            passes.iter().map(|pass| pass.kind).collect::<Vec<_>>(),
+            vec![PassKind::ColourCorrect, PassKind::WhiteBalance]
+        );
     }
 
     #[test]

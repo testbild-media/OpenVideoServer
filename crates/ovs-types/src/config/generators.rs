@@ -879,6 +879,19 @@ pub const PUBLISHED: [GeneratorManifest; 11] = [
     TEXT_V1,
 ];
 
+/// The types a source list no longer offers.
+///
+/// **Retired, not deleted.** Deleting a manifest takes the layer off every
+/// show that already names it — the generator cannot be built, so the layer
+/// draws its placeholder — and an operator opening last month's show would
+/// find a hole in it with nothing to say why. Retiring costs nothing: these
+/// leave the list, and [`manifest`] still answers for a show that has one.
+///
+/// The owner, 2026-10-12: "Was sowieso dann weg kann und mir keinen Mehrwert
+/// bringt: Generator Countdown, Generator Clock". Both draw the time, and the
+/// time is not what this system is for.
+pub const RETIRED: [&str; 2] = ["ovs.clock", "ovs.countdown"];
+
 /// Returns a published generator by type and version.
 ///
 /// A show naming a version this build does not have is refused rather than

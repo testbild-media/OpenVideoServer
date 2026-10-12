@@ -7,7 +7,7 @@
 //! Manifests are immutable once published, so this is a rendering of them rather
 //! than a second source of truth.
 
-use ovs_types::config::effects::PUBLISHED;
+use ovs_types::config::effects::{PUBLISHED, RETIRED};
 use serde::{Deserialize, Serialize};
 
 use crate::parameters::ModuleParameter;
@@ -36,6 +36,8 @@ pub struct EffectCatalogueResponse {
 
 /// Whether this is the newest published version of its type.
 ///
+/// A retired type is left out before this is asked; see `RETIRED`.
+///
 /// What a catalogue answers is "what can I put in a slot now", and the answer
 /// is one entry a type. An older version is still served to a show that names
 /// it: that is `manifest(type_id, version)`, and it is why both are published.
@@ -51,6 +53,7 @@ pub fn catalogue() -> EffectCatalogueResponse {
     EffectCatalogueResponse {
         effects: PUBLISHED
             .iter()
+            .filter(|manifest| !RETIRED.contains(&manifest.type_id))
             .filter(|manifest| is_newest(manifest.type_id, manifest.version))
             .map(|manifest| Effect {
                 type_id: manifest.type_id.to_owned(),
@@ -70,16 +73,44 @@ pub fn catalogue() -> EffectCatalogueResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ovs_types::config::effects::manifest;
 
     #[test]
-    fn the_catalogue_describes_every_published_effect() {
+    fn the_catalogue_offers_the_newest_of_every_effect_still_published() {
         let catalogue = catalogue();
-        assert_eq!(catalogue.effects.len(), PUBLISHED.len());
 
-        for (rendered, manifest) in catalogue.effects.iter().zip(PUBLISHED.iter()) {
-            assert_eq!(rendered.type_id, manifest.type_id);
-            assert_eq!(rendered.version, manifest.version);
-            assert_eq!(rendered.parameters.len(), manifest.parameters.len());
+        // One entry a type that is still offered: the newest version of it,
+        // and nothing that has been retired.
+        let mut types: Vec<&str> = PUBLISHED
+            .iter()
+            .map(|manifest| manifest.type_id)
+            .filter(|type_id| !RETIRED.contains(type_id))
+            .collect();
+        types.sort_unstable();
+        types.dedup();
+        assert_eq!(catalogue.effects.len(), types.len());
+
+        for rendered in &catalogue.effects {
+            assert!(
+                !RETIRED.contains(&rendered.type_id.as_str()),
+                "{} is offered after being retired",
+                rendered.type_id
+            );
+            let newest = PUBLISHED
+                .iter()
+                .filter(|manifest| manifest.type_id == rendered.type_id)
+                .map(|manifest| manifest.version)
+                .max()
+                .expect("a version of a type that is in the catalogue");
+            assert_eq!(rendered.version, newest, "{}", rendered.type_id);
+        }
+    }
+
+    #[test]
+    fn a_retired_effect_is_still_served_to_a_show_that_has_one() {
+        // Retired, not deleted: a show with a Tint in a chain opens with it.
+        for type_id in RETIRED {
+            assert!(manifest(type_id, 1).is_some(), "{type_id} is still served");
         }
     }
 

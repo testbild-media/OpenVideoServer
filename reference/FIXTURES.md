@@ -160,6 +160,19 @@ Footprint: **8 channels**. Patch to: **one effect instance in a chain**.
 | 5–6 | Saturation | `saturation` | 0 at 0, 4 at 65535 | 16384 |
 | 7–8 | Gamma | `gamma` | 0.1 at 0, 4 at 65535 | 15123 |
 
+## Colour Correct — `ovs.colour_correct` v2
+
+Footprint: **12 channels**. Patch to: **one effect instance in a chain**.
+
+| Channel | Name | Control | Values | Home |
+|---|---|---|---|---|
+| 1–2 | Brightness | `brightness` | 0 at 0, 4 at 65535 | 16384 |
+| 3–4 | Contrast | `contrast` | 0 at 0, 4 at 65535 | 16384 |
+| 5–6 | Saturation | `saturation` | 0 at 0, 4 at 65535 | 16384 |
+| 7–8 | Gamma | `gamma` | 0.1 at 0, 4 at 65535 | 15123 |
+| 9–10 | Temperature | `temperature_k` | 2000 at 0, 10000 at 65535 | 36863 |
+| 11–12 | Tint | `tint` | -1 at 0, 1 at 65535 | 32768 |
+
 ## Tint — `ovs.tint` v1
 
 Footprint: **7 channels**. Patch to: **one effect instance in a chain**.

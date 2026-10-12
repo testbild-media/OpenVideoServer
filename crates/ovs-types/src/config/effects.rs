@@ -294,6 +294,103 @@ pub const COLOUR_CORRECT_V1: EffectManifest = EffectManifest {
     ],
 };
 
+/// Neutral daylight, in kelvin: the temperature at which this changes nothing.
+///
+/// D65, which is what Rec. 709 is mastered against and therefore what every
+/// picture reaching this is already balanced for. The gains are worked out
+/// relative to it, so the published default is exactly no change rather than
+/// nearly none.
+pub const NEUTRAL_KELVIN: f64 = 6500.0;
+
+/// Brightness, contrast, saturation, gamma, and then the white point.
+///
+/// **Version two adds temperature and tint, after the four that were already
+/// here** (owner, 2026-10-12: "beides passiert erst nach Saturation und
+/// Gamma"). The order is not a preference: brightness and contrast move levels
+/// and gamma bends them, and a white point applied before those would be
+/// stretched by them. Applied after, it is what an operator means by it —
+/// the picture, warmed.
+///
+/// **Which is also the end of the Tint effect**, and the two senses of that
+/// word are worth keeping apart. Tint here is the green–magenta axis, the one
+/// that sits beside temperature on every grading desk and corrects the cast a
+/// panel or a camera has. The *effect* called Tint pushed a whole picture
+/// towards one colour, which is an artistic choice rather than a correction,
+/// and that is what the Colorize effect is for.
+///
+/// Temperature runs from 2000 K to 10000 K: candlelight at one end, a heavily
+/// overcast sky at the other, and everything a venue actually contains in
+/// between. **The ends are mine**, picked to cover what a room does rather
+/// than measured from anything.
+pub const COLOUR_CORRECT_V2: EffectManifest = EffectManifest {
+    type_id: "ovs.colour_correct",
+    version: 2,
+    name: "Colour Correct",
+    description: "Brightness, contrast, saturation, gamma, and the white point.",
+    parameters: &[
+        ParameterDefinition {
+            key: "brightness",
+            name: "Brightness",
+            kind: ParameterKind::Number {
+                min: 0.0,
+                max: 4.0,
+                default: 1.0,
+            },
+            dmx: Some(DmxChannel::Fine),
+        },
+        ParameterDefinition {
+            key: "contrast",
+            name: "Contrast",
+            kind: ParameterKind::Number {
+                min: 0.0,
+                max: 4.0,
+                default: 1.0,
+            },
+            dmx: Some(DmxChannel::Fine),
+        },
+        ParameterDefinition {
+            key: "saturation",
+            name: "Saturation",
+            kind: ParameterKind::Number {
+                min: 0.0,
+                max: 4.0,
+                default: 1.0,
+            },
+            dmx: Some(DmxChannel::Fine),
+        },
+        ParameterDefinition {
+            key: "gamma",
+            name: "Gamma",
+            kind: ParameterKind::Number {
+                min: 0.1,
+                max: 4.0,
+                default: 1.0,
+            },
+            dmx: Some(DmxChannel::Fine),
+        },
+        ParameterDefinition {
+            key: "temperature_k",
+            name: "Temperature",
+            kind: ParameterKind::Number {
+                min: 2000.0,
+                max: 10000.0,
+                default: NEUTRAL_KELVIN,
+            },
+            dmx: Some(DmxChannel::Fine),
+        },
+        ParameterDefinition {
+            key: "tint",
+            name: "Tint",
+            kind: ParameterKind::Number {
+                min: -1.0,
+                max: 1.0,
+                default: 0.0,
+            },
+            dmx: Some(DmxChannel::Fine),
+        },
+    ],
+};
+
 /// Pushes a picture towards one colour.
 ///
 /// What turns four clips into eight looks: the same content, one in the house
@@ -463,8 +560,29 @@ pub const CROP_V1: EffectManifest = EffectManifest {
 };
 
 /// Every effect this build publishes.
-pub const PUBLISHED: [EffectManifest; 5] =
-    [COLOUR_CORRECT_V1, TINT_V1, PIXELATE_V1, BLUR_V1, CROP_V1];
+pub const PUBLISHED: [EffectManifest; 6] = [
+    // Both versions, and the catalogue offers the newer: a show saved against
+    // version one opens with the four controls it was saved with.
+    COLOUR_CORRECT_V1,
+    COLOUR_CORRECT_V2,
+    TINT_V1,
+    PIXELATE_V1,
+    BLUR_V1,
+    CROP_V1,
+];
+
+/// The types an effect list no longer offers.
+///
+/// **Retired, not deleted**, for the reason [`crate::config::generators::RETIRED`]
+/// gives: a show that already names one keeps working, because [`manifest`]
+/// still answers for it.
+///
+/// Tint pushed a whole picture towards one colour. That is an artistic choice
+/// rather than a correction, and it is what the Colorize effect is for — which
+/// is the distinction that made it worth retiring rather than folding into
+/// Colour Correct, where "tint" means the green–magenta axis instead (owner,
+/// 2026-10-12).
+pub const RETIRED: [&str; 1] = ["ovs.tint"];
 
 /// Returns a published effect by type and version.
 ///
