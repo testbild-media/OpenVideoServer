@@ -7,6 +7,10 @@ because it is believed.
 A manifest is published once and never edited. Adding a parameter is a new version, so a
 show saved last year opens looking the way it was left.
 
+Every published version is listed here, which is not what a slot offers: a source list
+shows the newest of each type, and an older one is kept so that a show naming it still
+opens. Two entries with the same name are that, rather than a mistake.
+
 ## Generators
 
 A generator makes a picture without a file. It implements the same source contract a clip
@@ -29,6 +33,14 @@ A grid, colour bars and a centre cross, for lining a wall up.
 |---|---|---|---|
 | Grid size | `grid_px` | a number from 8 to 512 | 64 |
 | Colour bars | `bars` | on or off | on |
+
+### Test Pattern — `ovs.test_pattern` v2
+
+The service pattern: bars, a drift, a sweep and a caption.
+
+| Parameter | Key | Takes | Default |
+|---|---|---|---|
+| Caption | `caption` | text, up to 32 characters | `COMPOSITION` |
 
 ### Strobe — `ovs.strobe` v1
 

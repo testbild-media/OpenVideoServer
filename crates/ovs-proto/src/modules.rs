@@ -25,7 +25,10 @@ pub fn markdown() -> String {
          Do not edit by hand: a printed list that disagrees with the machine is worse than none,\n\
          because it is believed.\n\n\
          A manifest is published once and never edited. Adding a parameter is a new version, so a\n\
-         show saved last year opens looking the way it was left.\n\n",
+         show saved last year opens looking the way it was left.\n\n\
+         Every published version is listed here, which is not what a slot offers: a source list\n\
+         shows the newest of each type, and an older one is kept so that a show naming it still\n\
+         opens. Two entries with the same name are that, rather than a mistake.\n\n",
     );
 
     out.push_str("## Generators\n\n");

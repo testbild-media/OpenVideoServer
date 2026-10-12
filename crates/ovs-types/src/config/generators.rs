@@ -179,6 +179,49 @@ pub const TEST_PATTERN_V1: GeneratorManifest = GeneratorManifest {
     ],
 };
 
+/// The service pattern, on a layer.
+///
+/// **Version 2 draws a different picture from version 1, deliberately.** The
+/// first was a grid, bars and a centre cross, drawn once and left alone — and
+/// beside it this system already had a test pattern of its own, the one an
+/// output and a composition show, with colour bars over a black-level ramp, a
+/// picture that drifts, a sweep every five seconds and a caption naming the
+/// surface and its mode. Two answers to one question, and the lesser one was
+/// what a layer offered (owner, 2026-10-12: "den möchte ich da sehen und
+/// keinen Generischen").
+///
+/// **What the drift and the sweep are for**, and why they are worth what they
+/// cost: a frozen output and a live one showing a still look identical from
+/// across a room, and a pattern that moves tells them apart. The sweep is one
+/// bright diagonal edge with a fading trail, which is what tearing, frame
+/// doubling and a cable that cannot carry the rate all look wrong on.
+///
+/// **It is drawn every frame and that is not free.** The whole surface is
+/// copied twice a row and blended over, on the processor, and the finished
+/// picture crosses the bus whole — about fifteen megabytes a frame at 1080p.
+/// That is the price of the thing this is for, and it is paid while somebody
+/// is lining a wall up rather than during a show.
+///
+/// One parameter, because one is all the pattern has to be told: everything
+/// else about the picture is the surface it is drawn for. `COMPOSITION` as
+/// published because that is this system's own word for the surface a layer
+/// fills, and it is what the caption on a composition already says.
+pub const TEST_PATTERN_V2: GeneratorManifest = GeneratorManifest {
+    type_id: "ovs.test_pattern",
+    version: 2,
+    name: "Test Pattern",
+    description: "The service pattern: bars, a drift, a sweep and a caption.",
+    parameters: &[ParameterDefinition {
+        key: "caption",
+        name: "Caption",
+        kind: ParameterKind::Text {
+            default: "COMPOSITION",
+            max_chars: 32,
+        },
+        dmx: None,
+    }],
+};
+
 /// The slowest flash that is still a flash, in hertz.
 ///
 /// **My choice, not a measurement.** Below this it is a light being switched
@@ -819,9 +862,13 @@ pub const TEXT_V1: GeneratorManifest = GeneratorManifest {
 };
 
 /// Every generator this build publishes.
-pub const PUBLISHED: [GeneratorManifest; 10] = [
+pub const PUBLISHED: [GeneratorManifest; 11] = [
     SOLID_COLOUR_V1,
+    // Both, and in this order. A catalogue offers the newest of a type and a
+    // show is served whichever version it names, so v1 is here to keep a show
+    // that already uses it opening the way it was left — not to be offered.
     TEST_PATTERN_V1,
+    TEST_PATTERN_V2,
     STROBE_V1,
     GRADIENT_V1,
     GRID_V1,

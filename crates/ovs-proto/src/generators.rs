@@ -36,12 +36,24 @@ pub struct GeneratorCatalogueResponse {
     pub generators: Vec<Generator>,
 }
 
+/// Whether this is the newest published version of its type.
+///
+/// What a catalogue answers is "what can I put in a slot now", and the answer
+/// is one entry a type. An older version is still served to a show that names
+/// it: that is `manifest(type_id, version)`, and it is why both are published.
+fn is_newest(type_id: &str, version: u32) -> bool {
+    !PUBLISHED
+        .iter()
+        .any(|other| other.type_id == type_id && other.version > version)
+}
+
 /// Returns the catalogue for this build.
 #[must_use]
 pub fn catalogue() -> GeneratorCatalogueResponse {
     GeneratorCatalogueResponse {
         generators: PUBLISHED
             .iter()
+            .filter(|manifest| is_newest(manifest.type_id, manifest.version))
             .map(|manifest| Generator {
                 type_id: manifest.type_id.to_owned(),
                 version: manifest.version,
@@ -60,36 +72,67 @@ pub fn catalogue() -> GeneratorCatalogueResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ovs_types::config::generators::manifest;
 
     #[test]
-    fn the_catalogue_describes_every_published_generator() {
+    fn the_catalogue_offers_the_newest_of_every_published_type() {
         let catalogue = catalogue();
-        assert_eq!(catalogue.generators.len(), PUBLISHED.len());
 
-        for (rendered, manifest) in catalogue.generators.iter().zip(PUBLISHED.iter()) {
-            assert_eq!(rendered.type_id, manifest.type_id);
-            assert_eq!(rendered.version, manifest.version);
+        // One entry a type, not one an entry in `PUBLISHED`. Two rows with the
+        // same name in a source list is a question an operator cannot answer
+        // from the list.
+        let mut types: Vec<&str> = PUBLISHED.iter().map(|manifest| manifest.type_id).collect();
+        types.sort_unstable();
+        types.dedup();
+        assert_eq!(catalogue.generators.len(), types.len());
+
+        for rendered in &catalogue.generators {
+            let newest = PUBLISHED
+                .iter()
+                .filter(|manifest| manifest.type_id == rendered.type_id)
+                .map(|manifest| manifest.version)
+                .max()
+                .expect("a version of a type that is in the catalogue");
+            assert_eq!(rendered.version, newest, "{}", rendered.type_id);
+
+            let manifest = manifest(&rendered.type_id, rendered.version).expect("published");
             assert_eq!(rendered.parameters.len(), manifest.parameters.len());
         }
+    }
+
+    #[test]
+    fn an_older_version_is_still_served_to_a_show_that_names_it() {
+        // The other half of offering only the newest: a show saved against v1
+        // opens drawing what it was left drawing, rather than losing its layer
+        // to a build that no longer admits the version it names.
+        assert!(manifest("ovs.test_pattern", 1).is_some());
+        assert!(manifest("ovs.test_pattern", 2).is_some());
+        assert!(
+            !catalogue()
+                .generators
+                .iter()
+                .any(|generator| generator.type_id == "ovs.test_pattern" && generator.version == 1),
+            "v1 is served but not offered"
+        );
     }
 
     #[test]
     fn a_parameter_carries_what_a_client_needs_to_draw_a_control() {
         // A number without its range is a text box; with one it is a fader.
         let catalogue = catalogue();
-        let pattern = catalogue
+        let strobe = catalogue
             .generators
             .iter()
-            .find(|generator| generator.type_id == "ovs.test_pattern")
-            .expect("the test pattern");
+            .find(|generator| generator.type_id == "ovs.strobe")
+            .expect("the strobe");
 
-        let grid = pattern
+        let rate = strobe
             .parameters
             .iter()
-            .find(|parameter| parameter.key == "grid_px")
-            .expect("a grid size");
+            .find(|parameter| parameter.key == "hz")
+            .expect("a rate");
 
-        match grid.parameter_type {
+        match rate.parameter_type {
             ParameterType::Number { min, max, default } => {
                 assert!(min < default && default < max);
             }

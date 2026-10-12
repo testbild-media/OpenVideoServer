@@ -34,12 +34,24 @@ pub struct EffectCatalogueResponse {
     pub effects: Vec<Effect>,
 }
 
+/// Whether this is the newest published version of its type.
+///
+/// What a catalogue answers is "what can I put in a slot now", and the answer
+/// is one entry a type. An older version is still served to a show that names
+/// it: that is `manifest(type_id, version)`, and it is why both are published.
+fn is_newest(type_id: &str, version: u32) -> bool {
+    !PUBLISHED
+        .iter()
+        .any(|other| other.type_id == type_id && other.version > version)
+}
+
 /// Returns the catalogue for this build.
 #[must_use]
 pub fn catalogue() -> EffectCatalogueResponse {
     EffectCatalogueResponse {
         effects: PUBLISHED
             .iter()
+            .filter(|manifest| is_newest(manifest.type_id, manifest.version))
             .map(|manifest| Effect {
                 type_id: manifest.type_id.to_owned(),
                 version: manifest.version,

@@ -121,6 +121,14 @@ struct Generating<'a> {
     slot_index: u16,
     slot: &'a Slot,
     size: ovs_types::geometry::SizePx,
+    /// What the composition is rendered at.
+    ///
+    /// Only the service pattern has anything to do with it: its caption names
+    /// the surface and the mode it is running at, and a caption naming a rate
+    /// nobody is running is worse than no caption. Carried here rather than
+    /// asked for at the draw, so a composition somebody re-rates gets a new
+    /// caption on the next pass.
+    rate: ovs_types::geometry::FrameRate,
     trigger: u64,
     now: Instant,
     /// What a control source has done to the generators, by instance.
@@ -449,6 +457,7 @@ impl Playback {
                             slot_index: live.active_slot,
                             slot,
                             size: show.composition.size,
+                            rate: show.composition.render_rate,
                             trigger: live.trigger,
                             now,
                             overrides: &state.generators,
@@ -890,6 +899,7 @@ impl Playback {
             slot_index,
             slot,
             size,
+            rate,
             trigger,
             now,
             overrides: wanted_overrides,
@@ -1020,7 +1030,7 @@ impl Playback {
             since_anchor: now.saturating_duration_since(generated.anchor),
         };
         let tick = generated.source.tick_at(moment).unwrap_or(0);
-        let uploaded = match generated.source.redraw_at(tick) {
+        let uploaded = match generated.source.redraw_at(tick, rate) {
             Some(image) => compositor.upload_texture(TextureKey::Layer(layer_id), image),
             // The second has not moved, so what is on the GPU is still right.
             None => return built,

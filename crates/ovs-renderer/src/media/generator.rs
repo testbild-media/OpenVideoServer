@@ -73,12 +73,13 @@ use ovs_types::config::generators::{
     manifest, GeneratorManifest, ParameterDefinition, MAX_STROBE_HZ, MIN_STROBE_HZ,
 };
 use ovs_types::config::slot::{ParameterMap, ParameterValue};
-use ovs_types::geometry::SizePx;
+use ovs_types::geometry::{FrameRate, SizePx};
 
 use crate::media::source::{Frame, FrameSource};
 use crate::media::still::{DecodedImage, MediaError};
 use crate::media::text::{self, Pen};
 use crate::media::timeline::SourceLength;
+use crate::pattern::ServicePattern;
 
 /// The largest generated frame.
 ///
@@ -158,6 +159,13 @@ pub struct GeneratorSource {
     kind: Kind,
     size: SizePx,
     live: Option<Live>,
+    /// The service pattern, built the first time it is asked for.
+    ///
+    /// Built there rather than here because it needs the rate of the surface
+    /// it is drawn for, which is the composition's and can change while a show
+    /// is open — and a caption naming a rate nobody is running is worse than
+    /// no caption at all.
+    pattern: Option<Box<ServicePattern>>,
 }
 
 /// What a generator draws.
@@ -170,6 +178,11 @@ enum Kind {
     SolidColour { colour: [f32; 4] },
     /// A grid, optional colour bars and a centre cross.
     TestPattern { grid: u32, bars: bool },
+    /// This system's own test pattern, the one an output and a composition
+    /// show. Only the caption is carried here: everything else about the
+    /// picture is the surface it is drawn for, and the pattern keeps its own
+    /// buffers, so the drawing itself lives in [`GeneratorSource::pattern`].
+    ServicePattern { caption: String },
     /// A flash at a rate: the colour, then nothing, then the colour.
     Strobe { colour: [f32; 4], hz: f32 },
     /// A linear ramp between two colours, along an angle.
@@ -324,6 +337,17 @@ impl Kind {
                     frame_count: frames,
                 }
             }
+            // **The index is milliseconds, and the picture never repeats.**
+            // The drift wraps over the width — about nineteen seconds across
+            // and twenty-seven down at 1920x1080, both of which scale with the
+            // surface — and the sweep over a cycle of its own that depends on
+            // the diagonal. Neither divides the other, so there is no shorter
+            // honest number here than the span the index itself runs before it
+            // comes round, which is about forty-nine days.
+            Self::ServicePattern { .. } => SourceLength {
+                duration_ms: u32::MAX as u64,
+                frame_count: u32::MAX,
+            },
             // Two pictures -- lit and dark -- and one cycle to show them in.
             // The frame count is the granularity of the picture here as it is
             // everywhere else in this match; a strobe simply has only two.
@@ -347,7 +371,10 @@ impl Kind {
     const fn changes_over_time(&self) -> bool {
         matches!(
             *self,
-            Self::Clock { .. } | Self::Countdown { .. } | Self::Strobe { .. }
+            Self::Clock { .. }
+                | Self::Countdown { .. }
+                | Self::Strobe { .. }
+                | Self::ServicePattern { .. }
         )
     }
 }
@@ -361,6 +388,15 @@ impl Kind {
 fn clamp_rate(hz: f32) -> f64 {
     f64::from(hz).clamp(MIN_STROBE_HZ, MAX_STROBE_HZ)
 }
+
+/// How finely the service pattern's time is divided, in ticks a second.
+///
+/// A millisecond, which is finer than any rate this drives presents at — so
+/// every pass gets an index of its own whatever the wall is running at, and
+/// the drift does not judder against a number this picked. The cost of the
+/// fine division is nothing: this pattern is redrawn every pass regardless,
+/// which is what it is for.
+const PATTERN_TICKS_PER_SECOND: u32 = 1_000;
 
 /// How many frames a countdown holds.
 ///
@@ -412,6 +448,13 @@ impl GeneratorSource {
         let kind = match manifest.type_id {
             "ovs.solid_colour" => Kind::SolidColour {
                 colour: colour_of(manifest, parameters, "colour"),
+            },
+            // **Version two draws a different picture, deliberately.** A
+            // show that names version one still gets the grid and bars it was
+            // saved with; a source list offers only the newest, so this is
+            // what an operator adds today.
+            "ovs.test_pattern" if manifest.version >= 2 => Kind::ServicePattern {
+                caption: text_of(manifest, parameters, "caption"),
             },
             "ovs.test_pattern" => Kind::TestPattern {
                 grid: number_of(manifest, parameters, "grid_px") as u32,
@@ -483,12 +526,23 @@ impl GeneratorSource {
         // slot changes, because the alternative is allocating a composition on
         // the render thread once a second (house rule §5). A still gets none: it
         // is uploaded once and never asked again.
-        let live = kind.changes_over_time().then(|| Live {
-            image: blank(size),
-            drawn: None,
-        });
+        // The service pattern keeps its own buffers — the bars and the
+        // caption are drawn once and copied — so a second one the size of the
+        // composition would be up to two hundred megabytes held for nothing.
+        let live =
+            (kind.changes_over_time() && !matches!(kind, Kind::ServicePattern { .. })).then(|| {
+                Live {
+                    image: blank(size),
+                    drawn: None,
+                }
+            });
 
-        Some(Self { kind, size, live })
+        Some(Self {
+            kind,
+            size,
+            live,
+            pattern: None,
+        })
     }
 
     /// Whether the picture depends on the time as well as on the position.
@@ -530,6 +584,15 @@ impl GeneratorSource {
                 let second = second_of_day(moment.wall, *offset_minutes);
                 Some(if *show_seconds { second } else { second / 60 })
             }
+            Kind::ServicePattern { .. } => {
+                // Wrapped rather than held at the end: a test pattern that
+                // stopped moving would be exactly the lie it exists to expose
+                // — a frozen output and a live one showing a still look the
+                // same from across a room. Once in forty-nine days the picture
+                // jumps instead, which is the better of the two.
+                let ms = moment.since_anchor.as_millis() % u128::from(u32::MAX);
+                Some(ms as u32)
+            }
             Kind::Strobe { hz, .. } => {
                 // The parity of the half-cycle, and nothing more: a strobe has
                 // two pictures, so that is the whole index. Counting
@@ -555,8 +618,14 @@ impl GeneratorSource {
     ///
     /// Also `None` for a still, which has no kept buffer: it is drawn through
     /// [`FrameSource::frame`] once when the slot changes.
-    pub fn redraw_at(&mut self, tick: u32) -> Option<&DecodedImage> {
-        let Self { kind, size, live } = self;
+    pub fn redraw_at(&mut self, tick: u32, rate: FrameRate) -> Option<&DecodedImage> {
+        if matches!(self.kind, Kind::ServicePattern { .. }) {
+            return self.redraw_pattern(tick, rate);
+        }
+
+        let Self {
+            kind, size, live, ..
+        } = self;
         let live = live.as_mut()?;
         if live.drawn == Some(tick) {
             return None;
@@ -565,6 +634,32 @@ impl GeneratorSource {
         draw_kind(kind, *size, live.image.pixels_mut(), tick);
         live.drawn = Some(tick);
         Some(&live.image)
+    }
+
+    /// Draws the service pattern, rebuilding it when the surface has changed.
+    ///
+    /// `matches` is three comparisons a pass. The caption names the surface's
+    /// size and mode, so a composition somebody resizes or re-rates has to get
+    /// a new caption rather than keep one that has stopped being true.
+    ///
+    /// There is no "already drawn" comparison here as there is for a clock:
+    /// this picture is different on every pass, which is the whole of what it
+    /// is for.
+    fn redraw_pattern(&mut self, tick: u32, rate: FrameRate) -> Option<&DecodedImage> {
+        let stale = match (&self.kind, &self.pattern) {
+            (Kind::ServicePattern { caption }, Some(pattern)) => {
+                !pattern.matches(self.size, rate, caption)
+            }
+            _ => true,
+        };
+        if stale {
+            if let Kind::ServicePattern { caption } = &self.kind {
+                self.pattern = Some(Box::new(ServicePattern::new(self.size, rate, caption)));
+            }
+        }
+
+        let seconds = tick as f32 / PATTERN_TICKS_PER_SECOND as f32;
+        self.pattern.as_mut().map(|pattern| pattern.draw(seconds))
     }
 
     /// Forgets which tick is on the GPU, so the next redraw draws again.
@@ -597,6 +692,19 @@ impl FrameSource for GeneratorSource {
         // frame is the right answer to it. For a still every index is the same
         // picture, which is what it always was.
         let index = index.min(self.kind.length().frame_count.saturating_sub(1));
+
+        // **The side door, and nothing in the live path comes through it.** A
+        // generator that changes over time is drawn through `redraw_at`, which
+        // is given the surface's real rate; this is what a test or an exporter
+        // reaches for. Built fresh and at the rate a composition is published
+        // with, because there is no surface here to ask — stated rather than
+        // invented, and the caption says so on the picture.
+        if let Kind::ServicePattern { caption } = &self.kind {
+            let mut pattern = ServicePattern::new(self.size, FrameRate::FPS_60, caption);
+            let seconds = index as f32 / PATTERN_TICKS_PER_SECOND as f32;
+            return Ok(Frame::new(index, pattern.draw(seconds).clone()));
+        }
+
         Ok(Frame::new(index, self.draw(index)))
     }
 }
@@ -623,6 +731,11 @@ fn draw_kind(kind: &Kind, size: SizePx, pixels: &mut [u8], tick: u32) {
             }
         }
         Kind::TestPattern { grid, bars } => draw_test_pattern(pixels, width, height, *grid, *bars),
+        // Never reached: the service pattern keeps its own buffer and is
+        // drawn through `redraw_at`. Left as it was found rather than
+        // panicking — a layer that is black is something an operator can see
+        // and say, and a renderer that stopped is not.
+        Kind::ServicePattern { .. } => {}
         Kind::Strobe { colour, .. } => {
             // Lit on one half of the cycle and clear on the other. Clear
             // rather than black: a strobe belongs over whatever is under it,
@@ -1641,7 +1754,9 @@ mod tests {
         // Forgotten first: `redraw_at` answers `None` for a tick it has
         // already drawn, and this asks about moments out of order.
         source.forget_drawn();
-        let image = source.redraw_at(tick).expect("a picture");
+        let image = source
+            .redraw_at(tick, FrameRate::FPS_60)
+            .expect("a picture");
         pixel(image, 0, 0)
     }
 
@@ -1733,6 +1848,105 @@ mod tests {
                 since_anchor: Duration::from_secs(1),
             })
             .is_some());
+    }
+
+    fn service_pattern() -> GeneratorSource {
+        GeneratorSource::new(
+            "ovs.test_pattern",
+            2,
+            &ParameterMap::new(),
+            SizePx::new(192, 108),
+        )
+        .expect("published")
+    }
+
+    #[test]
+    fn the_test_pattern_a_slot_offers_now_is_the_service_pattern() {
+        // The owner, 2026-10-12: "den möchte ich da sehen und keinen
+        // Generischen". Version one is still published and still draws its
+        // grid, so a show saved with it opens unchanged; version two is what a
+        // source list offers, and it is the picture an output shows.
+        let still = GeneratorSource::new("ovs.test_pattern", 1, &ParameterMap::new(), size())
+            .expect("published");
+        assert!(!still.changes_over_time(), "version one is a still");
+
+        let service = service_pattern();
+        assert!(service.changes_over_time(), "version two moves");
+        assert!(service.length().frame_count > 1);
+        assert!(service.length().duration_ms > 0);
+    }
+
+    #[test]
+    fn the_service_pattern_is_a_different_picture_at_a_different_moment() {
+        // The whole reason it moves: a frozen output and a live one showing a
+        // still look identical from across a room. A pattern that gave the
+        // same pixels two seconds apart would be no better than the still it
+        // replaced.
+        let mut source = service_pattern();
+
+        let first = source
+            .redraw_at(0, FrameRate::FPS_60)
+            .expect("a picture")
+            .pixels()
+            .to_vec();
+        let later = source
+            .redraw_at(2_000, FrameRate::FPS_60)
+            .expect("a picture")
+            .pixels()
+            .to_vec();
+
+        assert_ne!(first, later, "two seconds apart and the same pixels");
+        assert!(
+            first.iter().any(|byte| *byte > 0),
+            "and it is a picture rather than a black field"
+        );
+    }
+
+    #[test]
+    fn the_caption_follows_the_rate_the_surface_is_running_at() {
+        // The caption names the surface and its mode, which is the whole point
+        // of putting one on: an engineer reads what the wall is doing off the
+        // wall instead of taking somebody's word for it. A composition whose
+        // rate somebody changes has to get a new caption rather than keep one
+        // that has stopped being true.
+        let mut source = service_pattern();
+
+        let sixty = source
+            .redraw_at(0, FrameRate::FPS_60)
+            .expect("a picture")
+            .pixels()
+            .to_vec();
+        let fifty = source
+            .redraw_at(0, FrameRate::FPS_50)
+            .expect("a picture")
+            .pixels()
+            .to_vec();
+
+        assert_ne!(
+            sixty, fifty,
+            "the same moment, and the caption did not move"
+        );
+    }
+
+    #[test]
+    fn the_service_pattern_keeps_moving_rather_than_stopping_at_the_end() {
+        // The index is milliseconds and it wraps. Holding the last one instead
+        // would leave the picture frozen, which is exactly the fault it is
+        // there to expose.
+        let source = service_pattern();
+        let at = |seconds: u64| {
+            source
+                .tick_at(Moment {
+                    wall: UNIX_EPOCH,
+                    since_anchor: Duration::from_secs(seconds),
+                })
+                .expect("a tick")
+        };
+
+        assert_eq!(at(0), 0);
+        assert_eq!(at(2), 2_000, "a millisecond a tick");
+        // Three minutes in, which is still climbing rather than clamped.
+        assert_eq!(at(180), 180_000);
     }
 
     #[test]
@@ -2025,12 +2239,18 @@ mod tests {
             GeneratorSource::new("ovs.clock", 1, &ParameterMap::new(), SizePx::new(128, 64))
                 .expect("published");
 
-        assert!(source.redraw_at(45_296).is_some(), "the first one is drawn");
         assert!(
-            source.redraw_at(45_296).is_none(),
+            source.redraw_at(45_296, FrameRate::FPS_60).is_some(),
+            "the first one is drawn"
+        );
+        assert!(
+            source.redraw_at(45_296, FrameRate::FPS_60).is_none(),
             "and the same second is not drawn again"
         );
-        assert!(source.redraw_at(45_297).is_some(), "the next one is");
+        assert!(
+            source.redraw_at(45_297, FrameRate::FPS_60).is_some(),
+            "the next one is"
+        );
     }
 
     #[test]
@@ -2040,7 +2260,7 @@ mod tests {
         // kept for nothing.
         let mut solid = GeneratorSource::new("ovs.solid_colour", 1, &ParameterMap::new(), size())
             .expect("published");
-        assert!(solid.redraw_at(0).is_none());
+        assert!(solid.redraw_at(0, FrameRate::FPS_60).is_none());
     }
 
     #[test]
@@ -2057,7 +2277,11 @@ mod tests {
         .expect("published");
 
         let allocated = source.frame(123).expect("draws").image.pixels().to_vec();
-        let in_place = source.redraw_at(123).expect("draws").pixels().to_vec();
+        let in_place = source
+            .redraw_at(123, FrameRate::FPS_60)
+            .expect("draws")
+            .pixels()
+            .to_vec();
         assert_eq!(allocated, in_place);
     }
 
