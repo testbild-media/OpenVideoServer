@@ -1852,6 +1852,21 @@ impl RenderLoop {
             if output.faulted.is_some() {
                 continue;
             }
+            // **The System screen takes none of it.** It shows the console,
+            // not the show, and `rebuild_mappings` skips it for that reason —
+            // which leaves it recorded as unmapped, and unmapped is read below
+            // as "takes the whole composition". So from the day the renderer
+            // started driving that connector (2026-09-26, three days after
+            // this mask was written) every machine with a System screen put
+            // the whole surface into the mask, and the Pieces preview became
+            // the plain composition pixel for pixel.
+            //
+            // The owner, 2026-10-12: "es ist beides Composition, als würde bei
+            // Pieces die Maske fehlen". It was not missing; it was letting
+            // everything through.
+            if output.kind == Kind::Console {
+                continue;
+            }
             if !output.mapped {
                 regions.push(crate::mask::Region::WHOLE);
                 continue;
@@ -3134,6 +3149,54 @@ mod tests {
         render.tick(at(epoch, 0));
 
         assert_eq!(render.mapped_regions(), vec![crate::mask::Region::WHOLE]);
+    }
+
+    #[test]
+    fn the_system_screen_takes_none_of_the_composition() {
+        // **What the Pieces preview is for**: showing which regions of the
+        // composition a wall actually takes. The mask is built by asking every
+        // output what it takes, and the System screen is one of them — it
+        // takes nothing, because it shows the console rather than the show.
+        //
+        // It is deliberately never mapped, and "not mapped" was read as "takes
+        // the whole composition". So on every machine with a System screen the
+        // mask let everything through and Pieces was the plain composition
+        // (owner, 2026-10-12: "es ist beides Composition, als würde bei Pieces
+        // die Maske fehlen").
+        use ovs_types::config::{OutputConfig, Piece};
+        use ovs_types::geometry::RectPx;
+
+        let (epoch, state, mut render) = loop_with(vec![
+            Box::new(HeadlessBackend::new("Wall", mode())),
+            Box::new(HeadlessBackend::new("System screen", mode())),
+        ]);
+        // What `adopt_console` does on a machine that has one. Set here
+        // because that method is `cfg(unix)` and this has to run everywhere.
+        render.outputs[1].kind = Kind::Console;
+
+        let mut show = Show::new("Show");
+        let output = OutputConfig::new("LED Wall", mode());
+        let output_id = output.id;
+        show.outputs.push(output);
+        show.pieces.push(Piece::new(
+            "Left half",
+            output_id,
+            RectPx::new(0, 0, 960, 1080),
+            RectPx::new(0, 0, 960, 1080),
+        ));
+        state.replace(ShowState {
+            sequence: Sequence(1),
+            show: Some(Box::new(show)),
+            ..ShowState::default()
+        });
+        render.tick(at(epoch, 0));
+
+        let regions = render.mapped_regions();
+        assert!(
+            !regions.contains(&crate::mask::Region::WHOLE),
+            "the System screen put the whole composition into the mask: {regions:?}"
+        );
+        assert_eq!(regions.len(), 1, "the wall's one piece, and nothing else");
     }
 
     #[test]
