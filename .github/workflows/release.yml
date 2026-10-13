@@ -201,6 +201,30 @@ jobs:
           fi
           exit 0
 
+      # And when it could not, the same question put to the binary on its own,
+      # in full voice.
+      #
+      # The client runs FFmpeg quietly and keeps the tail of what it said, which
+      # is the right trade for a queue of files and the wrong one for finding
+      # out why a brand-new encoder refuses a frame: "Task finished with error
+      # code: -22" was all there was to go on, and the encoder itself had said
+      # nothing at all (2026-10-13).
+      - name: Ask the shipped FFmpeg directly
+        if: failure() && steps.client-against-its-ffmpeg.outcome == 'failure'
+        shell: bash
+        run: |
+          ffmpeg=clients/desktop/vendor/ffmpeg/ffmpeg.exe
+          "$ffmpeg" -hide_banner -loglevel debug -y \
+            -i clients/desktop/test/media/refused-h264.mp4 -an -map 0:v:0 \
+            -c:v libkvazaar \
+            -kvazaar-params preset=veryfast,qp=18,period=25 \
+            -pix_fmt yuv420p \
+            -color_range tv -colorspace bt709 -color_primaries bt709 -color_trc bt709 \
+            -r 25 -tag:v hvc1 /tmp/kvazaar-trial.mp4 > /tmp/kvazaar.log 2>&1 || true
+          printf '::error title=%s::%s\n' 'kvazaar, asked in full' \
+            "$(sed -e 's/%/%25/g' -e 's/\r$//' /tmp/kvazaar.log | tail -n 70 | awk '{ printf "%s%%0A", $0 }')"
+          exit 0
+
       # `--release` refuses to fall back to the npm FFmpeg. Belt and braces
       # with the check above: that one proves the vendored build is clean, and
       # this one proves the vendored build is the one that got packaged.

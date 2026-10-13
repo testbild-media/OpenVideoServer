@@ -458,8 +458,14 @@ function common(from: string): string[] {
   return [
     '-nostdin',
     '-hide_banner',
+    // **Warnings as well as errors.** What is kept of this is the last four
+    // kilobytes, and only when the encode failed -- so a successful one costs
+    // nothing and a failed one says why. An encoder that refused one of its own
+    // options says so at warning level and then fails with a number
+    // ("Task finished with error code: -22"), and the number on its own sent me
+    // reading FFmpeg's source instead of its output (2026-10-13).
     '-loglevel',
-    'error',
+    'warning',
     // Progress as parseable lines rather than the status line FFmpeg writes for
     // a person.
     '-progress',
