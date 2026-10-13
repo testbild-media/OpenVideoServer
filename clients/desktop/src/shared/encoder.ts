@@ -211,11 +211,12 @@ export function hevcArguments(
   depth: ProfileDepth,
   rate: FrameRate,
   tags: ColourTags,
+  readAs: readonly string[] = [],
 ): string[] {
   const keyframes = keyframeArguments(backend, rate);
 
   return [
-    ...common(from),
+    ...common(from, readAs),
     '-c:v',
     backend,
     ...qualityArguments(backend, MOST_BITS_PER_SECOND, rate),
@@ -252,9 +253,14 @@ export function hevcArguments(
  * default and is a single-threaded decompress of the whole frame; more than
  * four buys nothing on the cores a show has spare.
  */
-export function hapArguments(from: string, into: string, rate: FrameRate): string[] {
+export function hapArguments(
+  from: string,
+  into: string,
+  rate: FrameRate,
+  readAs: readonly string[] = [],
+): string[] {
   return [
-    ...common(from),
+    ...common(from, readAs),
     '-c:v',
     'hap',
     '-format',
@@ -356,6 +362,45 @@ function keyframeArguments(backend: HevcBackend, rate: FrameRate): string[] {
 }
 
 /**
+ * The length of Kvazaar's B-frame group, said here rather than inherited.
+ *
+ * Its presets each set one — `veryfast` sets `--gop=8` — and a keyframe period
+ * that is not a multiple of it is refused outright rather than rounded:
+ *
+ *     Input error: intra period (25) not a multiple of B-gop length (8)
+ *
+ * The encoder then does not open, FFmpeg's wrapper says so, the scheduler
+ * flattens that to `-22` two layers further out, and the client used to keep
+ * only those outer layers — which is how the software path failed on every
+ * machine without a hardware encoder from 0.2.16 to 0.2.18 and never once said
+ * why. The client asks for a keyframe a second, a second at 25 fps is 25
+ * frames, and 25 is not a multiple of 8.
+ *
+ * Stating the GOP length here puts both halves of that arithmetic in one place,
+ * so a preset that chose a different one cannot quietly break it again.
+ */
+const KVAZAAR_GOP = 8;
+
+/**
+ * The keyframe period Kvazaar will accept, with the B-gop it has to match.
+ *
+ * Rounded **down** to a multiple of the GOP length, because the contract is a
+ * ceiling: `MOST_SECONDS_BETWEEN_KEYFRAMES` is the longest a clip may go
+ * without a keyframe, so at 25 fps 24 frames keeps it and 32 would break it.
+ *
+ * Under one GOP there is no multiple to round to — a clip at 5 fps may go five
+ * frames — so the B-gop is switched off instead, which is the other case
+ * Kvazaar exempts from the rule.
+ */
+function kvazaarKeyframes(rate: FrameRate): { gop: number; period: number } {
+  const most = Number(framesPerKeyframe(rate));
+  if (most < KVAZAAR_GOP) {
+    return { gop: 0, period: most };
+  }
+  return { gop: KVAZAAR_GOP, period: most - (most % KVAZAAR_GOP) };
+}
+
+/**
  * The rate-control flags, which the two backends spell entirely differently.
  *
  * NVENC's `p5` is the middle of its seven presets: the point past which more time
@@ -412,13 +457,14 @@ function qualityArguments(
   }
   if (backend === 'libkvazaar') {
     // Everything Kvazaar takes, in the one string it takes it in: the preset,
-    // the quantiser and the keyframe period. `veryfast` because this is the
-    // path a machine with no encoder at all goes down, where what an operator
-    // cares about is whether it finishes before doors — a slower preset buys
-    // picture quality nobody is comparing against anything.
+    // the quantiser, the B-gop and the keyframe period. `veryfast` because this
+    // is the path a machine with no encoder at all goes down, where what an
+    // operator cares about is whether it finishes before doors — a slower preset
+    // buys picture quality nobody is comparing against anything.
+    const keyframes = kvazaarKeyframes(rate);
     return [
       '-kvazaar-params',
-      `preset=veryfast,qp=${CONSTANT_QUALITY},period=${framesPerKeyframe(rate)}`,
+      `preset=veryfast,qp=${CONSTANT_QUALITY},gop=${keyframes.gop},period=${keyframes.period}`,
     ];
   }
   return ['-rate_control', 'quality', '-quality', String(MEDIA_FOUNDATION_QUALITY)];
@@ -499,8 +545,14 @@ export function whyItStopped(said: string): string {
   return (telling.length > 0 ? telling : lines).slice(-LINES_KEPT).join('; ');
 }
 
-/** The flags every encode takes, whatever it is producing. */
-function common(from: string): string[] {
+/**
+ * The flags every encode takes, whatever it is producing.
+ *
+ * `readAs` is what to put before `-i`, which is the only place FFmpeg takes an
+ * input's own options. Empty for a file that says what it is; the encoder trial
+ * passes the rawvideo demuxer's, because its one frame is a headerless file.
+ */
+function common(from: string, readAs: readonly string[] = []): string[] {
   return [
     '-nostdin',
     '-hide_banner',
@@ -518,6 +570,7 @@ function common(from: string): string[] {
     'pipe:1',
     '-nostats',
     '-y',
+    ...readAs,
     '-i',
     from,
     '-an',

@@ -247,23 +247,36 @@ jobs:
             else
               code=$?
             fi
-            printf '::error title=%s::%s\n' "trial $name (exit $code)" \
+            # A trial that worked is a notice rather than an error: which ones
+            # passed is half the answer, and an annotation that calls a success
+            # an error is how a log stops being read.
+            kind=error
+            if [ "$code" = 0 ]; then
+              kind=notice
+            fi
+            printf '::%s title=%s::%s\n' "$kind" "trial $name (exit $code)" \
               "$(quiet "/tmp/$name.log" | tail -n 18 | awk '{ printf "%s%%0A", $0 }')"
           }
 
           # The encoder on its own, then each clause the client adds to it. The
           # fourth is the one worth knowing: Kvazaar's `veryfast` preset sets
-          # `--gop=8`, the client asks for a keyframe every 25 frames, and 25
-          # is not a multiple of 8.
-          try bare -c:v libkvazaar -f hevc /tmp/bare.hevc
-          try qp -c:v libkvazaar -kvazaar-params qp=18 -f hevc /tmp/qp.hevc
-          try preset -c:v libkvazaar -kvazaar-params preset=veryfast,qp=18 -f hevc /tmp/preset.hevc
-          try period25 -c:v libkvazaar -kvazaar-params preset=veryfast,qp=18,period=25 -f hevc /tmp/p25.hevc
-          try period24 -c:v libkvazaar -kvazaar-params preset=veryfast,qp=18,period=24 -f hevc /tmp/p24.hevc
-          try nogop -c:v libkvazaar -kvazaar-params preset=veryfast,qp=18,gop=0,period=25 -f hevc /tmp/p0.hevc
+          # `--gop=8`, the client asked for a keyframe every 25 frames, and 25
+          # is not a multiple of 8 -- which Kvazaar refuses outright.
+          #
+          # `-f null -` for the ones that are only about the encoder, because
+          # this build has no raw-HEVC muxer and should not: the client writes
+          # MP4 and nothing else. The last two are the ones that need a real
+          # container, and they say whether `hvc1` in an MP4 is the problem
+          # instead.
+          try bare -c:v libkvazaar -f null -
+          try qp -c:v libkvazaar -kvazaar-params qp=18 -f null -
+          try preset -c:v libkvazaar -kvazaar-params preset=veryfast,qp=18 -f null -
+          try period25 -c:v libkvazaar -kvazaar-params preset=veryfast,qp=18,period=25 -f null -
+          try period24 -c:v libkvazaar -kvazaar-params preset=veryfast,qp=18,gop=8,period=24 -f null -
+          try nogop -c:v libkvazaar -kvazaar-params preset=veryfast,qp=18,gop=0,period=25 -f null -
           try colour -c:v libkvazaar -pix_fmt yuv420p \
             -color_range tv -colorspace bt709 -color_primaries bt709 -color_trc bt709 \
-            -r 25 -f hevc /tmp/colour.hevc
+            -r 25 -f null -
           try mp4 -c:v libkvazaar -f mp4 /tmp/plain.mp4
           try hvc1 -c:v libkvazaar -tag:v hvc1 -f mp4 /tmp/hvc1.mp4
 

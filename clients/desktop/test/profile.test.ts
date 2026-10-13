@@ -374,6 +374,55 @@ describe('how far an encode has got', () => {
   });
 });
 
+describe('the software encoder, which is the one every machine has', () => {
+  /** The `key=value` pairs out of the one string Kvazaar takes. */
+  function settings(rate: { numerator: number; denominator: number }): Map<string, string> {
+    const args = hevcArguments('in.mp4', 'out.mp4', 'libkvazaar', 8, rate, CONVENTIONAL_TAGS);
+    const params = args[args.indexOf('-kvazaar-params') + 1] ?? '';
+    return new Map(
+      params.split(',').map((one) => {
+        const [key, value] = one.split('=');
+        return [key ?? '', value ?? ''];
+      }),
+    );
+  }
+
+  it('asks for a keyframe period Kvazaar will accept', () => {
+    // "Input error: intra period (25) not a multiple of B-gop length (8)" is a
+    // refusal rather than a warning, and 25 frames is one second at 25 fps.
+    // Every software encode failed on that from 0.2.16 to 0.2.18.
+    for (const rate of [
+      { numerator: 24, denominator: 1 },
+      { numerator: 25, denominator: 1 },
+      { numerator: 30000, denominator: 1001 },
+      { numerator: 30, denominator: 1 },
+      { numerator: 50, denominator: 1 },
+      { numerator: 60000, denominator: 1001 },
+    ]) {
+      const asked = settings(rate);
+      const gop = Number(asked.get('gop'));
+      const period = Number(asked.get('period'));
+      const perSecond = rate.numerator / rate.denominator;
+      expect(period, `a period at ${perSecond} fps`).toBeGreaterThan(0);
+      if (gop !== 0) {
+        expect(period % gop, `${period} frames against a gop of ${gop}`).toBe(0);
+      }
+      // And still inside the contract: the ceiling is a keyframe a second.
+      expect(period, `${perSecond} fps may not exceed its own ceiling`).toBeLessThanOrEqual(
+        keyframesAtMost(perSecond),
+      );
+    }
+  });
+
+  it('switches the B-gop off below one gop, where no multiple exists', () => {
+    // A rate this low is unusual rather than impossible, and the alternative is
+    // a period of zero -- which is one keyframe at the start and then none.
+    const asked = settings({ numerator: 5, denominator: 1 });
+    expect(asked.get('gop')).toBe('0');
+    expect(asked.get('period')).toBe('5');
+  });
+});
+
 describe('what FFmpeg said about a failure', () => {
   // Verbatim from the release of 2026-10-13, where a software HEVC encode
   // failed on every machine with no hardware encoder and this was the whole of

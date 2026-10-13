@@ -167,9 +167,18 @@ describe('the FFmpeg the client brings with it', () => {
 
       const plan = planFor(video, new Set(await client.usableEncoders()));
       if (plan.kind === 'unavailable') {
-        // No encoder of any kind here. That is a fact about the machine rather
-        // than about this client, and the build's own check is what refuses a
-        // binary with no software encoder in it.
+        // **Not a skip when the binary has a software encoder in it.**
+        // `tools/build-ffmpeg.sh` refuses to produce one without `libkvazaar`,
+        // so on the build this client ships there is always a way through, and
+        // "this machine has no encoder" is only ever true of a developer's own
+        // FFmpeg. Skipping here would have turned the release that could
+        // prepare nothing into a green run (2026-10-13).
+        const { stdout } = await run(bundled('ffmpeg'), ['-hide_banner', '-encoders']);
+        if (/libkvazaar/.test(stdout)) {
+          throw new Error(
+            `the shipped FFmpeg has libkvazaar and the client cannot use it: ${plan.reason}`,
+          );
+        }
         ctx.skip();
         return;
       }

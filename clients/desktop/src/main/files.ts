@@ -38,6 +38,7 @@ import {
   preparedName,
   progressFrom,
   whyItStopped,
+  CONVENTIONAL_TAGS,
   type ColourTags,
   type HevcBackend,
 } from '../shared/encoder.js';
@@ -415,16 +416,26 @@ async function encodesOneFrame(encoder: string): Promise<boolean> {
   // them, so the trial asks about the encoder and nothing else.
   const source = join(directory, 'trial.yuv');
   const TRIAL = { width: 1280, height: 720 };
+  const rate = { numerator: 25, denominator: 1 };
   try {
     // Mid grey in Y, Cb and Cr alike: one byte repeated is a legal picture in
-    // this format, and what it looks like does not matter.
+    // this format, and what it looks like does not matter. Exactly one frame,
+    // which is what makes `-frames:v` unnecessary: the demuxer stops when the
+    // file does.
     await writeFile(source, Buffer.alloc((TRIAL.width * TRIAL.height * 3) / 2, 128));
-    await run(FFMPEG, [
-      '-nostdin',
-      '-hide_banner',
-      '-loglevel',
-      'error',
-      '-y',
+    // **The arguments a real encode would use, not a reduced set of them.**
+    // This asked `-c:v libkvazaar` and nothing else, so Kvazaar passed the
+    // trial and then refused every file the client gave it: the settings it
+    // objected to were in the string the trial left out. A trial that asks an
+    // easier question than the job is worse than no trial, because its answer
+    // is believed (2026-10-13).
+    //
+    // Eight bits, because that is the one depth every backend here can do. A
+    // machine whose encoder manages eight and not ten still passes this and
+    // fails a ten-bit file -- which `ingest.ts` catches by probing what came
+    // out, and which no one-frame trial can tell apart from a refusal to work
+    // at all.
+    const readAs = [
       '-f',
       'rawvideo',
       '-pix_fmt',
@@ -433,16 +444,13 @@ async function encodesOneFrame(encoder: string): Promise<boolean> {
       `${TRIAL.width}x${TRIAL.height}`,
       '-r',
       '25',
-      '-i',
-      source,
-      '-frames:v',
-      '1',
-      '-an',
-      '-c:v',
-      encoder,
-      ...(encoder === 'hap' ? ['-format', 'hap_alpha'] : []),
-      into,
-    ]);
+    ];
+    await run(
+      FFMPEG,
+      encoder === 'hap'
+        ? hapArguments(source, into, rate, readAs)
+        : hevcArguments(source, into, encoder as HevcBackend, 8, rate, CONVENTIONAL_TAGS, readAs),
+    );
     // A zero exit is not enough. Media Foundation writes a container with no
     // video in it and *then* fails, and some builds report that as success.
     const written = await stat(into).catch(() => null);
