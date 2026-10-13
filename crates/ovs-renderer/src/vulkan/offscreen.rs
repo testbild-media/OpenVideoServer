@@ -7782,6 +7782,143 @@ mod tests {
     }
 
     #[test]
+    fn losing_the_vertical_hold_moves_the_picture_up_and_down_and_nowhere_else() {
+        let _gpu = crate::vulkan::one_gpu_at_a_time();
+        // **Vertically, and only vertically** (owner, 2026-10-13: "ein
+        // kompletter vertikaler zufaelliger versatz ... also dass man wirklich
+        // out of sync waere"). Everything else this effect does moves the
+        // picture sideways, so a displacement that leaked into x would look
+        // like more of what was already there and pass unnoticed.
+        //
+        // The picture is a vertical ramp: every row is one flat colour and no
+        // two rows are alike. A purely vertical displacement reorders rows and
+        // leaves each of them flat; anything sideways breaks that.
+        let Some(mut canvas) = backend(64, 64) else {
+            return;
+        };
+        let media = MediaItemId::new();
+        let layer = LayerId::new();
+        canvas
+            .set_media_texture(
+                media,
+                // Opaque, and the ramp only in the colour: an alpha that
+                // ramped as well would be multiplied into the colour as the
+                // layer is composited, and the row number read back would be
+                // the square of the one that went in.
+                &rgba(
+                    &pattern(64, |_, y| {
+                        [(y * 4) as u8, (y * 4) as u8, (y * 4) as u8, 255]
+                    }),
+                    64,
+                    64,
+                ),
+            )
+            .expect("uploads");
+
+        // The hold on its own: the other three faults are at nought, so what
+        // is measured is this control and not the ones beside it.
+        let passes = effect_at(
+            "ovs.tv_glitch",
+            2,
+            &[
+                ("amount", ParameterValue::Float(1.0)),
+                ("tear", ParameterValue::Float(0.0)),
+                ("noise", ParameterValue::Float(0.0)),
+                ("roll", ParameterValue::Float(0.0)),
+                ("vertical_hold", ParameterValue::Float(1.0)),
+            ],
+        );
+
+        let scene = effected(layer, media, &passes);
+        let row_of = |frame: &[u8], y: usize| frame[y * 64 * 4];
+        let flat_rows = |frame: &[u8]| {
+            (0..64).all(|y| {
+                let first = row_of(frame, y);
+                (0..64).all(|x| frame[(y * 64 + x) * 4].abs_diff(first) <= 1)
+            })
+        };
+
+        let mut seen = std::collections::BTreeSet::new();
+        let mut moved_by = 0_usize;
+        for tick in 0..12 {
+            canvas.set_effect_time(tick as f32 * 0.4);
+            let frame = composed_frame(&mut canvas, &scene, 64);
+            assert!(
+                flat_rows(&frame),
+                "a row stopped being one colour, so the displacement was not purely vertical"
+            );
+            // Where the middle row's colour came from, as a row number: the
+            // ramp makes that readable straight off the pixel.
+            let from = usize::from(row_of(&frame, 32)) / 4;
+            moved_by = moved_by.max(from.abs_diff(32));
+            seen.insert(from);
+        }
+
+        assert!(
+            seen.len() >= 3,
+            "the picture sat in the same place all the way through: {seen:?}"
+        );
+        assert!(
+            moved_by >= 2,
+            "nothing was thrown far enough to see: {moved_by} rows"
+        );
+        // Twenty per cent of sixty-four rows is thirteen, and a band may jump
+        // half as far again on top of that. Much past that and this is not the
+        // owner's twenty per cent any more.
+        assert!(
+            moved_by <= 20,
+            "thrown further than the control allows: {moved_by} rows"
+        );
+    }
+
+    #[test]
+    fn version_one_of_the_glitch_is_what_it_always_was() {
+        let _gpu = crate::vulkan::one_gpu_at_a_time();
+        // The rule the whole catalogue rests on. Version two added a number in
+        // a slot version one leaves at nought, which is the cheap way to add a
+        // control and the easy way to change an old show by accident.
+        let Some(mut canvas) = backend(32, 32) else {
+            return;
+        };
+        let media = MediaItemId::new();
+        let layer = LayerId::new();
+        canvas
+            .set_media_texture(
+                media,
+                &rgba(
+                    &pattern(32, |x, y| [(x * 8) as u8, (y * 8) as u8, 90, 255]),
+                    32,
+                    32,
+                ),
+            )
+            .expect("uploads");
+
+        let one = effect_at(
+            "ovs.tv_glitch",
+            1,
+            &[("amount", ParameterValue::Float(1.0))],
+        );
+        let two = effect_at(
+            "ovs.tv_glitch",
+            2,
+            &[
+                ("amount", ParameterValue::Float(1.0)),
+                ("vertical_hold", ParameterValue::Float(0.0)),
+            ],
+        );
+
+        canvas.set_effect_time(2.5);
+        let drawn_by_one = composed_frame(&mut canvas, &effected(layer, media, &one), 32);
+        canvas.set_effect_time(2.5);
+        let drawn_by_two = composed_frame(&mut canvas, &effected(layer, media, &two), 32);
+
+        assert_eq!(
+            drawn_by_one, drawn_by_two,
+            "version two with its new control at nought drew something else"
+        );
+    }
+
+    #[test]
     fn mirroring_folds_the_half_it_was_told_to_keep() {
         let _gpu = crate::vulkan::one_gpu_at_a_time();
         // Which half is kept is the whole of the control: a logo in the left

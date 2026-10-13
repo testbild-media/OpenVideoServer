@@ -101,6 +101,27 @@ const KIND_MASK: u32 = 13u;
 /// shimmer, and once a second would be a slideshow.
 const GLITCH_ROLLS_A_SECOND: f32 = 12.0;
 
+/// How often the picture is thrown off its vertical hold, a second.
+///
+/// **Mine.** Three: slow enough that each displacement is a place the picture
+/// sits rather than a flicker, fast enough that it never looks like a cut.
+/// Deliberately slower than the line jumps above, so the two faults read as two
+/// faults rather than as one shimmer.
+const GLITCH_SYNC_JUMPS_A_SECOND: f32 = 3.0;
+
+/// How many bands the picture is divided into when its lines jump.
+///
+/// **Mine.** Twenty-four: about forty-five lines each on a 1080-line picture,
+/// which is a run thick enough to see jump. Per line, which is what the
+/// sideways tear above does, the same displacement reads as texture.
+const GLITCH_SYNC_BANDS: f32 = 24.0;
+
+/// How far a band jumps, against how far the whole picture is thrown.
+///
+/// **Mine.** Half: enough that a band clearly leaves the picture it belongs
+/// to, little enough that the picture is still one picture.
+const GLITCH_SYNC_BAND_SHARE: f32 = 0.5;
+
 /// How long the rolling error takes to cross the picture, in seconds.
 ///
 /// **Mine**, and the one number here anybody will argue with: slow enough to
@@ -525,6 +546,38 @@ fn tv_glitch(uv: vec2<f32>, source: vec4<f32>) -> vec4<f32> {
     let distance = abs(fract(uv.y - head + 0.5) - 0.5);
     let band = smoothstep(0.06, 0.0, distance) * roll;
     at.x = at.x + band * 0.04;
+
+    // **The vertical hold, which is all version two adds.** Everything above
+    // moves the picture sideways; a set that had lost its grip did something
+    // else, and this is that: whole runs of lines jumping, and the frame
+    // itself sitting somewhere it does not belong.
+    //
+    // What arrives here is how far the frame may be thrown, as a fraction of
+    // its own height — the control multiplied by the owner's twenty per cent,
+    // done where that number lives rather than written again here. A version
+    // one pass leaves this at nought, which is why version one is untouched.
+    //
+    // Thrown and held, then thrown again, rather than scrolled: a picture that
+    // travels smoothly is the rolling error above, and this is a picture that
+    // is simply in the wrong place. It wraps, because that is what a tube did
+    // — what leaves the bottom comes back at the top.
+    let hold = max(effect.colour.x, 0.0) * master;
+    if hold > 0.0 {
+        let step = floor(seconds * GLITCH_SYNC_JUMPS_A_SECOND);
+        let thrown = (hash21(vec2<f32>(step, 19.0)) * 2.0 - 1.0) * hold;
+
+        // And the bands, each on its own. Only some of them, for the reason
+        // only some lines tear: all of them at once is a texture.
+        let band = floor(uv.y * GLITCH_SYNC_BANDS);
+        var jumped = 0.0;
+        if hash21(vec2<f32>(band, step + 3.0)) > 0.65 {
+            jumped = (hash21(vec2<f32>(band, step + 11.0)) * 2.0 - 1.0)
+                * hold
+                * GLITCH_SYNC_BAND_SHARE;
+        }
+
+        at.y = fract(at.y + thrown + jumped);
+    }
 
     var colour = read(at);
 

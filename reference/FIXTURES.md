@@ -282,6 +282,18 @@ Footprint: **8 channels**. Patch to: **one effect instance in a chain**.
 | 5–6 | Snow | `noise` | 0 at 0, 1 at 65535 | 32768 |
 | 7–8 | Rolling error | `roll` | 0 at 0, 1 at 65535 | 32768 |
 
+## TV Glitch — `ovs.tv_glitch` v2
+
+Footprint: **10 channels**. Patch to: **one effect instance in a chain**.
+
+| Channel | Name | Control | Values | Home |
+|---|---|---|---|---|
+| 1–2 | Amount | `amount` | 0 at 0, 1 at 65535 | 0 |
+| 3–4 | Line jumps | `tear` | 0 at 0, 1 at 65535 | 32768 |
+| 5–6 | Snow | `noise` | 0 at 0, 1 at 65535 | 32768 |
+| 7–8 | Rolling error | `roll` | 0 at 0, 1 at 65535 | 32768 |
+| 9–10 | Out of sync | `vertical_hold` | 0 at 0, 1 at 65535 | 32768 |
+
 ## Mask — `ovs.mask` v1
 
 Footprint: **2 channels**. Patch to: **one effect instance in a chain**.

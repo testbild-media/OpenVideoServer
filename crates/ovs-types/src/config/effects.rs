@@ -608,7 +608,7 @@ pub const CROP_V1: EffectManifest = EffectManifest {
 };
 
 /// Every effect this build publishes.
-pub const PUBLISHED: [EffectManifest; 12] = [
+pub const PUBLISHED: [EffectManifest; 13] = [
     // Both versions, and the catalogue offers the newer: a show saved against
     // version one opens with the four controls it was saved with.
     COLOUR_CORRECT_V1,
@@ -622,8 +622,96 @@ pub const PUBLISHED: [EffectManifest; 12] = [
     RGB_CORRECT_V1,
     RGB_SPLIT_V1,
     TV_GLITCH_V1,
+    TV_GLITCH_V2,
     MASK_V1,
 ];
+
+/// How far out of vertical hold the picture can be thrown, as a fraction of
+/// its height.
+///
+/// **The owner's number** (2026-10-13: "ein kompletter vertikaler zufaelliger
+/// versatz von 0-20%"), not mine and not measured from anything: it is how far
+/// a picture may sit from where it belongs and still read as that picture,
+/// badly held, rather than as a cut to something else.
+pub const GLITCH_OUT_OF_SYNC: f64 = 0.2;
+
+/// A picture coming apart the way a tube did, now including vertically.
+///
+/// **Version two adds the vertical hold**, which is the fault version one did
+/// not have: everything in it moves the picture sideways — lines dragged left
+/// and right, a band travelling down that pulls them with it — and a set that
+/// had lost its grip did something else entirely. It let the whole frame
+/// slide, and it jumped whole runs of lines rather than single ones.
+///
+/// So one control does both, because they are one fault at two scales: bands
+/// of lines jump up and down, and the whole picture is thrown off its hold by
+/// up to [`GLITCH_OUT_OF_SYNC`] of its own height. The displacement wraps —
+/// what leaves the bottom comes back at the top, as it did on a tube — and it
+/// is held for a moment and then jumped again rather than scrolled, because a
+/// picture that scrolls smoothly is the Rolling error above and this is a
+/// picture that is simply in the wrong place.
+///
+/// Version one is still served and still looks exactly as it did: the new
+/// control travels in a slot a version one pass leaves at nought, so its
+/// passes are unchanged to the byte.
+pub const TV_GLITCH_V2: EffectManifest = EffectManifest {
+    type_id: "ovs.tv_glitch",
+    version: 2,
+    name: "TV Glitch",
+    description: "Line jumps, snow, a rolling error and a lost vertical hold.",
+    parameters: &[
+        ParameterDefinition {
+            key: "amount",
+            name: "Amount",
+            kind: ParameterKind::Number {
+                min: 0.0,
+                max: 1.0,
+                default: 0.0,
+            },
+            dmx: Some(DmxChannel::Fine),
+        },
+        ParameterDefinition {
+            key: "tear",
+            name: "Line jumps",
+            kind: ParameterKind::Number {
+                min: 0.0,
+                max: 1.0,
+                default: 0.5,
+            },
+            dmx: Some(DmxChannel::Fine),
+        },
+        ParameterDefinition {
+            key: "noise",
+            name: "Snow",
+            kind: ParameterKind::Number {
+                min: 0.0,
+                max: 1.0,
+                default: 0.5,
+            },
+            dmx: Some(DmxChannel::Fine),
+        },
+        ParameterDefinition {
+            key: "roll",
+            name: "Rolling error",
+            kind: ParameterKind::Number {
+                min: 0.0,
+                max: 1.0,
+                default: 0.5,
+            },
+            dmx: Some(DmxChannel::Fine),
+        },
+        ParameterDefinition {
+            key: "vertical_hold",
+            name: "Out of sync",
+            kind: ParameterKind::Number {
+                min: 0.0,
+                max: 1.0,
+                default: 0.5,
+            },
+            dmx: Some(DmxChannel::Fine),
+        },
+    ],
+};
 
 /// A picture from the library, used as a stencil.
 ///

@@ -268,6 +268,18 @@ Line jumps, snow and a rolling error, under one master.
 | Snow | `noise` | a number from 0 to 1 | 0.5 |
 | Rolling error | `roll` | a number from 0 to 1 | 0.5 |
 
+### TV Glitch — `ovs.tv_glitch` v2
+
+Line jumps, snow, a rolling error and a lost vertical hold.
+
+| Parameter | Key | Takes | Default |
+|---|---|---|---|
+| Amount | `amount` | a number from 0 to 1 | 0 |
+| Line jumps | `tear` | a number from 0 to 1 | 0.5 |
+| Snow | `noise` | a number from 0 to 1 | 0.5 |
+| Rolling error | `roll` | a number from 0 to 1 | 0.5 |
+| Out of sync | `vertical_hold` | a number from 0 to 1 | 0.5 |
+
 ### Mask — `ovs.mask` v1
 
 A picture from the library, multiplied in or cut out.

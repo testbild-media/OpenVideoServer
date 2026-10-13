@@ -357,6 +357,30 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
             colour: [0.0; 4],
             mask: None,
         }),
+        // **The fifth number travels in the colour slot, because a pass has four
+        // and this effect has five.** The same thing RGB Correct does with its
+        // lift, and the reason version one is untouched by this: a version one
+        // pass leaves the slot at nought, and at nought the shader does what it
+        // always did.
+        ("ovs.tv_glitch", 2) => into.push(EffectPass {
+            kind: PassKind::TvGlitch,
+            values: [
+                number("amount"),
+                number("tear"),
+                number("noise"),
+                number("roll"),
+            ],
+            // Scaled here rather than in the shader: how far out of hold the
+            // picture may go is the owner's number and lives beside the
+            // manifest, so what crosses is a fraction of the height.
+            colour: [
+                number("vertical_hold") * effects::GLITCH_OUT_OF_SYNC as f32,
+                0.0,
+                0.0,
+                0.0,
+            ],
+            mask: None,
+        }),
         ("ovs.tv_glitch", 1) => into.push(EffectPass {
             kind: PassKind::TvGlitch,
             values: [
