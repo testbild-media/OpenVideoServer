@@ -279,6 +279,12 @@ pub struct RenderLoop {
     /// Pictures the encoders have finished, reused between passes.
     #[cfg(unix)]
     chunks: Vec<crate::stream::Chunk>,
+    /// Which parts of the composition the show's mapping takes.
+    ///
+    /// Worked out where the show is to hand rather than where the mask is
+    /// wanted: this is read once per streamed frame per watcher, and the
+    /// answer only changes when the show does.
+    mask_regions: Vec<crate::mask::Region>,
     /// Whether the surfaces are currently copying their frames out.
     ///
     /// Tracked so the surfaces are told when it changes rather than every
@@ -412,6 +418,9 @@ impl RenderLoop {
             streams: std::collections::BTreeMap::new(),
             #[cfg(unix)]
             refused: std::collections::BTreeSet::new(),
+            // Nothing is open yet, so nothing is mapped. The first tick
+            // replaces this with whatever the show says.
+            mask_regions: vec![crate::mask::Region::WHOLE],
             #[cfg(unix)]
             chunks: Vec::new(),
             readback: true,
@@ -1723,6 +1732,11 @@ impl RenderLoop {
     ///; until then, the first output takes the first configured
     /// one.
     fn rebuild_mappings(&mut self, show: Option<&Show>) {
+        // The mask the Pieces preview is cut with. Here because this is where
+        // the show is, and because the mapping is the show's rather than the
+        // hardware's — see `mask_regions`.
+        self.mask_regions = Self::mask_regions(show);
+
         // Which physical output drives which configured one. Worked out from
         // hardware identity where there is any, because "Display 2" is whatever
         // the driver enumerated second this morning and a wall that came
@@ -1847,37 +1861,54 @@ impl RenderLoop {
     /// a warning — which is how the workspace came to stop compiling there.
     #[cfg(any(unix, test))]
     fn mapped_regions(&self) -> Vec<crate::mask::Region> {
+        self.mask_regions.clone()
+    }
+
+    /// Which parts of the composition the show's mapping takes.
+    ///
+    /// **From the show, not from what is plugged in** (owner, 2026-10-13: "das
+    /// mapping existiert aber für den ausgang... damit kann man offline weiter
+    /// bauen"). This used to walk the outputs the renderer was driving, so a
+    /// wall that was not connected contributed nothing and the preview went
+    /// black — on exactly the machine where somebody is most likely to be
+    /// building a show, the one with no wall on it. The pieces are in the
+    /// document either way, and the document is what this surface is a picture
+    /// of.
+    ///
+    /// It also takes the System screen out of the question for good. That was
+    /// one of the driven outputs, it is deliberately never mapped, and unmapped
+    /// meant "takes everything" — so from the day the renderer took over that
+    /// connector the mask let the whole composition through. A show has no such
+    /// output to confuse it with.
+    ///
+    /// Two cases answer with the whole composition, because that is what a wall
+    /// would be showing: no show at all, and a show that maps nothing. A show
+    /// with outputs but no pieces on them answers with nothing, and nothing is
+    /// black — which is also what those walls would be drawing.
+    fn mask_regions(show: Option<&Show>) -> Vec<crate::mask::Region> {
+        let Some(show) = show else {
+            return vec![crate::mask::Region::WHOLE];
+        };
+        if show.outputs.is_empty() {
+            return vec![crate::mask::Region::WHOLE];
+        }
+
         let mut regions = Vec::new();
-        for output in &self.outputs {
-            if output.faulted.is_some() {
+        let mut mapping = crate::pieces::OutputMapping::new();
+        for output in &show.outputs {
+            if !output.enabled {
                 continue;
             }
-            // **The System screen takes none of it.** It shows the console,
-            // not the show, and `rebuild_mappings` skips it for that reason —
-            // which leaves it recorded as unmapped, and unmapped is read below
-            // as "takes the whole composition". So from the day the renderer
-            // started driving that connector (2026-09-26, three days after
-            // this mask was written) every machine with a System screen put
-            // the whole surface into the mask, and the Pieces preview became
-            // the plain composition pixel for pixel.
-            //
-            // The owner, 2026-10-12: "es ist beides Composition, als würde bei
-            // Pieces die Maske fehlen". It was not missing; it was letting
-            // everything through.
-            if output.kind == Kind::Console {
-                continue;
-            }
-            if !output.mapped {
-                regions.push(crate::mask::Region::WHOLE);
-                continue;
-            }
-            for piece in output.mapping.pieces() {
+            // The size the show configures rather than a panel's: there may be
+            // no panel, and where there is one it is driven at this mode.
+            mapping.build(show, output.id, output.mode.size);
+            for piece in mapping.pieces() {
                 if piece.is_invisible() || piece.is_off_screen() {
                     continue;
                 }
-                // The turn as well as the rectangle. A piece whose input end
-                // is taken at an angle takes a diamond out of the composition,
-                // and a mask that kept the upright box it came from would show
+                // The turn as well as the rectangle. A piece whose input end is
+                // taken at an angle takes a diamond out of the composition, and
+                // a mask that kept the upright box it came from would show
                 // horizontal bars where the mapping has diagonal ones — which
                 // is the one thing this surface exists to be trusted about
                 // (owner, 2026-09-23). The same matrix the shader samples
@@ -3149,6 +3180,49 @@ mod tests {
         render.tick(at(epoch, 0));
 
         assert_eq!(render.mapped_regions(), vec![crate::mask::Region::WHOLE]);
+    }
+
+    #[test]
+    fn the_pieces_are_in_the_mask_with_no_wall_attached() {
+        // **The case this exists for.** Somebody building a show at a desk has
+        // no wall on the machine, and the mapping is in the document all the
+        // same (owner, 2026-10-13: "das mapping existiert aber für den
+        // ausgang... damit kann man offline weiter bauen"). Reading the mask
+        // off the driven outputs made Pieces black exactly there.
+        use ovs_types::config::{OutputConfig, Piece};
+        use ovs_types::geometry::RectPx;
+
+        // Nothing but the System screen: no wall is connected at all.
+        let (epoch, state, mut render) = loop_with(vec![Box::new(HeadlessBackend::new(
+            "System screen",
+            mode(),
+        ))]);
+        render.outputs[0].kind = Kind::Console;
+
+        let mut show = Show::new("Show");
+        let output = OutputConfig::new("LED Wall", mode());
+        let output_id = output.id;
+        show.outputs.push(output);
+        show.pieces.push(Piece::new(
+            "Left half",
+            output_id,
+            RectPx::new(0, 0, 960, 1080),
+            RectPx::new(0, 0, 960, 1080),
+        ));
+        state.replace(ShowState {
+            sequence: Sequence(1),
+            show: Some(Box::new(show)),
+            ..ShowState::default()
+        });
+        render.tick(at(epoch, 0));
+
+        let regions = render.mapped_regions();
+        assert_eq!(regions.len(), 1, "the piece the show maps: {regions:?}");
+        assert_ne!(
+            regions[0],
+            crate::mask::Region::WHOLE,
+            "the left half, not the whole composition"
+        );
     }
 
     #[test]
