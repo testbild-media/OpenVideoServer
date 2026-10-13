@@ -527,6 +527,13 @@ else
   # libstdc++ carries the GCC Runtime Library Exception, which exists so that
   # a program under any licence may link it.
   sharing="$sharing --extra-libs=-lstdc++"
+  # **And pkg-config has to be asked the static question.** Without this it
+  # answers with the flags for linking against a DLL, so FFmpeg's configure
+  # check links against the import library and fails on `__imp_kvz_api_get`
+  # while kvazaar's `.a` sits right there -- "kvazaar >= 2.0.0 not found using
+  # pkg-config", with FFmpeg's own note saying exactly this (2026-10-13).
+  # Snappy never needed it because FFmpeg names `-lsnappy -lstdc++` itself.
+  sharing="$sharing --pkg-config-flags=--static"
   decoders="$DECODERS"
 fi
 readonly sharing decoders
