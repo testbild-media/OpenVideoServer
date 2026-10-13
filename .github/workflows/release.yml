@@ -177,7 +177,12 @@ jobs:
           cp clients/desktop/vendor/ffmpeg/ffmpeg.exe \
              clients/desktop/vendor/ffmpeg/ffprobe.exe \
              clients/desktop/dist/bin/
-          npm run client:test --workspace @ovs/desktop 2>&1 | tee /tmp/client-test.log
+          # The root's own script, and it has to be called from the root:
+          # `npm run client:test --workspace @ovs/desktop` asks npm for a
+          # script of that name *inside* the workspace, where there is none,
+          # and npm exits 1 without running a test. That is how this step
+          # failed the first release that had it.
+          npm run client:test 2>&1 | tee /tmp/client-test.log
           exit "${PIPESTATUS[0]}"
 
       # Said as an annotation, because a log needs an account and an annotation
