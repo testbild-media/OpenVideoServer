@@ -1,6 +1,6 @@
 {
   "name": "@ovs/desktop",
-  "version": "0.2.13",
+  "version": "0.2.14",
   "private": true,
   "description": "OpenVideoServer desktop client: configuration, project editing, media ingest and Live Mode",
   "type": "module",
