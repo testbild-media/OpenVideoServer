@@ -995,7 +995,16 @@ SWEEP_SKIPS = {"ovs.strobe"}
 # own, because the generic ones cannot see them on a machine drawing ten frames
 # a second.
 JUDGED_ELSEWHERE = {"ovs.strobe"}
-COVERED = {"ovs.shape": frozenset({"rotation_deg"})}
+COVERED = {
+    "ovs.shape": frozenset({"rotation_deg"}),
+    # Multiplying and cutting out are two pictures only where there is a layer
+    # underneath, and this check builds one layer over black -- where both leave
+    # the same black hole. What tells them apart is the pair of layers in
+    # `cutting_out_shows_the_layer_underneath_where_multiplying_blacks_it`,
+    # which runs on the card. Reporting it here would be reporting the shape of
+    # this check rather than anything about the effect.
+    "ovs.mask": frozenset({"mode"}),
+}
 
 
 def channel_spread(picture):
