@@ -49,6 +49,17 @@ fn vertex_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
 @group(0) @binding(0) var source_texture: texture_2d<f32>;
 @group(0) @binding(1) var source_sampler: sampler;
 
+// The second picture, for the one pass that has one.
+//
+// A set of the same shape as the source's, bound at every pass whether or not
+// it reads this: a pipeline layout is fixed and a set that is never sampled
+// costs a bind. What a pass with no picture of its own gets is the white
+// default texture, which is also what a mask that is still being decoded gets
+// — and white is a mask that does nothing, so an effect waiting for its
+// picture leaves the layer alone instead of blanking it.
+@group(1) @binding(0) var mask_texture: texture_2d<f32>;
+@group(1) @binding(1) var mask_sampler: sampler;
+
 // What one pass is. The renderer fills this from the effect's manifest, so the
 // defaults a project was published with are the only defaults there are.
 struct Effect {
@@ -81,6 +92,7 @@ const KIND_COLORIZE: u32 = 9u;
 const KIND_RGB_CORRECT: u32 = 10u;
 const KIND_RGB_SPLIT: u32 = 11u;
 const KIND_TV_GLITCH: u32 = 12u;
+const KIND_MASK: u32 = 13u;
 
 /// How often the line jumps are re-rolled, a second.
 ///
@@ -525,6 +537,51 @@ fn tv_glitch(uv: vec2<f32>, source: vec4<f32>) -> vec4<f32> {
     return vec4<f32>(clamp(lifted, vec3<f32>(0.0), vec3<f32>(1.0)), source.a);
 }
 
+/// A picture from the library, used as a stencil.
+///
+/// **Stretched over the whole picture**, both axes independently, whatever its
+/// own size: the mask is sampled at the same place as the pixel it masks. A
+/// mask is made for the picture it masks, so one authored at the composition's
+/// own size lands pixel for pixel, and one authored at any other size still
+/// covers the same thing. Keeping its proportions instead would put the mask's
+/// own edge somewhere in the picture, which is an edge nobody drew.
+///
+/// **Brightness, not one channel.** Grey is the point rather than a special
+/// case (owner, 2026-10-13: "dann koennten es auch graustufen sein"), so the
+/// mask is read as a number from nought to one and used whole — which is what
+/// makes a soft edge in the mask a soft edge in the picture. Weighted the way
+/// every other luminance here is weighted, so a mask drawn in colour by
+/// accident reads as the brightness somebody saw when they drew it.
+///
+/// Its own alpha counts as well. A mask exported with a transparent background
+/// has nothing drawn there, and nothing drawn is nothing kept; on an opaque
+/// black-and-white mask the alpha is one everywhere and this term does nothing.
+fn mask(uv: vec2<f32>, source: vec4<f32>) -> vec4<f32> {
+    let amount = clamp(effect.values.x, 0.0, 1.0);
+    let cut_out = effect.values.y >= 0.5;
+    let inverted = effect.values.z >= 0.5;
+
+    let picture = textureSampleLevel(mask_texture, mask_sampler, uv, 0.0);
+    var level = dot(picture.rgb, LUMA_WEIGHTS) * picture.a;
+    if inverted {
+        level = 1.0 - level;
+    }
+    // Amount fades the mask out towards doing nothing, never towards hiding
+    // more: an operator riding this during a show is bringing the hole in and
+    // taking it out again.
+    level = mix(1.0, level, amount);
+
+    // **The two modes are different pictures, not one with a flag.** Multiply
+    // darkens towards black and leaves the layer covering what is under it;
+    // cutting out lowers the layer's own opacity, so what is on the layer
+    // underneath comes through the hole. Straight alpha, as everywhere in this
+    // shader, so the second one is a multiply on the alpha channel alone.
+    if cut_out {
+        return vec4<f32>(source.rgb, source.a * level);
+    }
+    return vec4<f32>(source.rgb * level, source.a);
+}
+
 @fragment
 fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // Straight alpha throughout, never premultiplied. What comes out of the
@@ -572,6 +629,9 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         }
         case KIND_TV_GLITCH: {
             return tv_glitch(input.uv, source);
+        }
+        case KIND_MASK: {
+            return mask(input.uv, source);
         }
         // Unreachable: the renderer only ever writes a kind it has a branch
         // for. Returning the picture untouched is the one answer that cannot

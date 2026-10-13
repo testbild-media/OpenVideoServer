@@ -4118,8 +4118,32 @@ export class LivePanel {
         cell.append(select);
         break;
       }
+      case 'image': {
+        const namedOption = (value: string, label: string): HTMLOptionElement => {
+          const node = document.createElement('option');
+          node.value = value;
+          node.textContent = label;
+          return node;
+        };
+        // The library, as the editor offers it. Live as well as configured,
+        // because swapping the stencil is a thing to do during a show rather
+        // than only while building one — and because every other parameter
+        // here is live, so one that was not would be the odd one out.
+        const select = document.createElement('select');
+        select.append(namedOption('', 'None'));
+        for (const item of this.#library) {
+          if (item.kind === 'image' && item.state === 'ready') {
+            select.append(namedOption(item.id, item.display_name));
+          }
+        }
+        select.setAttribute('aria-label', `${plugin.name} ${parameter.name}`);
+        select.addEventListener('change', () => send({ type: 'text', value: select.value }));
+        inputs.push(select);
+        cell.append(select);
+        break;
+      }
       default: {
-        // A sixth kind is a compile error here rather than a wrong control.
+        // A seventh kind is a compile error here rather than a wrong control.
         const unreachable: never = declared;
         return unreachable;
       }
@@ -4818,13 +4842,16 @@ function setParameterInputs(
       return;
     }
     case 'text':
+    case 'image':
     case 'choice': {
       // Left alone while it has focus, like a colour channel and for the same
       // reason: a box that rewrites itself under somebody typing in it cannot
       // be typed in, and a menu that reopens at the server's value takes the
       // choice away mid-gesture.
       const input = inputs[0];
-      const wanted = kind === 'text' ? value.type === 'text' : value.type === 'choice';
+      // A picture is carried as text, like the words in a caption: the kind
+      // says what the string means and the value is a string either way.
+      const wanted = kind === 'choice' ? value.type === 'choice' : value.type === 'text';
       if (input !== undefined && wanted && document.activeElement !== input) {
         input.value = String(value.value);
       }

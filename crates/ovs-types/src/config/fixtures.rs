@@ -616,7 +616,10 @@ pub fn generated_personality(
             continue;
         };
         match parameter.kind {
-            ParameterKind::Text { .. } => {}
+            // A picture is chosen in the client, never sent down a wire. The
+            // manifest declares no channel for it; this is the second door and
+            // it says the same thing.
+            ParameterKind::Text { .. } | ParameterKind::Image => {}
             ParameterKind::Colour { default } => {
                 for part in ColourPart::ALL {
                     channels.push(ChannelDefinition {

@@ -81,6 +81,21 @@ pub enum ParameterKind {
         /// the catalogue's own test rather than by a show that opens wrong.
         default: &'static str,
     },
+    /// A picture from the media library.
+    ///
+    /// The first parameter that names something outside itself. Its value is
+    /// the identifier of a media item, as text, and empty text is "none
+    /// chosen" — which is what it starts as, because a published default may
+    /// not name anything that could be deleted, and an effect has to be
+    /// neutral at its defaults.
+    ///
+    /// Text rather than an identifier of its own on the wire, for the reason
+    /// [`ParameterKind::Choice`] is text: the kind says what the string means,
+    /// and a client that reads the catalogue knows to offer the library here
+    /// rather than a text box. What it costs is a parse where the value is
+    /// read; what it saves is a second shape of value in every show file, every
+    /// schema and every control path.
+    Image,
 }
 
 /// How wide a channel a parameter asks for, when it asks for one at all.
@@ -168,7 +183,9 @@ impl ParameterDefinition {
                 DmxChannel::Fine => 2,
             },
             ParameterKind::Toggle { .. } | ParameterKind::Choice { .. } => 1,
-            ParameterKind::Text { .. } => 0,
+            // Neither is anything a desk can send: one is words, the other
+            // names a file in the library.
+            ParameterKind::Text { .. } | ParameterKind::Image => 0,
         }
     }
 
@@ -181,6 +198,9 @@ impl ParameterDefinition {
             ParameterKind::Toggle { default } => ParameterValue::Bool(*default),
             ParameterKind::Choice { default, .. } => ParameterValue::Choice((*default).to_owned()),
             ParameterKind::Text { default, .. } => ParameterValue::Text((*default).to_owned()),
+            // No picture. See `ParameterKind::Image`: a default that named one
+            // would be a default that can be deleted from the library.
+            ParameterKind::Image => ParameterValue::Text(String::new()),
         }
     }
 
@@ -216,10 +236,20 @@ impl ParameterDefinition {
                 .iter()
                 .all(|choice| choice.id != chosen)
                 .then(|| format!("must be one of {}", ids(choices))),
+            // Whether the library has it is not asked here. This crate has no
+            // library to ask, and the answer would be a different kind of
+            // refusal in any case: a show naming a picture that was deleted is
+            // a show with a gap in it, not a show with a bad value.
+            (ParameterKind::Image, ParameterValue::Text(name)) => (!name.is_empty()
+                && name.parse::<crate::id::MediaItemId>().is_err())
+            .then(|| "must be a picture from the library, or nothing".to_owned()),
             (ParameterKind::Number { .. }, _) => Some("must be a number".to_owned()),
             (ParameterKind::Colour { .. }, _) => Some("must be a colour".to_owned()),
             (ParameterKind::Toggle { .. }, _) => Some("must be on or off".to_owned()),
             (ParameterKind::Text { .. }, _) => Some("must be text".to_owned()),
+            (ParameterKind::Image, _) => {
+                Some("must be a picture from the library, or nothing".to_owned())
+            }
             (ParameterKind::Choice { choices, .. }, _) => {
                 Some(format!("must be one of {}", ids(choices)))
             }

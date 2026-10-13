@@ -282,6 +282,14 @@ Footprint: **8 channels**. Patch to: **one effect instance in a chain**.
 | 5–6 | Snow | `noise` | 0 at 0, 1 at 65535 | 32768 |
 | 7–8 | Rolling error | `roll` | 0 at 0, 1 at 65535 | 32768 |
 
+## Mask — `ovs.mask` v1
+
+Footprint: **2 channels**. Patch to: **one effect instance in a chain**.
+
+| Channel | Name | Control | Values | Home |
+|---|---|---|---|---|
+| 1–2 | Amount | `amount` | 0 at 0, 1 at 65535 | 65535 |
+
 ## Solid Colour — `ovs.solid_colour` v1
 
 Footprint: **4 channels**. Patch to: **one generator instance in a slot**.

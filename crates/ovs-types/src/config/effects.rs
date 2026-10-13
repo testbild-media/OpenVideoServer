@@ -28,6 +28,7 @@
 use crate::config::fixtures::{FixtureDefinition, ParameterSlot};
 use crate::config::manifest::{Choice, DmxChannel, ParameterDefinition, ParameterKind};
 use crate::config::slot::{ParameterMap, ParameterValue};
+use crate::id::MediaItemId;
 
 /// A published effect.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -256,6 +257,22 @@ impl<'a> EffectValues<'a> {
         match self.value(key) {
             Some(ParameterValue::Choice(id)) => id,
             _ => String::new(),
+        }
+    }
+
+    /// Returns the media item a picture parameter names, where it names one.
+    ///
+    /// The parse is the cost of keeping the value a string
+    /// ([`ParameterKind::Image`]). It is twenty-six characters of base32 and
+    /// allocates nothing, and it happens once per effect per frame rather than
+    /// per pixel — but it is a parse on the render path, so if a second
+    /// parameter of this kind ever appears it is worth measuring rather than
+    /// assuming.
+    #[must_use]
+    pub fn media(&self, key: &str) -> Option<MediaItemId> {
+        match self.value(key) {
+            Some(ParameterValue::Text(name)) => name.parse().ok(),
+            _ => None,
         }
     }
 }
@@ -581,7 +598,7 @@ pub const CROP_V1: EffectManifest = EffectManifest {
 };
 
 /// Every effect this build publishes.
-pub const PUBLISHED: [EffectManifest; 11] = [
+pub const PUBLISHED: [EffectManifest; 12] = [
     // Both versions, and the catalogue offers the newer: a show saved against
     // version one opens with the four controls it was saved with.
     COLOUR_CORRECT_V1,
@@ -595,7 +612,87 @@ pub const PUBLISHED: [EffectManifest; 11] = [
     RGB_CORRECT_V1,
     RGB_SPLIT_V1,
     TV_GLITCH_V1,
+    MASK_V1,
 ];
+
+/// A picture from the library, used as a stencil.
+///
+/// The owner, 2026-10-13: "einen effekt namens mask wo man eine schwarz weiss
+/// maske als bild hochladen kann und das ausschneidet oder multipliziert, dann
+/// koennten es auch graustufen sein."
+///
+/// So: grey is not a special case, it is the point. The mask's brightness is
+/// read as a number from nought to one and used whole, which makes a soft edge
+/// in the picture wherever there is a soft edge in the mask.
+///
+/// **The two modes are not the same picture**, which is why they are a choice
+/// rather than one behaviour. Multiplying darkens towards black and leaves the
+/// layer covering what is under it; cutting out lowers the layer's own opacity,
+/// so whatever is on the layer underneath comes through the hole. A hole in a
+/// top layer is the usual reason to reach for this, and a vignette is the
+/// usual reason for the other.
+///
+/// **It is stretched over the composition**, both axes independently, whatever
+/// its own size. A mask is made for the picture it masks: one authored at the
+/// composition's own size lands pixel for pixel, and one authored at any other
+/// size still covers the same thing. Fitting rules that keep the proportions
+/// would put a mask's own edge somewhere in the picture, which is a mask with
+/// an edge nobody drew.
+///
+/// It starts with no picture, and with no picture it does nothing at all —
+/// not a pass that reads a white texture, but no pass. That is what makes it
+/// neutral at its published defaults, like every other effect here, on a
+/// machine where nothing has been uploaded yet.
+pub const MASK_V1: EffectManifest = EffectManifest {
+    type_id: "ovs.mask",
+    version: 1,
+    name: "Mask",
+    description: "A picture from the library, multiplied in or cut out.",
+    parameters: &[
+        ParameterDefinition {
+            key: "image",
+            name: "Picture",
+            kind: ParameterKind::Image,
+            // Not drivable from a console: a desk can send a number, and
+            // which picture is in a show is not one.
+            dmx: None,
+        },
+        ParameterDefinition {
+            key: "mode",
+            name: "Mode",
+            kind: ParameterKind::Choice {
+                choices: &[
+                    Choice {
+                        id: "multiply",
+                        name: "Multiply",
+                    },
+                    Choice {
+                        id: "cut_out",
+                        name: "Cut out",
+                    },
+                ],
+                default: "multiply",
+            },
+            dmx: None,
+        },
+        ParameterDefinition {
+            key: "invert",
+            name: "Invert",
+            kind: ParameterKind::Toggle { default: false },
+            dmx: None,
+        },
+        ParameterDefinition {
+            key: "amount",
+            name: "Amount",
+            kind: ParameterKind::Number {
+                min: 0.0,
+                max: 1.0,
+                default: 1.0,
+            },
+            dmx: Some(DmxChannel::Fine),
+        },
+    ],
+};
 
 /// Folds one half of the picture onto the other.
 ///

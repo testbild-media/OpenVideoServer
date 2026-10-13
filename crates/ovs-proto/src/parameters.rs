@@ -55,6 +55,17 @@ pub enum ParameterType {
         /// The `id` of the one it is when nobody has set it.
         default: String,
     },
+    /// A picture from the media library.
+    ///
+    /// A client offers the library here — the still images in it — rather than
+    /// a text box, and stores the item's identifier. The value is carried as
+    /// text, and empty text is "none chosen": that is what it starts as, and
+    /// what it goes back to when the picture it named is deleted.
+    ///
+    /// No default, because there is nothing that could be one. Every other
+    /// parameter type publishes a default that is part of the manifest
+    /// forever; a picture is a row in a library that an operator can empty.
+    Image,
 }
 
 /// One entry in a [`ParameterType::Choice`] list.
@@ -87,6 +98,7 @@ impl From<ParameterKind> for ParameterType {
                     .collect(),
                 default: default.to_owned(),
             },
+            ParameterKind::Image => Self::Image,
         }
     }
 }

@@ -125,6 +125,10 @@ fn module(
                     format!("`{default}`")
                 },
             ),
+            ParameterKind::Image => (
+                "a picture from the library".to_owned(),
+                "nothing".to_owned(),
+            ),
             ParameterKind::Choice { choices, default } => (
                 format!(
                     "one of {}",

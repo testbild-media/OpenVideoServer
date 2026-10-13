@@ -2382,26 +2382,39 @@ fn fill_wanted(
         let Some(layer) = show.layer(live.layer_id) else {
             continue;
         };
+
+        // The pictures the layer's effects name, and the active slot's. A mask
+        // is a still like any other and comes through the same residency; what
+        // is different is that nothing in the slot points at it, so it has to
+        // be collected from the chains.
+        crate::effects::media_wanted(&layer.effects, &state.effects, into);
+        if let Some(slot) = layer.slot(live.active_slot) {
+            crate::effects::media_wanted(&slot.effects, &state.effects, into);
+        }
+
         let Some(media_item_id) = layer
             .slot(live.active_slot)
             .and_then(ovs_types::config::Slot::media_item_id)
         else {
             continue;
         };
-        // Stills only. A clip belongs to the scheduler, and handing it to the
-        // still loader would mean trying to open a video file as an image —
-        // once per clip, and every one of them failing.
-        if catalogue
-            .get(&media_item_id)
-            .is_some_and(|location| location.kind != ovs_types::media::MediaKind::Image)
-        {
-            continue;
-        }
 
         if !into.contains(&media_item_id) {
             into.push(media_item_id);
         }
     }
+
+    // Stills only, whichever way they got here. A clip belongs to the
+    // scheduler, and handing one to the still loader would mean trying to open
+    // a video file as an image — once per clip, and every one of them failing.
+    // A mask naming a clip is the same mistake by a different route, so the
+    // rule is applied once, to the whole list, rather than at each place that
+    // can add to it.
+    into.retain(|media_item_id| {
+        catalogue
+            .get(media_item_id)
+            .is_none_or(|location| location.kind == ovs_types::media::MediaKind::Image)
+    });
 }
 
 /// The clock an effect pass reads, in seconds within a day.

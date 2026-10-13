@@ -268,3 +268,14 @@ Line jumps, snow and a rolling error, under one master.
 | Snow | `noise` | a number from 0 to 1 | 0.5 |
 | Rolling error | `roll` | a number from 0 to 1 | 0.5 |
 
+### Mask — `ovs.mask` v1
+
+A picture from the library, multiplied in or cut out.
+
+| Parameter | Key | Takes | Default |
+|---|---|---|---|
+| Picture | `image` | a picture from the library | nothing |
+| Mode | `mode` | one of `multiply` (Multiply), `cut_out` (Cut out) | `multiply` |
+| Invert | `invert` | on or off | off |
+| Amount | `amount` | a number from 0 to 1 | 1 |
+

@@ -542,6 +542,14 @@ struct BusUpload {
     steps: [Vec<BusStep>; BUS_COUNT],
     /// Every effect pass this frame runs, one chain after another.
     passes: Vec<EffectPush>,
+    /// The second texture each of those passes samples, one for one with them.
+    ///
+    /// Beside the passes rather than in them: a pass is pushed to the shader as
+    /// constants and a descriptor set is not something that can be pushed. Every
+    /// pass has an entry, and a pass with no picture of its own gets the white
+    /// default — the set has to be bound either way, and white is a mask that
+    /// does nothing.
+    masks: Vec<vk::DescriptorSet>,
     /// The quads that combine the buses into the composition.
     combine: Vec<DrawRun>,
 }
@@ -556,6 +564,9 @@ impl BusUpload {
             steps.clear();
         }
         self.passes.clear();
+        // One for one with the passes, so they are emptied together or the next
+        // frame's passes read the last frame's pictures.
+        self.masks.clear();
         self.combine.clear();
     }
 }
@@ -1789,6 +1800,16 @@ impl OffscreenTarget {
             upload
                 .passes
                 .push(EffectPush::new(pass, texel, self.effect_seconds));
+            // Resolved here rather than at record time, because this is where
+            // the textures are. A picture that is not on the GPU yet resolves
+            // to white, which is a mask that does nothing: an effect waiting
+            // for its picture to decode leaves the layer alone, the same way a
+            // layer whose clip is still opening keeps drawing.
+            upload
+                .masks
+                .push(pass.mask.map_or(self.default_texture.set, |media_item_id| {
+                    self.set_for(TextureRef::Media(media_item_id))
+                }));
         }
 
         // The composite quad: the whole canvas, because the scratch already
@@ -2372,7 +2393,12 @@ impl OffscreenTarget {
         descriptor_layout: vk::DescriptorSetLayout,
         size: vk::Extent2D,
     ) -> Result<(vk::PipelineLayout, vk::Pipeline), VulkanError> {
-        let set_layouts = [descriptor_layout];
+        // Twice, of the same shape. The second is the picture a mask pass
+        // samples; every other pass binds the white default there and never
+        // reads it. One layout rather than two because a texture's descriptor
+        // set is already written against this one, so a mask is bound by naming
+        // the set the compositor already holds for it.
+        let set_layouts = [descriptor_layout, descriptor_layout];
         // Both stages, although only the fragment shader reads it: a range that
         // covers a stage which does not use it is legal and costs nothing,
         // while one that misses a stage which does is a pipeline the driver is
@@ -3121,6 +3147,7 @@ impl OffscreenTarget {
         }
 
         let passes = &self.upload.passes[chain.first..chain.first + chain.count];
+        let masks = &self.upload.masks[chain.first..chain.first + chain.count];
         for (step, push) in passes.iter().enumerate() {
             let from = step % SCRATCH_COUNT;
             let into = (step + 1) % SCRATCH_COUNT;
@@ -3150,7 +3177,7 @@ impl OffscreenTarget {
                     vk::PipelineBindPoint::GRAPHICS,
                     scratch.pass_layout,
                     0,
-                    &[scratch.images[from].set],
+                    &[scratch.images[from].set, masks[step]],
                     &[],
                 );
                 device.cmd_push_constants(
@@ -7327,6 +7354,199 @@ mod tests {
         assert!(
             !canvas.has_scratch(),
             "a disabled effect allocated a scratch image"
+        );
+    }
+
+    #[test]
+    fn a_mask_keeps_as_much_of_the_picture_as_the_one_it_names_is_bright() {
+        let _gpu = crate::vulkan::one_gpu_at_a_time();
+        // Grey is the point rather than a special case, so the stencil has a
+        // band of it: a mask that treated its picture as a yes or no would
+        // pass on black and white alone and give a hard edge where the owner
+        // asked for a soft one.
+        let Some(mut canvas) = backend(32, 32) else {
+            return;
+        };
+        let media = MediaItemId::new();
+        let stencil = MediaItemId::new();
+        let layer = LayerId::new();
+
+        canvas
+            .set_media_texture(media, &rgba(&pattern(32, |_, _| [255; 4]), 32, 32))
+            .expect("uploads the picture");
+        canvas
+            .set_media_texture(
+                stencil,
+                &rgba(
+                    &pattern(32, |x, _| {
+                        let level = if x < 10 {
+                            0
+                        } else if x < 21 {
+                            128
+                        } else {
+                            255
+                        };
+                        [level, level, level, 255]
+                    }),
+                    32,
+                    32,
+                ),
+            )
+            .expect("uploads the stencil");
+
+        let passes = effect(
+            "ovs.mask",
+            &[("image", ParameterValue::Text(stencil.to_string()))],
+        );
+        let frame = composed_frame(&mut canvas, &effected(layer, media, &passes), 32);
+        let light = |x: usize, y: usize| frame[(y * 32 + x) * 4];
+
+        close_to(light(4, 16), 0, "black in the mask takes the picture away");
+        close_to(light(16, 16), 128, "grey in the mask keeps half of it");
+        close_to(light(27, 16), 255, "white in the mask keeps all of it");
+    }
+
+    #[test]
+    fn inverting_a_mask_keeps_what_it_was_hiding() {
+        let _gpu = crate::vulkan::one_gpu_at_a_time();
+        let Some(mut canvas) = backend(16, 16) else {
+            return;
+        };
+        let media = MediaItemId::new();
+        let stencil = MediaItemId::new();
+        let layer = LayerId::new();
+
+        canvas
+            .set_media_texture(media, &rgba(&pattern(16, |_, _| [255; 4]), 16, 16))
+            .expect("uploads the picture");
+        canvas
+            .set_media_texture(
+                stencil,
+                &rgba(
+                    &pattern(16, |x, _| if x < 8 { [0, 0, 0, 255] } else { [255; 4] }),
+                    16,
+                    16,
+                ),
+            )
+            .expect("uploads the stencil");
+
+        let passes = effect(
+            "ovs.mask",
+            &[
+                ("image", ParameterValue::Text(stencil.to_string())),
+                ("invert", ParameterValue::Bool(true)),
+            ],
+        );
+        let frame = composed_frame(&mut canvas, &effected(layer, media, &passes), 16);
+        let light = |x: usize| frame[(8 * 16 + x) * 4];
+
+        close_to(light(4), 255, "the half the mask was hiding is kept");
+        close_to(light(12), 0, "and the half it was keeping is gone");
+    }
+
+    #[test]
+    fn cutting_out_shows_the_layer_underneath_where_multiplying_blacks_it() {
+        let _gpu = crate::vulkan::one_gpu_at_a_time();
+        // **The two modes are two pictures, and this is the difference.** Both
+        // look identical over black, which is what a test with one layer would
+        // have been measuring: multiplying darkens the layer and leaves it
+        // covering what is under it, cutting out takes the layer's own opacity
+        // away so the one underneath comes through.
+        let Some(mut canvas) = backend(16, 16) else {
+            return;
+        };
+        let stencil = MediaItemId::new();
+        let under = LayerId::new();
+        let over = LayerId::new();
+
+        canvas
+            .set_media_texture(
+                stencil,
+                &rgba(
+                    &pattern(16, |x, _| if x < 8 { [0, 0, 0, 255] } else { [255; 4] }),
+                    16,
+                    16,
+                ),
+            )
+            .expect("uploads the stencil");
+
+        let scene = |mode: &str| {
+            let mut scene = Scene::new();
+            let mut below = quad_at(-1.0, -1.0, 1.0, 1.0, RED);
+            below.layer_id = Some(under);
+            scene.push(below);
+
+            let mut above = quad_at(-1.0, -1.0, 1.0, 1.0, [1.0, 1.0, 1.0, 1.0]);
+            above.layer_id = Some(over);
+            scene.push(above);
+            scene.set_effects(
+                over,
+                &effect(
+                    "ovs.mask",
+                    &[
+                        ("image", ParameterValue::Text(stencil.to_string())),
+                        ("mode", ParameterValue::Choice(mode.to_owned())),
+                    ],
+                ),
+            );
+            scene
+        };
+
+        let multiplied = composed_frame(&mut canvas, &scene("multiply"), 16);
+        let cut = composed_frame(&mut canvas, &scene("cut_out"), 16);
+        let at = |frame: &[u8], x: usize| {
+            let first = (8 * 16 + x) * 4;
+            [frame[first], frame[first + 1], frame[first + 2]]
+        };
+
+        close_to(at(&multiplied, 4)[0], 0, "multiplied, the hole is black");
+        close_to(at(&multiplied, 4)[1], 0, "with nothing of the red");
+        close_to(at(&cut, 4)[0], 255, "cut out, the red underneath comes up");
+        close_to(at(&cut, 4)[1], 0, "and it is the red rather than white");
+        close_to(
+            at(&cut, 12)[1],
+            255,
+            "where the mask is white the top layer stays",
+        );
+    }
+
+    #[test]
+    fn a_mask_naming_a_picture_the_card_does_not_have_leaves_the_layer_alone() {
+        let _gpu = crate::vulkan::one_gpu_at_a_time();
+        // A mask still decoding, and a mask whose picture was deleted from the
+        // library, are the same case: the layer goes on as it was rather than
+        // being blanked by a stencil nobody can see.
+        let Some(mut canvas) = backend(16, 16) else {
+            return;
+        };
+        let media = MediaItemId::new();
+        let layer = LayerId::new();
+        canvas
+            .set_media_texture(
+                media,
+                &rgba(
+                    &pattern(16, |x, y| [(x * 16) as u8, (y * 16) as u8, 64, 255]),
+                    16,
+                    16,
+                ),
+            )
+            .expect("uploads");
+
+        let before = composed_frame(&mut canvas, &effected(layer, media, &[]), 16);
+        let passes = effect(
+            "ovs.mask",
+            // An item that was never uploaded. Nothing else about the effect is
+            // touched, so what is being measured is the missing picture.
+            &[(
+                "image",
+                ParameterValue::Text(MediaItemId::new().to_string()),
+            )],
+        );
+        let after = composed_frame(&mut canvas, &effected(layer, media, &passes), 16);
+
+        assert_eq!(
+            after, before,
+            "a mask with no picture on the card changed it"
         );
     }
 

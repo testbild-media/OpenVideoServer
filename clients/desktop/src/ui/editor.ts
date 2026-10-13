@@ -24,6 +24,7 @@ import type {
   DmxProtocols,
   EffectInstance,
   MasterConfig,
+  MediaItem,
   ModuleParameter,
   OutputConfig,
   ParameterValue,
@@ -140,6 +141,14 @@ export class EditorPanel {
    */
   #deleting: string | null = null;
   #shows: ShowListEntry[] = [];
+  /**
+   * The media library, for the one parameter kind that names something in it.
+   *
+   * Read when the editor loads, like the catalogues: a picture is chosen from
+   * a menu of what has been uploaded, so an editor without this offers nothing
+   * rather than a box to type an identifier into.
+   */
+  #media: MediaItem[] = [];
   #catalogue: Catalogue = emptyCatalogue();
   /** The fixture personalities this server publishes. Empty until it has said. */
   #fixtures: FixtureCatalogue = emptyFixtures();
@@ -354,6 +363,9 @@ export class EditorPanel {
       this.#note(`the effect and generator catalogues could not be read: ${catalogues.message}`);
     }
     if (media.ok) {
+      // Kept, because an effect parameter can name one: the Mask effect takes
+      // a picture out of the library rather than a number.
+      this.#media = media.value.items;
     } else {
       this.#note(`the media library could not be read: ${media.message}`);
     }
@@ -1848,6 +1860,36 @@ export class EditorPanel {
         }
         select.value = current?.type === 'choice' ? current.value : type.default;
         select.addEventListener('change', () => onSet({ type: 'choice', value: select.value }));
+        return select;
+      }
+      case 'image': {
+        const option = (value: string, label: string): HTMLOptionElement => {
+          const node = document.createElement('option');
+          node.value = value;
+          node.textContent = label;
+          return node;
+        };
+        // The library, never a text box. This is the one parameter whose value
+        // names something somebody uploaded, and typing a twenty-six character
+        // identifier is not a thing anybody can do.
+        const select = document.createElement('select');
+        select.append(option('', 'None'));
+        for (const item of this.#media) {
+          // Stills only, and only the ones that finished arriving: a clip
+          // cannot be a stencil and an item still uploading has no pixels yet.
+          if (item.kind === 'image' && item.state === 'ready') {
+            select.append(option(item.id, item.display_name));
+          }
+        }
+        const chosen = current?.type === 'text' ? current.value : '';
+        if (chosen !== '' && !this.#media.some((item) => item.id === chosen)) {
+          // A picture the library no longer has is still what the show says.
+          // Dropping it from the menu would quietly empty the parameter the
+          // next time anybody touched this screen.
+          select.append(option(chosen, `${chosen} â€” not in the library`));
+        }
+        select.value = chosen;
+        select.addEventListener('change', () => onSet({ type: 'text', value: select.value }));
         return select;
       }
     }

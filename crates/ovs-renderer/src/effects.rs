@@ -36,7 +36,9 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use ovs_types::config::effects::{self, EffectValues};
+use ovs_types::config::manifest::ParameterKind;
 use ovs_types::config::EffectInstance;
+use ovs_types::id::MediaItemId;
 use ovs_types::live::EffectOverrides;
 
 /// What one full-screen pass computes.
@@ -72,6 +74,9 @@ pub enum PassKind {
     RgbSplit,
     /// Line jumps, snow and a rolling error. The one pass that reads the clock.
     TvGlitch,
+    /// A picture from the library, multiplied in or cut out. The one pass that
+    /// samples a second texture.
+    Mask,
 }
 
 impl PassKind {
@@ -92,6 +97,7 @@ impl PassKind {
             Self::RgbCorrect => 10,
             Self::RgbSplit => 11,
             Self::TvGlitch => 12,
+            Self::Mask => 13,
         }
     }
 }
@@ -108,6 +114,16 @@ pub struct EffectPass {
     pub values: [f32; 4],
     /// The pass's colour, where it has one.
     pub colour: [f32; 4],
+    /// The picture this pass samples besides the one it is given, where it has
+    /// one.
+    ///
+    /// **The only thing in a pass that is not a number.** Everything else here
+    /// is pushed to the shader as constants; this is a texture the compositor
+    /// has to bind, and a pass naming a picture that is not on the GPU is
+    /// skipped rather than drawn against something else. Still `Copy`: an
+    /// identifier is sixteen bytes and a chain is rebuilt into a reused buffer
+    /// every frame.
+    pub mask: Option<MediaItemId>,
 }
 
 /// Appends the passes a chain runs at its configured values, in chain order.
@@ -157,6 +173,38 @@ pub fn live_passes_into(
     }
 }
 
+/// Appends the pictures a chain's effects name, live values on top.
+///
+/// Which pictures have to be on the GPU is decided from the show rather than
+/// from the scene, the same way a slot's clip is: this is what the residency is
+/// told to keep, and a layer faded to nothing keeps its mask instead of losing
+/// it and having to decode again the moment it is faded up.
+///
+/// Appends rather than replaces, and skips what is already in the list, because
+/// the caller is collecting every layer's into one buffer it reuses.
+pub fn media_wanted(chain: &[EffectInstance], live: &EffectOverrides, into: &mut Vec<MediaItemId>) {
+    for instance in chain {
+        // A disabled effect is not drawn, but its picture is kept: an operator
+        // switching a mask off and on again during a show must not wait for a
+        // decode, and the list this feeds is also what keeps it from being
+        // evicted. It is the same reason a faded layer keeps its clip.
+        let Some(manifest) = effects::manifest(&instance.type_id, instance.version) else {
+            continue;
+        };
+        let values = manifest.live_over(&instance.parameters, live.get(&instance.id));
+        for parameter in manifest.parameters {
+            if !matches!(parameter.kind, ParameterKind::Image) {
+                continue;
+            }
+            if let Some(media_item_id) = values.media(parameter.key) {
+                if !into.contains(&media_item_id) {
+                    into.push(media_item_id);
+                }
+            }
+        }
+    }
+}
+
 /// Appends the passes one effect runs.
 fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
     let manifest = values.manifest();
@@ -180,11 +228,13 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
                     number("gamma"),
                 ],
                 colour: [0.0; 4],
+                mask: None,
             });
             into.push(EffectPass {
                 kind: PassKind::WhiteBalance,
                 values: [number("temperature_k"), number("tint"), 0.0, 0.0],
                 colour: [0.0; 4],
+                mask: None,
             });
         }
         ("ovs.colour_correct", 1) => into.push(EffectPass {
@@ -196,6 +246,7 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
                 number("gamma"),
             ],
             colour: [0.0; 4],
+            mask: None,
         }),
         ("ovs.tint", 1) => into.push(EffectPass {
             kind: PassKind::Tint,
@@ -206,6 +257,7 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
                 0.0,
             ],
             colour: values.colour("colour"),
+            mask: None,
         }),
         ("ovs.pixelate", 1) => {
             let block = number("block_px");
@@ -214,6 +266,7 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
                     kind,
                     values: [block, 0.0, 0.0, 0.0],
                     colour: [0.0; 4],
+                    mask: None,
                 });
             }
         }
@@ -225,6 +278,7 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
                     kind,
                     values: [radius, amount, 0.0, 0.0],
                     colour: [0.0; 4],
+                    mask: None,
                 });
             }
         }
@@ -241,6 +295,28 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
                 number("bottom_px"),
             ],
             colour: [0.0; 4],
+            mask: None,
+        }),
+        // **Appended with no picture as well**, like every other effect here,
+        // because that is what lets the renderer prove it neutral by rendering
+        // it. A pass naming no picture binds the white default texture, and
+        // white is a mask that does nothing — which is also what a mask that is
+        // still decoding and a mask whose picture was deleted from the library
+        // get, so all three leave the layer exactly as it was.
+        ("ovs.mask", 1) => into.push(EffectPass {
+            kind: PassKind::Mask,
+            values: [
+                number("amount"),
+                // Which of the two things it does, as a code. Multiplying
+                // darkens the picture and keeps the layer covering what is
+                // under it; cutting out lowers the layer's own alpha, so what
+                // is underneath comes through the hole.
+                f32::from(u8::from(values.choice("mode") == "cut_out")),
+                f32::from(u8::from(values.flag("invert"))),
+                0.0,
+            ],
+            colour: [0.0; 4],
+            mask: values.media("image"),
         }),
         ("ovs.mirror", 1) => into.push(EffectPass {
             kind: PassKind::Mirror,
@@ -255,11 +331,13 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
                 0.0,
             ],
             colour: [0.0; 4],
+            mask: None,
         }),
         ("ovs.colorize", 1) => into.push(EffectPass {
             kind: PassKind::Colorize,
             values: [number("hue"), number("saturation"), number("amount"), 0.0],
             colour: [0.0; 4],
+            mask: None,
         }),
         // **The lift travels in the colour slot, because it is one.** A pass
         // carries four numbers and this effect has six, and a black level per
@@ -270,11 +348,13 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
             kind: PassKind::RgbCorrect,
             values: [number("gain_r"), number("gain_g"), number("gain_b"), 0.0],
             colour: [number("lift_r"), number("lift_g"), number("lift_b"), 0.0],
+            mask: None,
         }),
         ("ovs.rgb_split", 1) => into.push(EffectPass {
             kind: PassKind::RgbSplit,
             values: [number("offset_px"), number("angle_deg"), 0.0, 0.0],
             colour: [0.0; 4],
+            mask: None,
         }),
         ("ovs.tv_glitch", 1) => into.push(EffectPass {
             kind: PassKind::TvGlitch,
@@ -285,6 +365,7 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
                 number("roll"),
             ],
             colour: [0.0; 4],
+            mask: None,
         }),
         // A manifest this build publishes but the renderer cannot draw. Nothing
         // is in this state today — the four published effects are the four

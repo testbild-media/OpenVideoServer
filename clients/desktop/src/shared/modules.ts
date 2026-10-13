@@ -86,8 +86,22 @@ export function defaultValue(parameter: ModuleParameter): ParameterValue {
       return { type: 'choice', value: type.default };
     case 'text':
       return { type: 'text', value: type.default };
+    case 'image':
+      // No picture. Mirrors the server: a published default may not name
+      // something an operator can delete from the library.
+      return { type: 'text', value: '' };
   }
 }
+
+/**
+ * The shape of an identifier, as the server writes one.
+ *
+ * Twenty-six characters of Crockford base32, the first of them low enough that
+ * the whole thing fits in a hundred and twenty-eight bits. Whether the library
+ * still holds it is a different question, asked where there is a library to
+ * ask â€” exactly as on the server, where the type model has none either.
+ */
+const IDENTIFIER = /^[0-7][0-9ABCDEFGHJKMNPQRSTVWXYZ]{25}$/;
 
 /**
  * The value in force for a parameter: what is set, or what it was published with.
@@ -185,6 +199,15 @@ export function refuse(parameter: ModuleParameter, value: ParameterValue): strin
       return type.choices.some((choice) => choice.id === value.value)
         ? null
         : `must be one of ${named}`;
+    }
+    case 'image': {
+      const wrong = 'must be a picture from the library, or nothing';
+      if (value.type !== 'text') {
+        return wrong;
+      }
+      // Empty is "none chosen", which is what it starts as and what it goes
+      // back to when the picture it named is deleted.
+      return value.value === '' || IDENTIFIER.test(value.value) ? null : wrong;
     }
   }
 }

@@ -43,6 +43,7 @@ first:
 ASCII only on purpose: this is read through an ssh round trip.
 """
 
+import hashlib
 import json
 import random
 import struct
@@ -181,6 +182,69 @@ def pixels_of(png):
         )
         previous = line
     return width, height, rows
+
+
+def png_of(width, height, pixel):
+    """Builds an eight-bit RGBA PNG. The other direction of `pixels_of`."""
+    raw = bytearray()
+    for y in range(height):
+        raw.append(0)
+        for x in range(width):
+            raw.extend(pixel(x, y))
+
+    def chunk(kind, body):
+        head = struct.pack(">I", len(body)) + kind
+        return head + body + struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF)
+
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(bytes(raw), 6))
+        + chunk(b"IEND", b"")
+    )
+
+
+def upload(name, png, width, height):
+    """Puts a picture in the library and returns its identifier.
+
+    Three requests, as the module documentation describes them: say what is
+    coming, send it, have it verified. Nothing is trusted until the server has
+    hashed what actually arrived, so the hash here has to be the real one.
+    """
+    digest = hashlib.sha256(png).hexdigest()
+    answer = call(
+        "POST",
+        "/media/uploads",
+        {
+            "display_name": name,
+            "original_filename": name + ".png",
+            "sha256": digest,
+            "byte_size": len(png),
+            "kind": "image",
+            "dimensions": {"width": width, "height": height},
+            "has_alpha": True,
+            "container": "png",
+            "codec": "png",
+        },
+    )
+    if answer.get("result") == "already_present":
+        return answer["media_item_id"]
+
+    upload_id = answer["upload_id"]
+    request = urllib.request.Request(
+        API + "/media/uploads/%s?offset=0" % upload_id, data=png, method="PUT"
+    )
+    request.add_header("Content-Type", "application/octet-stream")
+    with urllib.request.urlopen(request, timeout=60) as sent:
+        sent.read()
+    item = call("POST", "/media/uploads/%s/verify" % upload_id, None)
+    return item["id"]
+
+
+# The picture the Mask effect is driven with, uploaded once per run. Black down
+# the left half and white down the right, so what it does is a thing that can be
+# counted rather than a thing that looks about right.
+STENCIL = {"id": None, "width": 0, "height": 0}
 
 
 class Picture:
@@ -527,6 +591,10 @@ class Report:
 def default_value(parameter):
     kind = parameter["parameter_type"]["kind"]
     body = parameter["parameter_type"]
+    if kind == "image":
+        # No picture, which is what this kind starts at and the only default it
+        # has: a published default may not name a row somebody can delete.
+        return {"type": "text", "value": ""}
     tag = {
         "number": "float",
         "toggle": "bool",
@@ -575,6 +643,12 @@ def enabling_value(parameter):
         return {"type": "color", "value": far}
     if kind == "text":
         return {"type": "text", "value": "OVS 12:34"}
+    if kind == "image":
+        # The stencil this run uploaded. Without one there is nothing to switch
+        # a picture parameter on with, and the sweep leaves it alone.
+        if not STENCIL["id"]:
+            return None
+        return {"type": "text", "value": STENCIL["id"]}
     if kind == "choice":
         others = [one["id"] for one in body["choices"] if one["id"] != body["default"]]
         if not others:
@@ -758,6 +832,43 @@ def specific(width, height):
                     seen.uniform_blocks(8) > base.uniform_blocks(8) + 0.1,
                     "blocks of one colour %.2f -> %.2f"
                     % (base.uniform_blocks(8), seen.uniform_blocks(8)),
+                ),
+            ),
+        ],
+        "ovs.mask": [
+            (
+                "the black half of the stencil takes the picture away",
+                {
+                    "image": {"type": "text", "value": STENCIL["id"] or ""},
+                    "amount": {"type": "float", "value": 1.0},
+                },
+                lambda base, seen: (
+                    seen.dark_fraction(right=0.45) > 0.97 and seen.dark_fraction(left=0.55) < 0.2,
+                    "dark left=%.2f right=%.2f"
+                    % (seen.dark_fraction(right=0.45), seen.dark_fraction(left=0.55)),
+                ),
+            ),
+            (
+                "inverted, it takes the other half",
+                {
+                    "image": {"type": "text", "value": STENCIL["id"] or ""},
+                    "invert": {"type": "bool", "value": True},
+                },
+                lambda base, seen: (
+                    seen.dark_fraction(left=0.55) > 0.97 and seen.dark_fraction(right=0.45) < 0.2,
+                    "dark left=%.2f right=%.2f"
+                    % (seen.dark_fraction(right=0.45), seen.dark_fraction(left=0.55)),
+                ),
+            ),
+            (
+                "amount at nought leaves the picture alone",
+                {
+                    "image": {"type": "text", "value": STENCIL["id"] or ""},
+                    "amount": {"type": "float", "value": 0.0},
+                },
+                lambda base, seen: (
+                    distance(base, seen)[0] <= SAME,
+                    "distance=%.2f" % distance(base, seen)[0],
                 ),
             ),
         ],
@@ -1032,6 +1143,21 @@ def main():
     print("composition: %dx%d" % (width, height))
     sys.stdout.flush()
 
+    # A stencil for the Mask effect, which is the one module that is driven
+    # with a picture rather than with numbers. Uploaded before the show is
+    # built, so that everything below can name it.
+    try:
+        STENCIL["width"], STENCIL["height"] = width, height
+        STENCIL["id"] = upload(
+            "Module check stencil",
+            png_of(width, height, lambda x, _: (0, 0, 0, 255) if x < width // 2 else (255,) * 4),
+            width,
+            height,
+        )
+        print("stencil: %s" % STENCIL["id"])
+    except Exception as error:  # noqa: BLE001 - reported, not handled
+        print("no stencil, so the Mask effect is driven with nothing: %s" % error)
+
     try:
         # Opened before it is edited, because a show that is not loaded cannot
         # be edited -- the server answers 409 to a save on any other document.
@@ -1073,6 +1199,14 @@ def main():
         if was_open:
             print(" ", refused("POST", "/shows/%s/open" % was_open, None) or "the show is open again")
         print(" ", refused("DELETE", "/shows/" + show_id) or "the test show is deleted")
+        if STENCIL["id"]:
+            # Out of the library as well. A check that left a picture behind
+            # every time it ran would be a check that tidies up after the show
+            # and not after itself.
+            print(
+                " ",
+                refused("DELETE", "/media/" + STENCIL["id"]) or "the stencil is out of the library",
+            )
         if not previews_were:
             call("PUT", "/preview/enabled", {"enabled": False})
 

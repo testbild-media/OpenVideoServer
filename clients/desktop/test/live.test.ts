@@ -196,6 +196,11 @@ function otherValue(parameter: ModuleParameter): ParameterValue {
       const other = type.choices.find((choice) => choice.id !== type.default);
       return { type: 'choice', value: other?.id ?? type.default };
     }
+    case 'image':
+      // Any well-formed identifier. The server checks the shape of one here
+      // and leaves "is it still in the library" to the places that have a
+      // library to ask, so this round trip does not need a real picture.
+      return { type: 'text', value: '01HQX7Y0000000000000000000' };
     case 'number':
       return { type: 'float', value: type.default === type.max ? type.min : type.max };
     case 'colour':

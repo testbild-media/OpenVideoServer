@@ -57,6 +57,9 @@ export type ParameterType =
        */
       default: string;
       kind: 'choice';
+    }
+  | {
+      kind: 'image';
     };
 
 /**
