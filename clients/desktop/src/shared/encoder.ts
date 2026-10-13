@@ -219,7 +219,7 @@ export function hevcArguments(
     ...common(from, readAs),
     '-c:v',
     backend,
-    ...qualityArguments(backend, MOST_BITS_PER_SECOND, rate),
+    ...qualityArguments(backend, MOST_BITS_PER_SECOND, rate, tags),
     '-pix_fmt',
     PIXEL_FORMAT[depth],
     ...keyframes,
@@ -382,6 +382,33 @@ function keyframeArguments(backend: HevcBackend, rate: FrameRate): string[] {
 const KVAZAAR_GOP = 8;
 
 /**
+ * The names Kvazaar knows a colour tag by, where they differ from FFmpeg's.
+ *
+ * Both tools use H.273's short names, so nearly everything passes through
+ * unchanged. These four do not: FFmpeg calls the two old transfer curves
+ * `gamma22` and `gamma28` where Kvazaar uses the recommendation numbers, and
+ * the identity matrix is `gbr` to ffprobe and `GBR` here.
+ *
+ * A name Kvazaar does not know — `smpte2084`, `arib-std-b67`, anything HDR — is
+ * passed through as it is rather than replaced with a guess. Kvazaar then
+ * ignores that one setting, the file comes out untagged in that respect, and
+ * `ingest.ts` refuses it and names the tag. Mislabelling a file would be worse,
+ * and quieter.
+ */
+const KVAZAAR_TAGS: Readonly<Record<string, string>> = {
+  gamma22: 'bt470m',
+  gamma28: 'bt470bg',
+  gbr: 'GBR',
+  rgb: 'GBR',
+  ycgco: 'YCgCo',
+};
+
+/** One colour tag, under the name Kvazaar knows it by. */
+function kvazaarTag(tag: string): string {
+  return KVAZAAR_TAGS[tag] ?? tag;
+}
+
+/**
  * The keyframe period Kvazaar will accept, with the B-gop it has to match.
  *
  * Rounded **down** to a multiple of the GOP length, because the contract is a
@@ -420,6 +447,7 @@ function qualityArguments(
   backend: HevcBackend,
   ceiling: number,
   rate: FrameRate,
+  tags: ColourTags,
 ): string[] {
   if (backend === 'hevc_nvenc') {
     return [
@@ -457,14 +485,35 @@ function qualityArguments(
   }
   if (backend === 'libkvazaar') {
     // Everything Kvazaar takes, in the one string it takes it in: the preset,
-    // the quantiser, the B-gop and the keyframe period. `veryfast` because this
-    // is the path a machine with no encoder at all goes down, where what an
-    // operator cares about is whether it finishes before doors — a slower preset
-    // buys picture quality nobody is comparing against anything.
+    // the quantiser, the B-gop, the keyframe period and the colour tags.
+    // `veryfast` because this is the path a machine with no encoder at all goes
+    // down, where what an operator cares about is whether it finishes before
+    // doors — a slower preset buys picture quality nobody is comparing against
+    // anything.
+    //
+    // **The colour tags have to be in here too.** FFmpeg's wrapper hands
+    // Kvazaar the dimensions, the frame rate and this string, and nothing else:
+    // `-color_primaries` and `-color_trc` never reach it, so the stream it
+    // writes carries no colour description at all. A file like that is one the
+    // server refuses — "colour primaries: wanted tagged, found untagged",
+    // measured on a release runner on 2026-10-13, after the encode itself had
+    // finally started working — so the whole encode would be thrown away at the
+    // last step. HEVC's VUI gates all three of primaries, transfer and matrix
+    // on one flag, which is why all three are named rather than only the two
+    // that were missing.
     const keyframes = kvazaarKeyframes(rate);
     return [
       '-kvazaar-params',
-      `preset=veryfast,qp=${CONSTANT_QUALITY},gop=${keyframes.gop},period=${keyframes.period}`,
+      [
+        'preset=veryfast',
+        `qp=${CONSTANT_QUALITY}`,
+        `gop=${keyframes.gop}`,
+        `period=${keyframes.period}`,
+        `colorprim=${kvazaarTag(tags.primaries)}`,
+        `transfer=${kvazaarTag(tags.transfer)}`,
+        `colormatrix=${kvazaarTag(tags.matrix)}`,
+        `range=${tags.range === 'pc' || tags.range === 'full' ? 'pc' : 'tv'}`,
+      ].join(','),
     ];
   }
   return ['-rate_control', 'quality', '-quality', String(MEDIA_FOUNDATION_QUALITY)];
@@ -512,8 +561,17 @@ const BOOKKEEPING = [
   /^Conversion failed!?$/,
 ];
 
-/** How many of the telling lines are worth putting in front of an operator. */
-const LINES_KEPT = 4;
+/**
+ * How many of the telling lines are worth putting in front of an operator.
+ *
+ * Six, because the cause can sit above three consequences and still not be the
+ * last thing said. The Kvazaar refusal read, in order: Kvazaar's own `Input
+ * error: intra period (25) not a multiple of B-gop length (8)`, then "Could not
+ * open kvazaar encoder", then FFmpeg's guess at why, then a filter graph
+ * reporting an internal bug, then "Could not open encoder before EOF". Four
+ * lines kept the diagnosis and lost the reason by one line (2026-10-13).
+ */
+const LINES_KEPT = 6;
 
 /**
  * The part of what FFmpeg said that says why it stopped.

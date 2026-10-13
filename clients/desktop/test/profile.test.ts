@@ -414,6 +414,37 @@ describe('the software encoder, which is the one every machine has', () => {
     }
   });
 
+  it('tells Kvazaar the colour tags, which FFmpeg does not pass on', () => {
+    // The encode succeeded and the file was refused: FFmpeg's wrapper hands
+    // Kvazaar the dimensions, the rate and this string and nothing else, so
+    // `-color_primaries` never reaches it and the stream carries no colour
+    // description (measured on a runner, 2026-10-13).
+    const asked = settings({ numerator: 25, denominator: 1 });
+    expect(asked.get('colorprim')).toBe('bt709');
+    expect(asked.get('transfer')).toBe('bt709');
+    expect(asked.get('colormatrix')).toBe('bt709');
+    expect(asked.get('range')).toBe('tv');
+  });
+
+  it("carries a source's own tags, under the names Kvazaar knows", () => {
+    const args = hevcArguments(
+      'in.mp4',
+      'out.mp4',
+      'libkvazaar',
+      8,
+      { numerator: 25, denominator: 1 },
+      { primaries: 'bt470bg', transfer: 'gamma28', matrix: 'gbr', range: 'pc' },
+    );
+    const params = args[args.indexOf('-kvazaar-params') + 1] ?? '';
+    // `gamma28` is FFmpeg's name for the curve Kvazaar calls `bt470bg`, and the
+    // identity matrix is `gbr` to ffprobe and `GBR` here. The primaries keep
+    // their name, which is the same in both.
+    expect(params).toContain('colorprim=bt470bg');
+    expect(params).toContain('transfer=bt470bg');
+    expect(params).toContain('colormatrix=GBR');
+    expect(params).toContain('range=pc');
+  });
+
   it('switches the B-gop off below one gop, where no multiple exists', () => {
     // A rate this low is unusual rather than impossible, and the alternative is
     // a period of zero -- which is one keyframe at the start and then none.
@@ -447,20 +478,19 @@ describe('what FFmpeg said about a failure', () => {
     expect(said).toContain('error code: -22');
   });
 
-  it('keeps the last few of what is telling, not only the last one', () => {
-    const said = whyItStopped(
-      [
-        'the first thing it said',
-        'the second thing it said',
-        'the third thing it said',
-        'the fourth thing it said',
-        'the fifth thing it said',
-        'Conversion failed!',
-      ].join('\n'),
+  it('keeps the last several of what is telling, not only the last one', () => {
+    // Several, because the cause can sit above three consequences: Kvazaar's
+    // own refusal was five lines from the end of what FFmpeg said.
+    const numbered = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh'].map(
+      (which) => `the ${which} thing it said`,
     );
-    expect(said).toBe(
-      'the second thing it said; the third thing it said; the fourth thing it said; the fifth thing it said',
-    );
+    const said = whyItStopped([...numbered, 'Conversion failed!'].join('\n'));
+    expect(said.split('; ').length, 'more than three, and bounded').toBeGreaterThan(3);
+    expect(said).toContain('the seventh thing it said');
+    expect(said).not.toContain('Conversion failed');
+    // Bounded from the far end: the oldest line goes when there are more than
+    // it keeps, so a file that produced a warning a frame cannot bury the end.
+    expect(said).not.toContain('the first thing it said');
   });
 
   it('is empty for an encode that said nothing at all', () => {
