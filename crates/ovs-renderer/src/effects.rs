@@ -119,8 +119,9 @@ pub struct EffectPass {
     ///
     /// **The only thing in a pass that is not a number.** Everything else here
     /// is pushed to the shader as constants; this is a texture the compositor
-    /// has to bind, and a pass naming a picture that is not on the GPU is
-    /// skipped rather than drawn against something else. Still `Copy`: an
+    /// has to bind. A pass naming no picture, and one naming a picture that is
+    /// not on the GPU, both get the white default bound instead — and white is
+    /// a mask that does nothing, so neither changes the layer. Still `Copy`: an
     /// identifier is sixteen bytes and a chain is rebuilt into a reused buffer
     /// every frame.
     pub mask: Option<MediaItemId>,
