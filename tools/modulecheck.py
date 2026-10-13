@@ -883,6 +883,12 @@ def specific(width, height):
             ),
         ],
     }
+    if not STENCIL["id"]:
+        # Nothing was uploaded, so there is nothing to mask with. Dropped rather
+        # than run against no picture, which would report the Mask effect as
+        # broken when what is missing is the stencil.
+        knows.pop("ovs.mask", None)
+    return knows
 
 
 def longest_still_run(count=20, pause=0.19):
