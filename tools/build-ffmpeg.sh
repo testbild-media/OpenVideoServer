@@ -534,6 +534,12 @@ else
   # pkg-config", with FFmpeg's own note saying exactly this (2026-10-13).
   # Snappy never needed it because FFmpeg names `-lsnappy -lstdc++` itself.
   sharing="$sharing --pkg-config-flags=--static"
+  # **And Kvazaar has to be told it is being linked statically.** Its header
+  # declares every symbol `__declspec(dllimport)` unless `KVZ_STATIC_LIB` is
+  # defined, so the configure check compiled a reference to `__imp_kvz_api_get`
+  # and the static archive beside it has no such symbol. The package's own
+  # pkg-config file does not carry the define, so this does.
+  sharing="$sharing --extra-cflags=-DKVZ_STATIC_LIB"
   decoders="$DECODERS"
 fi
 readonly sharing decoders
