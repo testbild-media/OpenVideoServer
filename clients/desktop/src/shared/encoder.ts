@@ -453,6 +453,52 @@ export function progressFrom(line: string): number | null {
   return raw / 1_000_000;
 }
 
+/**
+ * Lines that are FFmpeg tidying up rather than FFmpeg saying what went wrong.
+ *
+ * Each of these is written by whichever part noticed the failure *after* the
+ * part that caused it, so each one pushes the cause further out of view.
+ */
+const BOOKKEEPING = [
+  /Task finished with error code/,
+  /Terminating thread with return code/,
+  /Nothing was written into output file/,
+  /^Conversion failed!?$/,
+];
+
+/** How many of the telling lines are worth putting in front of an operator. */
+const LINES_KEPT = 4;
+
+/**
+ * The part of what FFmpeg said that says why it stopped.
+ *
+ * **The last three lines are the wrong three lines.** FFmpeg 7 runs each
+ * output stream as a task, and when one fails, the end of standard error is
+ * the scheduler's account of the funeral rather than the cause of death:
+ *
+ *     [vost#0:0/libkvazaar] Task finished with error code: -22 (Invalid argument)
+ *     [vost#0:0/libkvazaar] Terminating thread with return code -22 (Invalid argument)
+ *     [out#0/mp4] Nothing was written into output file, because at least one of
+ *     its streams received no packets.
+ *
+ * Three lines, not one of them the reason, and the encoder's own complaint
+ * pushed out above them. That is the message an operator reads at a venue, and
+ * it is also what came back from CI -- so a software encoder that refused every
+ * frame cost two round trips and said nothing either time (2026-10-13).
+ *
+ * So: the bookkeeping dropped as long as anything else remains, the last few of
+ * what is left, and the bookkeeping on its own if that is genuinely all there
+ * was -- an operator is better served by "error code: -22" than by silence.
+ */
+export function whyItStopped(said: string): string {
+  const lines = said
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '');
+  const telling = lines.filter((line) => !BOOKKEEPING.some((pattern) => pattern.test(line)));
+  return (telling.length > 0 ? telling : lines).slice(-LINES_KEPT).join('; ');
+}
+
 /** The flags every encode takes, whatever it is producing. */
 function common(from: string): string[] {
   return [

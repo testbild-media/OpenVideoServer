@@ -36,6 +36,13 @@ name: Release
 on:
   push:
     tags: ['v*']
+    # **A branch to measure on.** The only Windows build this project has is
+    # this job, so anything about the client's FFmpeg can be found out here and
+    # nowhere else -- and until this line existed, finding it out cost a tag,
+    # which is a release whose assets are a public download. Three tags went on
+    # one encoder refusing one frame (2026-10-13). A push to `ci/anything`
+    # builds the client and stops there; the package job below sits it out.
+    branches: ['ci/**']
   # Buildable by hand, so the packaging can be proved before a tag exists.
   workflow_dispatch:
 
@@ -201,28 +208,70 @@ jobs:
           fi
           exit 0
 
-      # And when it could not, the same question put to the binary on its own,
-      # in full voice.
+      # And when it could not, the same question put to the binary on its own --
+      # one clause of the client's command line at a time, so what comes back
+      # names the clause that is refused rather than only that something was.
       #
-      # The client runs FFmpeg quietly and keeps the tail of what it said, which
-      # is the right trade for a queue of files and the wrong one for finding
-      # out why a brand-new encoder refuses a frame: "Task finished with error
-      # code: -22" was all there was to go on, and the encoder itself had said
-      # nothing at all (2026-10-13).
+      # **Two narrow windows hid the answer twice.** The client keeps three
+      # lines of what FFmpeg said, and the last three lines of a failed encode
+      # are the scheduler's ("Task finished with error code: -22") rather than
+      # the encoder's. Asking the binary at `-loglevel debug` and annotating
+      # seventy lines hid it the other way round: a decoder at debug level
+      # writes a line per NAL unit, and an annotation is truncated at about
+      # four thousand characters -- which fell in the middle of the preset
+      # Kvazaar had just parsed (2026-10-13). So: the decoder's chatter
+      # filtered out, a trial per annotation, and a dozen lines each.
       - name: Ask the shipped FFmpeg directly
         if: failure() && steps.client-against-its-ffmpeg.outcome == 'failure'
         shell: bash
         run: |
           ffmpeg=clients/desktop/vendor/ffmpeg/ffmpeg.exe
-          "$ffmpeg" -hide_banner -loglevel debug -y \
-            -i clients/desktop/test/media/refused-h264.mp4 -an -map 0:v:0 \
-            -c:v libkvazaar \
-            -kvazaar-params preset=veryfast,qp=18,period=25 \
-            -pix_fmt yuv420p \
+          clip=clients/desktop/test/media/refused-h264.mp4
+
+          # Everything the H.264 decoder, the filter graph and the scaler say
+          # about themselves, which at this level is hundreds of lines and none
+          # of them about the encoder.
+          quiet() {
+            sed -e 's/%/%25/g' -e 's/\r$//' "$1" \
+              | grep -v -E '^\[(h264|swscaler|graph|format|auto_scale|Parsed_|AVFilterGraph|AVIOContext)' \
+              | grep -v -E "\] Setting '" \
+              | grep -v -E '^ {4,}'
+          }
+
+          try() {
+            name=$1
+            shift
+            if "$ffmpeg" -hide_banner -loglevel verbose -y -i "$clip" \
+                 -an -map 0:v:0 "$@" > "/tmp/$name.log" 2>&1; then
+              code=0
+            else
+              code=$?
+            fi
+            printf '::error title=%s::%s\n' "trial $name (exit $code)" \
+              "$(quiet "/tmp/$name.log" | tail -n 18 | awk '{ printf "%s%%0A", $0 }')"
+          }
+
+          # The encoder on its own, then each clause the client adds to it. The
+          # fourth is the one worth knowing: Kvazaar's `veryfast` preset sets
+          # `--gop=8`, the client asks for a keyframe every 25 frames, and 25
+          # is not a multiple of 8.
+          try bare -c:v libkvazaar -f hevc /tmp/bare.hevc
+          try qp -c:v libkvazaar -kvazaar-params qp=18 -f hevc /tmp/qp.hevc
+          try preset -c:v libkvazaar -kvazaar-params preset=veryfast,qp=18 -f hevc /tmp/preset.hevc
+          try period25 -c:v libkvazaar -kvazaar-params preset=veryfast,qp=18,period=25 -f hevc /tmp/p25.hevc
+          try period24 -c:v libkvazaar -kvazaar-params preset=veryfast,qp=18,period=24 -f hevc /tmp/p24.hevc
+          try nogop -c:v libkvazaar -kvazaar-params preset=veryfast,qp=18,gop=0,period=25 -f hevc /tmp/p0.hevc
+          try colour -c:v libkvazaar -pix_fmt yuv420p \
             -color_range tv -colorspace bt709 -color_primaries bt709 -color_trc bt709 \
-            -r 25 -tag:v hvc1 /tmp/kvazaar-trial.mp4 > /tmp/kvazaar.log 2>&1 || true
-          printf '::error title=%s::%s\n' 'kvazaar, asked in full' \
-            "$(sed -e 's/%/%25/g' -e 's/\r$//' /tmp/kvazaar.log | tail -n 70 | awk '{ printf "%s%%0A", $0 }')"
+            -r 25 -f hevc /tmp/colour.hevc
+          try mp4 -c:v libkvazaar -f mp4 /tmp/plain.mp4
+          try hvc1 -c:v libkvazaar -tag:v hvc1 -f mp4 /tmp/hvc1.mp4
+
+          # And what the encoder says it takes, which says which Kvazaar is in
+          # there as well.
+          "$ffmpeg" -hide_banner -h encoder=libkvazaar > /tmp/about.log 2>&1 || true
+          printf '::error title=%s::%s\n' 'libkvazaar, as the binary describes it' \
+            "$(sed -e 's/%/%25/g' -e 's/\r$//' /tmp/about.log | head -n 20 | awk '{ printf "%s%%0A", $0 }')"
           exit 0
 
       # `--release` refuses to fall back to the npm FFmpeg. Belt and braces
@@ -274,7 +323,13 @@ jobs:
     # discovered: a package with no installer in it still owns the client
     # directory, so installing it over an older one takes away the installer
     # the server's download page was offering.
-    if: always() && needs.windows-client.result != 'cancelled'
+    #
+    # Not on a `ci/**` branch, which exists to measure the Windows half: the
+    # package is twenty minutes of CEF and cargo that nobody is waiting for
+    # there.
+    if: >-
+      always() && needs.windows-client.result != 'cancelled'
+      && (github.ref_type == 'tag' || github.event_name == 'workflow_dispatch')
 
     # **Debian, not the Ubuntu runner.** `dpkg-shlibdeps` reads the binaries and
     # asks the local dpkg which package owns each library, so a package built on

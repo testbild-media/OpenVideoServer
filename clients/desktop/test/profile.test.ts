@@ -22,6 +22,7 @@ import {
   progressFrom,
   rateAsArgument,
   tagsFor,
+  whyItStopped,
   CONSTANT_QUALITY,
   CONVENTIONAL_TAGS,
   HEVC_BACKENDS,
@@ -370,6 +371,52 @@ describe('how far an encode has got', () => {
   it('refuses a time that is not one', () => {
     expect(progressFrom('out_time_us=N/A')).toBeNull();
     expect(progressFrom('out_time_us=-1')).toBeNull();
+  });
+});
+
+describe('what FFmpeg said about a failure', () => {
+  // Verbatim from the release of 2026-10-13, where a software HEVC encode
+  // failed on every machine with no hardware encoder and this was the whole of
+  // what the client reported.
+  const kvazaar = [
+    '[vost#0:0/libkvazaar @ 0000020c] Could not open kvazaar encoder.',
+    '[vost#0:0/libkvazaar @ 0000020c] Task finished with error code: -22 (Invalid argument)',
+    '[vost#0:0/libkvazaar @ 0000020c] Terminating thread with return code -22 (Invalid argument)',
+    '[out#0/mp4 @ 0000020d] Nothing was written into output file, because at least one of its streams received no packets.',
+  ].join('\n');
+
+  it('keeps the line that says why rather than the last three', () => {
+    const said = whyItStopped(kvazaar);
+    expect(said).toContain('Could not open kvazaar encoder.');
+    expect(said).not.toContain('Task finished with error code');
+    expect(said).not.toContain('Nothing was written into output file');
+  });
+
+  it('says the bookkeeping when the bookkeeping is all there is', () => {
+    // Silence would be worse: a number an operator can read out is something.
+    const said = whyItStopped(kvazaar.split('\n').slice(1).join('\n'));
+    expect(said).toContain('error code: -22');
+  });
+
+  it('keeps the last few of what is telling, not only the last one', () => {
+    const said = whyItStopped(
+      [
+        'the first thing it said',
+        'the second thing it said',
+        'the third thing it said',
+        'the fourth thing it said',
+        'the fifth thing it said',
+        'Conversion failed!',
+      ].join('\n'),
+    );
+    expect(said).toBe(
+      'the second thing it said; the third thing it said; the fourth thing it said; the fifth thing it said',
+    );
+  });
+
+  it('is empty for an encode that said nothing at all', () => {
+    expect(whyItStopped('')).toBe('');
+    expect(whyItStopped('\n  \n')).toBe('');
   });
 });
 

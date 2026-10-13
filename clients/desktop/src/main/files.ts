@@ -37,6 +37,7 @@ import {
   HEVC_BACKENDS,
   preparedName,
   progressFrom,
+  whyItStopped,
   type ColourTags,
   type HevcBackend,
 } from '../shared/encoder.js';
@@ -684,7 +685,7 @@ export async function prepareFile(
         return;
       }
       void rm(directory, { recursive: true, force: true });
-      const tail = said.trim().split('\n').slice(-3).join('; ');
+      const tail = whyItStopped(said);
       resolve({
         kind: 'failed',
         reason:
