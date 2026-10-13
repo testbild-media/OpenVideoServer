@@ -372,7 +372,11 @@ export function parameterText(parameter: ModuleParameter, value: ParameterValue 
     case 'float':
       return `${round(value.value, 4)}${unitOf(parameter)}`;
     case 'text':
-      return value.value;
+      // A picture is carried as text, and no picture is an empty one: shown as
+      // the word rather than as a blank, which reads as a missing value. What
+      // it shows when there is one is the identifier, because the name belongs
+      // to the library and this module has none to ask.
+      return parameter.parameter_type.kind === 'image' && value.value === '' ? 'none' : value.value;
     case 'color':
       return value.value.map((channel) => round(channel, 3)).join(', ');
     case 'choice':
