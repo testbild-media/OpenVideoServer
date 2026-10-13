@@ -747,6 +747,54 @@ async fn a_clip_dropped_on_an_empty_pad_is_in_the_show_and_on_disk() {
 }
 
 #[tokio::test]
+async fn a_generator_dropped_on_a_pad_is_given_an_identity_on_disk() {
+    // **The identity has to be in the row, not only in the running state.**
+    //
+    // A patch entry points at a generator instance and lives in the same
+    // document. `replace_show` mints one into the live state, so this worked
+    // for as long as the server stayed up; the row kept none, and the next open
+    // minted a different one — so a fixture patched against the first was
+    // pointing at a generator that no longer existed. The whole-document save
+    // had always done this. This door had not.
+    //
+    // Found on the live server (2026-10-13), where a generator assigned this
+    // way could not be driven through `PUT /live/generators/{id}` at all. Our
+    // own client never hit it: it mints an identity before it sends.
+    let harness = Harness::start().await;
+
+    let (status, body) = harness
+        .assign(
+            5,
+            SourceRef::Generator {
+                instance_id: ovs_types::id::GeneratorInstanceId::nil(),
+                type_id: "ovs.solid_colour".to_owned(),
+                version: 1,
+                parameters: ovs_types::config::slot::ParameterMap::new(),
+            },
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let on_disk = match harness.stored_slot(5).expect("the row has slot 5").source {
+        SourceRef::Generator { instance_id, .. } => instance_id,
+        other => panic!("the stored slot holds {other:?}"),
+    };
+    assert!(
+        !on_disk.is_nil(),
+        "the stored generator has no identity, so nothing in the document can point at it"
+    );
+
+    let running = match harness.running_slot(5).expect("the show has slot 5").source {
+        SourceRef::Generator { instance_id, .. } => instance_id,
+        other => panic!("the running slot holds {other:?}"),
+    };
+    assert_eq!(
+        running, on_disk,
+        "the row and the running show disagree about what the generator is called"
+    );
+}
+
+#[tokio::test]
 async fn filling_a_pad_does_not_restart_the_show() {
     // The whole reason this endpoint exists. Saving the show would reload it
     // on the server, which puts every layer back to its opening slot — in front

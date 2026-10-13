@@ -125,6 +125,27 @@ fn store(
     show: Show,
     settle: impl FnOnce(&mut AuthoritativeState),
 ) -> ApiResult<Timestamp> {
+    // A generator dragged onto a pad with no identity of its own is given one
+    // **before the row is written**.
+    //
+    // `show_routes::save` has always done this and says why: a patch entry
+    // points at a generator instance and lives in the same document, so an
+    // identity that exists only in the running state is minted again on the
+    // next open, and every fixture patched against the previous one is
+    // pointing at a generator that no longer exists. This is the other door
+    // into the same document and it was leaving the identity out of the row,
+    // while `replace_show` put one into the state — so the show on the machine
+    // and the show on disk disagreed about what the generator was called, and
+    // only until the next open at that.
+    //
+    // Found by driving the live server through its own API (2026-10-13): a
+    // generator assigned this way could not be addressed through
+    // `PUT /live/generators/{id}` at all, because the identity the stored
+    // document held was none. Our own client never hit it — it mints one
+    // before it sends — which is why it sat here unnoticed.
+    let mut show = show;
+    show.assign_missing_ids();
+
     let show_id = show.id;
     let updated_at = state.with_database(|database| database.save_show(&show))?;
 
