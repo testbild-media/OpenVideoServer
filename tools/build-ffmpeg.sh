@@ -238,7 +238,13 @@ readonly encoders configure_extra
 readonly CUVID_DECODERS="h264_cuvid,hevc_cuvid,av1_cuvid,vp9_cuvid,vp8_cuvid,mpeg1_cuvid,mpeg2_cuvid,mpeg4_cuvid,vc1_cuvid"
 
 readonly DEMUXERS="mov,matroska,mpegts,mpegvideo,avi,image2,image2pipe,png_pipe,mjpeg,rawvideo,gif,webp_pipe"
-readonly MUXERS="mov,null,rawvideo,image2"
+# **`mp4` as well as `mov`**, which is one muxer twice: the two are the same
+# code in FFmpeg and the extension decides which name it writes under. Without
+# it `ffmpeg out.mp4` answers "Unable to choose an output format", and the
+# client names every HEVC file it prepares `.mp4` -- so a build without it is a
+# client that cannot prepare anything at all, which is what shipped
+# (owner, 2026-10-13, at a venue: a file that would not go in).
+readonly MUXERS="mov,mp4,null,rawvideo,image2"
 readonly PARSERS="h264,hevc,av1,vp9,vp8,mpegvideo,mpeg4video,vc1,mjpeg,png,dnxhd"
 readonly FILTERS="scale,format,null,copy,setpts,fps"
 readonly PROTOCOLS="file,pipe"
@@ -358,6 +364,25 @@ verify() {
     for wanted in $(printf '%s' "$DECODERS" | tr ',' ' '); do
       if ! printf '%s\n' "$available" | grep -qx "$wanted"; then
         echo "  no $wanted decoder" >&2
+        failures=$((failures + 1))
+      fi
+    done
+  fi
+
+  # And that it can write the containers the client asks it for.
+  #
+  # The decoders are checked above and the encoders below, and between them sat
+  # the gap this is here for: a build with every encoder and no `mp4` muxer
+  # passes both and cannot write a single file the client asks for. It shipped
+  # that way, and the first thing anybody saw was an import that would not
+  # start.
+  if [ -x "$where/ffmpeg$EXE" ]; then
+    local writes
+    writes=$("${run[@]}" -hide_banner -muxers 2>/dev/null | awk '{print $2}')
+    local container
+    for container in $(printf '%s' "$MUXERS" | tr ',' ' '); do
+      if ! printf '%s\n' "$writes" | grep -qx "$container"; then
+        echo "  no $container muxer" >&2
         failures=$((failures + 1))
       fi
     done

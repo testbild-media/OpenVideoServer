@@ -17,7 +17,7 @@ import { execFile, spawn } from 'node:child_process';
 import { probeFailure } from '../shared/probe-failure.js';
 import { createHash } from 'node:crypto';
 import { createReadStream, existsSync } from 'node:fs';
-import { mkdtemp, open, rm, stat } from 'node:fs/promises';
+import { mkdtemp, open, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 
@@ -34,6 +34,7 @@ import type { ProbedVideo } from '../shared/profile.js';
 import {
   hapArguments,
   hevcArguments,
+  HEVC_BACKENDS,
   preparedName,
   progressFrom,
   type ColourTags,
@@ -358,7 +359,11 @@ export async function usableEncoders(): Promise<string[]> {
   const listed = new Set(await encoderNames());
   // Only the ones a decision rests on. Trialling every encoder FFmpeg has
   // would be a hundred encodes to answer three questions.
-  const worthTrying = ['hevc_nvenc', 'hevc_mf', 'hap'].filter((name) => listed.has(name));
+  // **Every backend a decision can rest on**, which is all four of them and
+  // not the two that were being asked about. `hevc_qsv` and `hevc_amf` were
+  // passed through as listed, so a machine with neither was handed one of them
+  // as its encoder and found out by failing. A trial is one frame.
+  const worthTrying = [...HEVC_BACKENDS, 'hap'].filter((name) => listed.has(name));
   const working: string[] = [];
   for (const name of worthTrying) {
     if (await encodesOneFrame(name)) {
@@ -380,11 +385,39 @@ export async function usableEncoders(): Promise<string[]> {
 /** What `usableEncoders` found, once it has looked. */
 let usableRemembered: string[] | null = null;
 
+/**
+ * What the system said about a failure, short enough to put in front of
+ * somebody.
+ *
+ * `ENOENT` and the rest are what Node reports and what a person can search for;
+ * the stack is not, and the message alone reads as a sentence.
+ */
+function systemSaid(error: unknown): string {
+  if (error instanceof Error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === undefined ? error.message : `${code} (${error.message})`;
+  }
+  return String(error);
+}
+
 /** Whether one encoder can write a single frame on this machine. */
 async function encodesOneFrame(encoder: string): Promise<boolean> {
   const directory = await mkdtemp(join(tmpdir(), 'ovs-encoder-trial-'));
   const into = join(directory, encoder === 'hap' ? 'trial.mov' : 'trial.mp4');
+  // **A raw frame from a file, not a generated one.** It was
+  // `-f lavfi -i testsrc2=...`, and the FFmpeg this client ships is built with
+  // `--disable-everything`: it has neither that input nor that filter, so every
+  // trial failed with "Unknown input format: 'lavfi'" and every encoder was
+  // recorded as not working here -- on every machine, whatever hardware it had
+  // (found 2026-10-13). What this uses instead is the `rawvideo` demuxer and
+  // the `file` protocol, which are in the build because the pipeline needs
+  // them, so the trial asks about the encoder and nothing else.
+  const source = join(directory, 'trial.yuv');
+  const TRIAL = { width: 1280, height: 720 };
   try {
+    // Mid grey in Y, Cb and Cr alike: one byte repeated is a legal picture in
+    // this format, and what it looks like does not matter.
+    await writeFile(source, Buffer.alloc((TRIAL.width * TRIAL.height * 3) / 2, 128));
     await run(FFMPEG, [
       '-nostdin',
       '-hide_banner',
@@ -392,9 +425,17 @@ async function encodesOneFrame(encoder: string): Promise<boolean> {
       'error',
       '-y',
       '-f',
-      'lavfi',
+      'rawvideo',
+      '-pix_fmt',
+      'yuv420p',
+      '-s',
+      `${TRIAL.width}x${TRIAL.height}`,
+      '-r',
+      '25',
       '-i',
-      'testsrc2=size=1280x720:rate=25:duration=0.04',
+      source,
+      '-frames:v',
+      '1',
       '-an',
       '-c:v',
       encoder,
@@ -575,9 +616,9 @@ export async function prepareFile(
       child = spawn(FFMPEG, args, {
         stdio: ['ignore', 'pipe', 'pipe'],
       });
-    } catch {
+    } catch (error) {
       void rm(directory, { recursive: true, force: true });
-      resolve({ kind: 'unavailable' });
+      resolve({ kind: 'unavailable', reason: systemSaid(error) });
       return;
     }
 
@@ -621,12 +662,14 @@ export async function prepareFile(
       }
     });
 
-    child.on('error', () => {
+    child.on('error', (error) => {
       stop?.removeEventListener('abort', onAbort);
       void rm(directory, { recursive: true, force: true });
       // A command that cannot be spawned at all is a machine without one, which
-      // is a different answer from a file it could not handle.
-      resolve({ kind: 'unavailable' });
+      // is a different answer from a file it could not handle — and *why* it
+      // could not be spawned is the difference between "install FFmpeg" and
+      // "something on this machine is holding it".
+      resolve({ kind: 'unavailable', reason: systemSaid(error) });
     });
 
     child.on('close', (code) => {

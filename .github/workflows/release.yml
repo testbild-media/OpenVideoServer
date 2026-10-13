@@ -153,6 +153,28 @@ jobs:
 
       - run: npm ci
 
+      # **The client's own code against the binary it is about to ship.**
+      #
+      # The check above asks whether the build has what the build script asked
+      # for. This asks the other question, and it is the one that went wrong:
+      # whether what the client *does* works with it. It fed its encoder trial
+      # through `-f lavfi -i testsrc2=...` and named its output `.mp4`, and this
+      # build has neither the device nor that muxer -- so every encoder was
+      # recorded as broken and no file could be prepared at all, on any machine.
+      # Nothing caught it, because the client's tests run on a machine with no
+      # vendored binary and skip themselves (owner, 2026-10-13, at a venue).
+      #
+      # The copy is what `build.mjs --release` does a step later anyway; doing
+      # it here is what lets the test find it.
+      - name: Check the client can use the FFmpeg it ships
+        shell: bash
+        run: |
+          mkdir -p clients/desktop/dist/bin
+          cp clients/desktop/vendor/ffmpeg/ffmpeg.exe \
+             clients/desktop/vendor/ffmpeg/ffprobe.exe \
+             clients/desktop/dist/bin/
+          npm run client:test --workspace @ovs/desktop
+
       # `--release` refuses to fall back to the npm FFmpeg. Belt and braces
       # with the check above: that one proves the vendored build is clean, and
       # this one proves the vendored build is the one that got packaged.

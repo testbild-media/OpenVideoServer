@@ -476,8 +476,16 @@ export type IngestFiles = Pick<
 export type PrepareOutcome =
   /** It worked, and the prepared file is here. */
   | { kind: 'prepared'; path: string }
-  /** There is no encoder on this machine. Nothing is guessed from that. */
-  | { kind: 'unavailable' }
+  /**
+   * The encoder could not be started at all.
+   *
+   * `reason` is what the system said, where it said anything: this is the one
+   * outcome whose message asserts something about the machine rather than
+   * about the file, and it was asserting it with nothing behind it. An
+   * evening was spent on "nothing answered to ffmpeg" from a client whose
+   * FFmpeg was present, ran, and listed its encoders (2026-10-13).
+   */
+  | { kind: 'unavailable'; reason?: string }
   /** There is one, and it could not do it. */
   | { kind: 'failed'; reason: string }
   /** It was stopped part way, because nobody wants the file any more. */
@@ -751,7 +759,9 @@ export class IngestQueue {
       this.#set(item, {
         at: 'undeclared',
         reason:
-          'This file is not in a form the server plays, and nothing on this machine answered to “ffmpeg” to convert it. Install it so it is on the path, or point OVS_FFMPEG at it — then this file prepares itself. Otherwise convert it to HEVC or HAP elsewhere, or say what it is and it will be sent as that.',
+          outcome.reason === undefined
+            ? 'This file is not in a form the server plays, and nothing on this machine answered to “ffmpeg” to convert it. Install it so it is on the path, or point OVS_FFMPEG at it — then this file prepares itself. Otherwise convert it to HEVC or HAP elsewhere, or say what it is and it will be sent as that.'
+            : `This file is not in a form the server plays, and the converter could not be started: ${outcome.reason}. Point OVS_FFMPEG at one that works, or convert it to HEVC or HAP elsewhere, or say what it is and it will be sent as that.`,
       });
       // No encoder on the machine will help, so there is no next backend.
       return { kind: 'over' };

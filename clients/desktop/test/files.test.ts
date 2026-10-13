@@ -16,12 +16,13 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 // Set before the module is loaded, because what to run is read once: this names
 // a command no machine has, which is the case the queue has to cope with.
 process.env['OVS_FFPROBE'] = 'ovs-no-such-prober';
 const { fileSize, hashFile, probeFile, readPart } = await import('../src/main/files.js');
+import { preparedName } from '../src/shared/encoder.js';
 
 // Where the build puts the pair it ships, and what the client computes from
 // `__dirname` when it is running out of `dist`.
@@ -105,4 +106,56 @@ describe('the FFmpeg the client brings with it', () => {
     const { stdout } = await run(bundled('ffprobe'), ['-hide_banner', '-version']);
     expect(stdout).toContain('ffprobe version');
   });
+
+  // **That it runs was never the question.** It ran, it had every encoder, and
+  // no file could be prepared with it on any machine: the build has
+  // `--disable-everything`, the client named its output `.mp4`, and `mp4` was
+  // not among the muxers. "Unable to choose an output format" is what an
+  // operator at a venue saw as "nothing on this machine answered to ffmpeg"
+  // (2026-10-13).
+  it.skipIf(!existsSync(bundled('ffmpeg')))(
+    'can write the containers this client names',
+    async () => {
+      const { stdout } = await run(bundled('ffmpeg'), ['-hide_banner', '-muxers']);
+      // What `preparedName` produces, asked of the binary rather than of the
+      // build script: the two disagreed, and the binary is the one that runs.
+      for (const profile of ['hevc_8', 'hevc_10', 'hap'] as const) {
+        const extension = preparedName('clip.mov', profile).split('.').pop();
+        const muxer = extension === 'mp4' ? 'mp4' : 'mov';
+        expect(stdout, `${profile} is written as .${extension}`).toMatch(
+          new RegExp(`^\\s*E\\s+${muxer}\\b`, 'm'),
+        );
+      }
+    },
+  );
+
+  // The trial the client runs before it trusts an encoder. It fed
+  // `-f lavfi -i testsrc2=...`, which this build has neither of, so every
+  // encoder on every machine was recorded as broken -- including `hap`, which
+  // needs no hardware at all and is the one this can insist on here.
+  it.skipIf(!existsSync(bundled('ffmpeg')))(
+    'can run the trial the client uses to decide what works',
+    async (ctx) => {
+      // Only against the build this client ships. A developer with their own
+      // FFmpeg in `dist/bin` has one without a HAP encoder, and the trial's
+      // answer there says nothing about ours.
+      const { stdout } = await run(bundled('ffmpeg'), ['-hide_banner', '-encoders']);
+      if (!/^\s*V[\w.]{5}\s+hap\b/m.test(stdout)) {
+        ctx.skip();
+        return;
+      }
+
+      // The module reads what to run once, when it loads, and it was loaded at
+      // the top of this file with no `OVS_FFMPEG` set -- so it found the one on
+      // the path. Against that binary this proves nothing: the question is
+      // about the one the client ships. A fresh registry is what lets the
+      // variable be read.
+      vi.resetModules();
+      process.env['OVS_FFMPEG'] = bundled('ffmpeg');
+      const fresh = await import('../src/main/files.js');
+
+      expect(await fresh.usableEncoders()).toContain('hap');
+    },
+    20_000,
+  );
 });
