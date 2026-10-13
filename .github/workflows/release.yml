@@ -84,8 +84,10 @@ jobs:
           update: true
           # `nasm` because a build without an assembler decodes several times
           # slower and the script refuses it. Snappy is what HAP needs, and HAP
-          # is the whole reason it is worth having. The header-only packages
-          # are the hardware encoders the client prefers over software.
+          # is the whole reason it is worth having. Kvazaar is the software HEVC
+          # encoder, which is the one path that is there on every machine. The
+          # header-only packages are the hardware encoders the client prefers
+          # over it.
           install: >-
             base-devel
             git
@@ -98,6 +100,7 @@ jobs:
             pkgconf
             mingw-w64-x86_64-toolchain
             mingw-w64-x86_64-snappy
+            mingw-w64-x86_64-kvazaar
             mingw-w64-x86_64-ffnvcodec-headers
             mingw-w64-x86_64-amf-headers
             mingw-w64-x86_64-libvpl

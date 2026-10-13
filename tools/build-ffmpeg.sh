@@ -207,8 +207,23 @@ readonly DECODERS="h264,hevc,av1,vp9,vp8,prores,hap,dnxhd,cfhd,mpeg2video,mpeg1v
 # `prores_ks` stays. Nothing produces ProRes for ingest any more, but the
 # encoder is FFmpeg's own, carries no third-party licence, and is what somebody
 # asked to hand a file to another system reaches for.
-encoders="hevc_nvenc,hevc_mf,hevc_qsv,hevc_amf,hap,prores_ks"
-configure_extra="--enable-libsnappy"
+# `libkvazaar` is the one that is always there.
+#
+# **Hardware where there is any, software always** (owner, 2026-10-13: "Software
+# Weg muss immer vorbereitet sein. Es koennte auf low budget Laptops laufen der
+# Client", and "Hardware Transcoding waere dann natuerlich immer der gewuenschte
+# weg, aber Software Transcoding muss als fallback immer gehen"). Every encoder
+# above needs a card, a driver or a Media Foundation transform; a laptop with
+# none of them could prepare nothing at all, and since the server takes HEVC and
+# HAP and nothing else, that laptop could upload nothing at all.
+#
+# Kvazaar rather than x265: x265 is GPL-2.0-or-later and cannot go inside a
+# client this repository publishes under Apache-2.0, and Kvazaar is
+# BSD-3-Clause. It is slower than x265 and far slower than any card, which is
+# why `clients/desktop/src/shared/encoder.ts` puts it last in its list and
+# reaches for it only when nothing else answered.
+encoders="hevc_nvenc,hevc_mf,hevc_qsv,hevc_amf,libkvazaar,hap,prores_ks"
+configure_extra="--enable-libsnappy --enable-libkvazaar"
 configure_extra="$configure_extra --enable-ffnvcodec --enable-nvenc"
 configure_extra="$configure_extra --enable-mediafoundation"
 configure_extra="$configure_extra --enable-libvpl --enable-amf"
@@ -345,8 +360,9 @@ verify() {
     done
   fi
 
-  # The licence material the LGPL requires to travel with the binaries.
-  for file in COPYING.LGPLv2.1 CONFIGURATION.txt; do
+  # The licence material the LGPL requires to travel with the binaries, and
+  # the BSD notices of what is linked into them.
+  for file in COPYING.LGPLv2.1 CONFIGURATION.txt THIRD-PARTY.txt; do
     if [ ! -s "$where/$file" ]; then
       echo "  MISSING $file" >&2
       failures=$((failures + 1))
@@ -404,7 +420,11 @@ verify() {
     local produced
     produced=$("${run[@]}" -hide_banner -encoders 2>/dev/null | awk '{print $2}')
     local needed
-    for needed in hevc_nvenc hevc_mf hap; do
+    # `libkvazaar` is in this list for the same reason `hap` is: it is a path
+    # the client depends on rather than a spare. A build that quietly lost it
+    # is a build that cannot prepare anything on a machine with no hardware
+    # encoder, which is the machine it exists for.
+    for needed in hevc_nvenc hevc_mf hap libkvazaar; do
       if ! printf '%s\n' "$produced" | grep -qx "$needed"; then
         echo "  no $needed encoder" >&2
         failures=$((failures + 1))
@@ -652,6 +672,32 @@ install -m 0644 "$source_dir/COPYING.LGPLv2.1" "$out/COPYING.LGPLv2.1"
     "$out/ffmpeg$EXE" -hide_banner -version 2>/dev/null | sed -n '/^configuration:/,$p' | head -1
   fi
 } > "$out/CONFIGURATION.txt"
+
+# The notices BSD-3-Clause asks to travel with a binary distribution.
+#
+# Snappy has been linked in since September and its notice never shipped; this
+# is that gap and Kvazaar's together. Taken from the packages themselves rather
+# than written out here, so what travels is the notice the library travels
+# with. A library whose package carries no licence file is named all the same:
+# an empty line in this file is a question somebody can answer, and a missing
+# name is not.
+{
+  echo "Third-party components linked into these binaries."
+  echo "FFmpeg itself is LGPL-2.1; its text is beside this file."
+  for library in snappy kvazaar; do
+    echo
+    echo "--- $library ---"
+    found=""
+    for licence in /mingw64/share/licenses/"$library"/* /usr/share/doc/"$library"/copyright; do
+      if [ -s "$licence" ]; then
+        cat "$licence"
+        found=yes
+        break
+      fi
+    done
+    [ -n "$found" ] || echo "(no licence file in the package this was built against)"
+  done
+} > "$out/THIRD-PARTY.txt"
 
 echo
 verify "$out"

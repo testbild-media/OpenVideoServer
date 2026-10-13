@@ -72,7 +72,16 @@ import {
  * nobody waits for a software HEVC encode. The first is answered — libx265 is
  * GPL-2.0-or-later and cannot go inside an Apache-2.0 client, but Kvazaar is
  * BSD-3-Clause and can. The second stands, which is why it sits at the end of
- * this list and why the owner's own words for it were "zur Not".
+ * this list -- hardware wherever there is any, software always (owner,
+ * 2026-10-13: "Hardware Transcoding waere dann natuerlich immer der gewuenschte
+ * weg, aber Software Transcoding muss als fallback immer gehen. Es koennte auf
+ * low budget Laptops laufen der Client").
+ *
+ * **Eight bits only**, which is a limit of the wrapper rather than a choice:
+ * FFmpeg's Kvazaar takes `yuv420p` and a ten-bit target asks for `p010le`. A
+ * ten-bit source on a machine with no hardware encoder therefore still has no
+ * way through, and says so by failing rather than by producing eight-bit
+ * quietly.
  */
 export const HEVC_BACKENDS = [
   'hevc_nvenc',
