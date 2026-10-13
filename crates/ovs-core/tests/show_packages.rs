@@ -354,6 +354,67 @@ async fn content_the_destination_already_has_is_relinked_rather_than_re_sent() {
 }
 
 #[tokio::test]
+async fn a_picture_used_only_as_a_mask_travels_and_is_relinked_like_any_other() {
+    // **The one way a show can name a picture that is not a slot.** A package
+    // is built from what the show references, and an import points what it
+    // references at the local copy; a mask that neither looked at would arrive
+    // at a festival naming an identifier from the machine it was built on, and
+    // the layer would come up unmasked with nothing to say why.
+    let origin = Server::start().await;
+    let clip = origin.ingest(&png([10, 20, 30, 255]), None).await;
+    let stencil_pixels = png([200, 200, 200, 255]);
+    let stencil = origin.ingest(&stencil_pixels, None).await;
+
+    let mut show = origin.make_show(clip).await;
+    let mut masking = ovs_types::config::EffectInstance::new("ovs.mask", 1);
+    masking.parameters.insert(
+        "image".to_owned(),
+        ovs_types::config::slot::ParameterValue::Text(stencil.to_string()),
+    );
+    show.layers[0].effects.push(masking);
+    let (status, body) = origin
+        .put(
+            &format!("/api/v1/shows/{}", show.id),
+            &SaveShowRequest { show: show.clone() },
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let (_, body) = origin
+        .get(&format!("/api/v1/shows/{}/export", show.id))
+        .await;
+    let package: ShowExport = serde_json::from_value(body).expect("a package");
+    assert_eq!(
+        package.media.len(),
+        2,
+        "the package carries the clip and the stencil"
+    );
+
+    // The destination already holds the same stencil under its own identifier.
+    let destination = Server::start().await;
+    let local = destination.ingest(&stencil_pixels, None).await;
+    assert_ne!(local, stencil, "a different item on this server");
+
+    let (status, body) = destination.post("/api/v1/shows/import", &package).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+
+    let imported = destination
+        .state
+        .with_database(|database| database.load_show(show.id))
+        .expect("the show is here");
+    let effect = &imported.layers[0].effects[0];
+    let named = effect
+        .parameters
+        .get("image")
+        .expect("the mask still names a picture");
+    assert_eq!(
+        *named,
+        ovs_types::config::slot::ParameterValue::Text(local.to_string()),
+        "the mask points at the copy this server holds"
+    );
+}
+
+#[tokio::test]
 async fn importing_the_same_package_twice_changes_nothing_the_second_time() {
     // An operator who is not sure whether the import worked will do it again.
     let origin = Server::start().await;

@@ -205,13 +205,49 @@ pub async fn import(
 }
 
 /// Points every reference to `from` at `to`.
+///
+/// Every way a show can name a picture, which is two: what a slot plays, and
+/// what an effect was given. A show imported with only the first relinked would
+/// carry a mask pointing at the identifier it had on the machine it came from.
 fn relink(show: &mut Show, from: MediaItemId, to: MediaItemId) {
     for layer in &mut show.layers {
+        relink_chain(&mut layer.effects, from, to);
         for slot in &mut layer.slots {
             if let SourceRef::Media { media_item_id } = &mut slot.source {
                 if *media_item_id == from {
                     *media_item_id = to;
                 }
+            }
+            relink_chain(&mut slot.effects, from, to);
+        }
+    }
+}
+
+/// Points a chain's picture parameters at the local copy.
+fn relink_chain(
+    chain: &mut [ovs_types::config::EffectInstance],
+    from: MediaItemId,
+    to: MediaItemId,
+) {
+    for instance in chain {
+        let Some(manifest) =
+            ovs_types::config::effects::manifest(&instance.type_id, instance.version)
+        else {
+            // An effect this build does not publish keeps whatever it was
+            // saved with: its parameters are not ours to read, and rewriting
+            // one by guessing which of them names a picture would be worse
+            // than leaving it.
+            continue;
+        };
+        for parameter in manifest.parameters {
+            if !matches!(parameter.kind, ovs_types::config::ParameterKind::Image) {
+                continue;
+            }
+            if manifest.media(&instance.parameters, parameter.key) == Some(from) {
+                instance.parameters.insert(
+                    parameter.key.to_owned(),
+                    ovs_types::config::slot::ParameterValue::Text(to.to_string()),
+                );
             }
         }
     }

@@ -130,6 +130,16 @@ impl EffectManifest {
     ///
     /// Empty only where the key is not a choice at all: a choice always has a
     /// default, so a show that validated against this manifest has an answer.
+    /// Returns the media item a picture parameter names, where it names one.
+    #[must_use]
+    pub fn media(&self, values: &ParameterMap, key: &str) -> Option<MediaItemId> {
+        match self.value(values, key) {
+            Some(ParameterValue::Text(name)) => name.parse().ok(),
+            _ => None,
+        }
+    }
+
+    /// Returns the value for a key as a choice, or an empty string.
     #[must_use]
     pub fn choice(&self, values: &ParameterMap, key: &str) -> String {
         match self.value(values, key) {

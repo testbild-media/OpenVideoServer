@@ -347,11 +347,50 @@ impl Show {
     /// built on.
     #[must_use]
     pub fn referenced_media(&self) -> BTreeSet<MediaItemId> {
-        self.layers
+        let mut referenced: BTreeSet<MediaItemId> = self
+            .layers
             .iter()
             .flat_map(|layer| layer.slots.iter())
             .filter_map(crate::config::slot::Slot::media_item_id)
-            .collect()
+            .collect();
+
+        // And the pictures the effects name. A slot was the only way a show
+        // could name one until the Mask effect, and the two things this list is
+        // built on are exactly the two that would be wrong: a package without
+        // the mask in it, and a deletion that reported the picture as used by
+        // nobody.
+        for layer in &self.layers {
+            Self::pictures_of(&layer.effects, &mut referenced);
+            for slot in &layer.slots {
+                Self::pictures_of(&slot.effects, &mut referenced);
+            }
+        }
+        referenced
+    }
+
+    /// Every picture a chain's effects name.
+    ///
+    /// Through the manifest rather than by looking for a key called `image`:
+    /// which parameters name a picture is the effect's own declaration, so an
+    /// effect added later needs nothing here.
+    fn pictures_of(chain: &[crate::config::EffectInstance], into: &mut BTreeSet<MediaItemId>) {
+        for instance in chain {
+            let Some(manifest) =
+                crate::config::effects::manifest(&instance.type_id, instance.version)
+            else {
+                // An effect this build does not publish. Its parameters are not
+                // ours to read, so nothing is claimed about what it names.
+                continue;
+            };
+            for parameter in manifest.parameters {
+                if !matches!(parameter.kind, crate::config::ParameterKind::Image) {
+                    continue;
+                }
+                if let Some(media_item_id) = manifest.media(&instance.parameters, parameter.key) {
+                    into.insert(media_item_id);
+                }
+            }
+        }
     }
 
     /// Returns layers in composite order, bottom first.
@@ -700,6 +739,63 @@ mod tests {
         assert_eq!(referenced.len(), 2);
         assert!(referenced.contains(&shared));
         assert!(referenced.contains(&other));
+    }
+
+    #[test]
+    fn a_picture_an_effect_masks_with_is_referenced_media() {
+        // **What this list is for decides this.** It is what a package is built
+        // from and what "which shows use this?" is answered with before a
+        // deletion, so a picture that is only ever a mask would be left out of
+        // the package and reported as used by nobody — and the operator who
+        // then deleted it would have broken a show that was working.
+        let stencil = MediaItemId::new();
+        let clip = MediaItemId::new();
+        let mut show = Show::new("Show");
+        let mut layer = Layer::new("Layer 1", 0);
+
+        let mut on_the_layer = crate::config::EffectInstance::new("ovs.mask", 1);
+        on_the_layer.parameters.insert(
+            "image".to_owned(),
+            crate::config::slot::ParameterValue::Text(stencil.to_string()),
+        );
+        layer.effects.push(on_the_layer);
+
+        // And one on a slot, because a chain hangs off both.
+        let other = MediaItemId::new();
+        let mut on_a_slot = crate::config::EffectInstance::new("ovs.mask", 1);
+        on_a_slot.parameters.insert(
+            "image".to_owned(),
+            crate::config::slot::ParameterValue::Text(other.to_string()),
+        );
+        let mut slot = Slot::media(1, clip);
+        slot.effects.push(on_a_slot);
+        layer.slots.push(slot);
+        show.layers.push(layer);
+
+        let referenced = show.referenced_media();
+        assert!(
+            referenced.contains(&stencil),
+            "the layer's mask: {referenced:?}"
+        );
+        assert!(
+            referenced.contains(&other),
+            "the slot's mask: {referenced:?}"
+        );
+        assert!(referenced.contains(&clip), "and what the slot plays");
+    }
+
+    #[test]
+    fn an_effect_with_no_picture_chosen_references_nothing() {
+        // The default is no picture, and "no picture" must not read as an
+        // identifier of twenty-six zeroes or as an empty name in the list.
+        let mut show = Show::new("Show");
+        let mut layer = Layer::new("Layer 1", 0);
+        layer
+            .effects
+            .push(crate::config::EffectInstance::new("ovs.mask", 1));
+        show.layers.push(layer);
+
+        assert!(show.referenced_media().is_empty());
     }
 
     #[test]
