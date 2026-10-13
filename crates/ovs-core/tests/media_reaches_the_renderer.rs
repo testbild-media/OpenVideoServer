@@ -207,6 +207,114 @@ fn a_registered_still_becomes_a_texture_on_an_output() {
 }
 
 #[test]
+fn a_picture_only_a_live_value_names_reaches_the_renderer() {
+    // **The gap the Mask effect found** (on the machine, 2026-10-13). The
+    // catalogue the renderer is sent is resolved from what the show document
+    // references, and an operator picking a mask in the live panel has saved
+    // nothing — so the value arrived, the pass ran, and the renderer had never
+    // been told where the file was. What it drew was the white default, which
+    // is a mask that does nothing: the layer came up unmasked with no fault
+    // anywhere to explain it.
+    let directory = tempfile::tempdir().expect("a temporary directory");
+    let media_root = directory.path().join("media");
+    let store = MediaStore::new(&media_root);
+    store.ensure_root().expect("creates the store");
+
+    let database = Database::open(directory.path().join("ovs.db")).expect("opens");
+    let state = AppState::with_media_root(database, "0.0.1-test", &media_root);
+    let clip = register_still(&state, &store, &"a".repeat(64));
+    let stencil = register_still(&state, &store, &"b".repeat(64));
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("binds");
+    let address = listener.local_addr().expect("has an address").to_string();
+    let shared = Arc::new(SharedShowState::new());
+    let running = Arc::new(AtomicBool::new(true));
+
+    let control_state = Arc::clone(&shared);
+    let control_running = Arc::clone(&running);
+    let control_thread = std::thread::Builder::new()
+        .name("test-control".to_owned())
+        .spawn(move || {
+            let _ = control::serve(&listener, &control_state, &control_running);
+        })
+        .expect("spawns");
+
+    let link_state = state.clone();
+    let link_address = address.clone();
+    let link_running = Arc::clone(&running);
+    let link_thread = std::thread::Builder::new()
+        .name("test-link".to_owned())
+        .spawn(move || renderer_link::run(&link_state, &link_address, &link_running))
+        .expect("spawns");
+
+    let live = Running {
+        running: Arc::clone(&running),
+        address: address.clone(),
+        threads: vec![control_thread, link_thread],
+    };
+
+    // A show with a mask on the layer and no picture in it, which is what
+    // dragging the effect onto a layer gives you.
+    let (mut show, layer_id) = show_using(clip);
+    let masking = ovs_types::config::EffectInstance::new("ovs.mask", 1);
+    let effect_instance_id = masking.id;
+    show.layers[0].effects.push(masking);
+    state.mutate_state(|current| {
+        let change = current.load_show(show, None);
+        ((), Some(change))
+    });
+    state.mutate_state(|current| {
+        let change = current.select_slot(layer_id, 1).expect("a real slot");
+        ((), change)
+    });
+
+    // And the picture chosen live, which is the whole point: nothing is saved.
+    let overrides = ovs_types::config::ParameterMap::from([(
+        "image".to_owned(),
+        ovs_types::config::slot::ParameterValue::Text(stencil.to_string()),
+    )]);
+    state.mutate_state(|current| {
+        let applied = current.set_effect_parameters(effect_instance_id, &overrides, false);
+        match applied {
+            Ok(change) => ((), change),
+            Err(error) => panic!("the live value was refused: {error}"),
+        }
+    });
+
+    let epoch = Instant::now();
+    let outputs: Vec<Box<dyn OutputBackend>> = vec![Box::new(HeadlessBackend::new(
+        "Wall",
+        DisplayMode::new(SizePx::new(1920, 1080), FrameRate::FPS_60),
+    ))];
+    let mut render = RenderLoop::new(
+        Box::new(|size| Ok(Box::new(HeadlessCompositor::sized(size)) as Box<dyn Compositor>)),
+        outputs,
+        Arc::clone(&shared),
+        epoch,
+    )
+    .expect("valid rates");
+
+    let frame = Duration::from_nanos(
+        FrameRate::FPS_60
+            .frame_duration_nanos()
+            .expect("valid rate"),
+    );
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut index = 0_u32;
+    while !render.media_is_resident(stencil) {
+        render.tick(epoch + frame * index + frame / 2);
+        assert!(
+            Instant::now() < deadline,
+            "the picture a live value named never reached the card"
+        );
+        index += 1;
+        std::thread::sleep(Duration::from_millis(1));
+    }
+
+    live.stop();
+}
+
+#[test]
 fn media_the_core_cannot_resolve_leaves_the_show_running() {
     // An asset registered against a file that is not there is what a
     // half-restored backup looks like. The renderer must keep presenting, and

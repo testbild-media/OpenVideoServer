@@ -427,6 +427,14 @@ fn pump(
                     StateChange::ShowLoaded { show, .. } => {
                         Some(media_catalogue(state, show.as_deref()))
                     }
+                    // A live value can name a picture the document does not,
+                    // and the renderer cannot draw a file it was never told
+                    // about. Resolved from the show as it stands, because this
+                    // change did not carry one.
+                    StateChange::EffectChanged { overrides, .. } if names_a_picture(overrides) => {
+                        let show = state.with_state(|current| current.show().cloned());
+                        Some(media_catalogue(state, show.as_ref()))
+                    }
                     _ => None,
                 };
 
@@ -517,7 +525,8 @@ fn media_catalogue(state: &AppState, show: Option<&Show>) -> Vec<MediaLocation> 
         return Vec::new();
     };
 
-    let referenced = show.referenced_media();
+    let mut referenced = show.referenced_media();
+    live_pictures(state, show, &mut referenced);
     state.with_database(|database| {
         referenced
             .iter()
@@ -548,6 +557,64 @@ fn media_catalogue(state: &AppState, show: Option<&Show>) -> Vec<MediaLocation> 
                 })
             })
             .collect()
+    })
+}
+
+/// Adds the pictures live values name to what the renderer will be told about.
+///
+/// **A live value is not in the document.** An operator who picks a mask in the
+/// live panel has saved nothing, so `referenced_media` does not mention the
+/// picture — and a renderer that was never told where the file is cannot draw
+/// it, however correctly the value itself arrived. That is exactly what it did:
+/// the effect ran against the white default and the layer came up unmasked
+/// (found on the machine, 2026-10-13).
+///
+/// Which parameters name a picture is the effect's own declaration, so an
+/// effect added later needs nothing here.
+fn live_pictures(
+    state: &AppState,
+    show: &Show,
+    into: &mut std::collections::BTreeSet<ovs_types::id::MediaItemId>,
+) {
+    let live = state.with_state(|current| current.snapshot().effects);
+    for (effect_instance_id, values) in &live {
+        let Some(instance) = crate::state::effect_instance(show, *effect_instance_id) else {
+            continue;
+        };
+        let Some(manifest) =
+            ovs_types::config::effects::manifest(&instance.type_id, instance.version)
+        else {
+            continue;
+        };
+        for parameter in manifest.parameters {
+            if !matches!(parameter.kind, ovs_types::config::ParameterKind::Image) {
+                continue;
+            }
+            // The live value if there is one, and what the show configured
+            // otherwise: this is the same order the renderer reads them in.
+            if let Some(media_item_id) = manifest
+                .live_over(&instance.parameters, Some(values))
+                .media(parameter.key)
+            {
+                into.insert(media_item_id);
+            }
+        }
+    }
+}
+
+/// Whether a live change names something that might be a picture.
+///
+/// Asked of every live effect change, and a console sends those forty-four
+/// times a second, so it is answered from the values in the change itself and
+/// never from the database. It over-answers on purpose: a value that merely
+/// looks like an identifier costs one catalogue, and a value that is one must
+/// never be missed.
+fn names_a_picture(parameters: &ovs_types::config::ParameterMap) -> bool {
+    parameters.values().any(|value| match value {
+        ovs_types::config::slot::ParameterValue::Text(name) => {
+            name.parse::<ovs_types::id::MediaItemId>().is_ok()
+        }
+        _ => false,
     })
 }
 

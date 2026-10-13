@@ -959,7 +959,10 @@ fn generator_instance(
         })
 }
 
-fn effect_instance(show: &Show, effect_instance_id: EffectInstanceId) -> Option<&EffectInstance> {
+pub(crate) fn effect_instance(
+    show: &Show,
+    effect_instance_id: EffectInstanceId,
+) -> Option<&EffectInstance> {
     show.layers
         .iter()
         .flat_map(|layer| {
