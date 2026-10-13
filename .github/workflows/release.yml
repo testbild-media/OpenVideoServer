@@ -263,6 +263,24 @@ jobs:
           name: windows-client
           path: dist/client
 
+      # The package carries one beside it, and the installer carried none:
+      # somebody whose download arrived short had no way to tell that from a
+      # build that does not run, which is exactly the question that came back
+      # from a venue (2026-10-13).
+      - name: Hash the Windows installer
+        shell: bash
+        run: |
+          shopt -s nullglob
+          mkdir -p dist/checksums
+          for file in dist/client/*.exe; do
+            # Beside the release rather than in `dist/client`: everything in
+            # that directory goes into the package and is offered on the
+            # server's own download page, which is meant to have one button on
+            # it. The checksum answers a question about a download from GitHub.
+            (cd dist/client && sha256sum "$(basename "$file")") > "dist/checksums/$(basename "$file").sha256"
+            cat "dist/checksums/$(basename "$file").sha256"
+          done
+
       - name: Say what the package will carry
         shell: bash
         run: |
@@ -345,4 +363,5 @@ jobs:
             target/package/*.deb
             target/package/*.sha256
             dist/client/*.exe
+            dist/checksums/*.sha256
           generate_release_notes: true
