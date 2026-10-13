@@ -170,13 +170,31 @@ jobs:
       # The copy is what `build.mjs --release` does a step later anyway; doing
       # it here is what lets the test find it.
       - name: Check the client can use the FFmpeg it ships
+        id: client-against-its-ffmpeg
         shell: bash
         run: |
           mkdir -p clients/desktop/dist/bin
           cp clients/desktop/vendor/ffmpeg/ffmpeg.exe \
              clients/desktop/vendor/ffmpeg/ffprobe.exe \
              clients/desktop/dist/bin/
-          npm run client:test --workspace @ovs/desktop
+          npm run client:test --workspace @ovs/desktop 2>&1 | tee /tmp/client-test.log
+          exit "${PIPESTATUS[0]}"
+
+      # Said as an annotation, because a log needs an account and an annotation
+      # does not -- the same reason the FFmpeg step above says its piece this
+      # way. A check whose failure cannot be read is a check that costs a round
+      # trip to find out anything at all.
+      - name: Say what the client made of it
+        if: failure() && steps.client-against-its-ffmpeg.outcome == 'failure'
+        shell: bash
+        run: |
+          if [ -f /tmp/client-test.log ]; then
+            printf '::error title=%s::%s\n' 'client against its own FFmpeg' \
+              "$(sed -e 's/%/%25/g' -e 's/\r$//' /tmp/client-test.log | tail -n 60 | awk '{ printf "%s%%0A", $0 }')"
+          else
+            echo '::error title=client against its own FFmpeg::The step wrote no log, so it died before the tests started.'
+          fi
+          exit 0
 
       # `--release` refuses to fall back to the npm FFmpeg. Belt and braces
       # with the check above: that one proves the vendored build is clean, and

@@ -252,6 +252,8 @@ describe('the FFmpeg the client brings with it', () => {
 
       expect(await fresh.usableEncoders()).toContain('hap');
     },
-    20_000,
+    // Five encoders, each a process that has to start, fail and be waited on:
+    // on a runner with no hardware at all that is slow rather than quick.
+    120_000,
   );
 });
