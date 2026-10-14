@@ -418,11 +418,29 @@ async function encodesOneFrame(encoder: string): Promise<boolean> {
   const TRIAL = { width: 1280, height: 720 };
   const rate = { numerator: 25, denominator: 1 };
   try {
-    // Mid grey in Y, Cb and Cr alike: one byte repeated is a legal picture in
-    // this format, and what it looks like does not matter. Exactly one frame,
-    // which is what makes `-frames:v` unnecessary: the demuxer stops when the
-    // file does.
-    await writeFile(source, Buffer.alloc((TRIAL.width * TRIAL.height * 3) / 2, 128));
+    // **A gradient rather than flat grey, because what it looks like turned
+    // out to matter.** A uniform picture compresses to almost nothing: the
+    // trial wrote a one-kilobyte container, and the size check below — which
+    // exists because Media Foundation writes a container with no video in it
+    // and then fails — rejected a perfectly good encoder for it. Measured
+    // against FFmpeg 6.1 on 2026-10-14, where it cost `hevc_nvenc` its place
+    // on a machine that has one. A gradient costs a loop to make and leaves
+    // that threshold nowhere near the edge.
+    //
+    // Exactly one frame, which is what makes `-frames:v` unnecessary: the
+    // rawvideo demuxer stops when the file does.
+    const luma = Buffer.alloc(TRIAL.width * TRIAL.height);
+    for (let row = 0; row < TRIAL.height; row += 1) {
+      for (let column = 0; column < TRIAL.width; column += 1) {
+        luma[row * TRIAL.width + column] = (column * 7 + row * 3) & 0xff;
+      }
+    }
+    // Mid grey in Cb and Cr: a gradient in luma alone is a legal picture and
+    // the colour of it is not what is being asked about.
+    await writeFile(
+      source,
+      Buffer.concat([luma, Buffer.alloc((TRIAL.width * TRIAL.height) / 2, 128)]),
+    );
     // **The arguments a real encode would use, not a reduced set of them.**
     // This asked `-c:v libkvazaar` and nothing else, so Kvazaar passed the
     // trial and then refused every file the client gave it: the settings it

@@ -374,6 +374,54 @@ describe('how far an encode has got', () => {
   });
 });
 
+describe('the colour tags, which every backend gets wrong differently', () => {
+  /** Where `-i` is, which is the line between the two halves of a command. */
+  function sides(args: readonly string[]): { readAs: string[]; writes: string[] } {
+    const at = args.indexOf('-i');
+    return { readAs: args.slice(0, at), writes: args.slice(at + 2) };
+  }
+
+  it('tells the decoder the tags as well as the encoder', () => {
+    // Since FFmpeg 7 the encoder takes them from the frame, and the filter
+    // graph carries only the two swscale can convert. Measured on 2026-10-14:
+    // with them on the output alone, `hevc_nvenc` wrote a file with no
+    // primaries and no transfer characteristics, which the server refuses.
+    const { readAs, writes } = sides(
+      hevcArguments('in.mp4', 'out.mp4', 'hevc_nvenc', 8, { numerator: 25, denominator: 1 }, {
+        primaries: 'bt470bg',
+        transfer: 'smpte170m',
+        matrix: 'smpte170m',
+        range: 'pc',
+      }),
+    );
+    for (const half of [readAs, writes]) {
+      expect(half[half.indexOf('-color_primaries') + 1]).toBe('bt470bg');
+      expect(half[half.indexOf('-color_trc') + 1]).toBe('smpte170m');
+      expect(half[half.indexOf('-colorspace') + 1]).toBe('smpte170m');
+      expect(half[half.indexOf('-color_range') + 1]).toBe('pc');
+    }
+  });
+
+  it('keeps the demuxer options the trial needs in front of them', () => {
+    // The trial reads a headerless frame, so its own options have to come
+    // first; both end up before `-i`, which is the only place FFmpeg takes
+    // either.
+    const { readAs } = sides(
+      hevcArguments(
+        'trial.yuv',
+        'trial.mp4',
+        'libkvazaar',
+        8,
+        { numerator: 25, denominator: 1 },
+        CONVENTIONAL_TAGS,
+        ['-f', 'rawvideo', '-s', '1280x720'],
+      ),
+    );
+    expect(readAs.indexOf('-f')).toBeLessThan(readAs.indexOf('-color_primaries'));
+    expect(readAs[readAs.indexOf('-s') + 1]).toBe('1280x720');
+  });
+});
+
 describe('the software encoder, which is the one every machine has', () => {
   /** The `key=value` pairs out of the one string Kvazaar takes. */
   function settings(rate: { numerator: number; denominator: number }): Map<string, string> {

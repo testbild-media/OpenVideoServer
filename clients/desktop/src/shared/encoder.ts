@@ -215,14 +215,31 @@ export function hevcArguments(
 ): string[] {
   const keyframes = keyframeArguments(backend, rate);
 
-  return [
-    ...common(from, readAs),
-    '-c:v',
-    backend,
-    ...qualityArguments(backend, MOST_BITS_PER_SECOND, rate, tags),
-    '-pix_fmt',
-    PIXEL_FORMAT[depth],
-    ...keyframes,
+  // **Said twice, to the decoder and to the encoder.** Since FFmpeg 7 an
+  // encoder takes its colour properties from the frame the filter graph hands
+  // it, not from the options on its own command line. The graph negotiates the
+  // two that swscale can convert — the matrix and the range — and leaves the two
+  // it cannot: a frame decoded from an untagged file arrives with its primaries
+  // and transfer still "unspecified", and that is what the encoder writes.
+  //
+  // Measured on this machine, 2026-10-14, 1080p25 through `hevc_nvenc` with the
+  // binary 0.2.19 ships, reading the four tags back off what came out:
+  //
+  // | source untagged, tags given        | primaries | transfer | matrix | range |
+  // |------------------------------------|-----------|----------|--------|-------|
+  // | on the output only, as it was      | *missing* | *missing*| bt709  | tv    |
+  // | on the input as well               | bt709     | bt709    | bt709  | tv    |
+  //
+  // The first of those is a file the server refuses, so **every untagged source
+  // on a machine with a hardware encoder** — a render, a screen recording,
+  // anything out of a tool that does not tag — failed the contract after a
+  // successful encode. Kvazaar escaped it only because its tags go in its own
+  // parameter string, which is the one thing FFmpeg passes through untouched.
+  //
+  // Telling the decoder restates what a tagged file already says and gives an
+  // untagged one the convention, which is `tagsFor`'s decision and not a new
+  // one made here.
+  const colour = [
     '-color_range',
     tags.range,
     '-colorspace',
@@ -231,6 +248,17 @@ export function hevcArguments(
     tags.primaries,
     '-color_trc',
     tags.transfer,
+  ];
+
+  return [
+    ...common(from, [...readAs, ...colour]),
+    '-c:v',
+    backend,
+    ...qualityArguments(backend, MOST_BITS_PER_SECOND, rate, tags),
+    '-pix_fmt',
+    PIXEL_FORMAT[depth],
+    ...keyframes,
+    ...colour,
     '-r',
     rateAsArgument(rate),
     // `hvc1` rather than `hev1`, which is the tag every player outside this

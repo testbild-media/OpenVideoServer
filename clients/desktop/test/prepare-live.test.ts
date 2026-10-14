@@ -23,7 +23,8 @@
 import { execFile } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -66,6 +67,52 @@ afterAll(async () => {
   }
 });
 
+/**
+ * A clip the server will not take, that any FFmpeg can read.
+ *
+ * **The committed one, not a rendered one.** `makeSource` builds its sources
+ * with `-f lavfi -i testsrc2=...`, and the FFmpeg this client *ships* is built
+ * `--disable-everything`: it has neither that input nor that filter. So every
+ * test below that rendered its own source could only ever run against a
+ * developer's FFmpeg -- which on this machine is 6.1, while what ships is
+ * 7.1.1, and the two differ in exactly the behaviour that broke the hardware
+ * path (2026-10-14: an encoder in 7.x takes its colour properties from the
+ * frame, so `-color_primaries` on the output alone is dropped). The suite
+ * passed and the product wrote untagged files.
+ *
+ * 320x240 H.264, untagged, fifteen-frame GOP: refused on the codec clause, and
+ * untagged on purpose, because an untagged source is the case that goes wrong.
+ */
+function theRefusedClip(): string {
+  return join(dirname(fileURLToPath(import.meta.url)), 'media', 'refused-h264.mp4');
+}
+
+/** Whether this FFmpeg can render a source of its own. */
+async function canRender(): Promise<boolean> {
+  try {
+    await run(FFMPEG, [
+      '-nostdin',
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-f',
+      'lavfi',
+      '-i',
+      'testsrc2=size=64x64:rate=5:duration=0.2',
+      '-frames:v',
+      '1',
+      '-f',
+      'null',
+      '-',
+    ]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const rendering = available ? await canRender() : false;
+
 /** Renders a short clip the server will not take as it stands. */
 async function makeSource(name: string, args: readonly string[]): Promise<string> {
   const path = join(directory, name);
@@ -104,8 +151,7 @@ describe.skipIf(!available)('preparing a file with the FFmpeg on this machine', 
   it('reads a file closely enough to say whether the server would take it', async () => {
     // The whole policy starts here. An H.264 file is not one of the three, and
     // saying so is a codec fault and nothing else.
-    const source = await makeSource('opener.mp4', ['-c:v', 'libx264', '-pix_fmt', 'yuv420p']);
-    const video = await readFully(source);
+    const video = await readFully(theRefusedClip());
 
     expect(video.codec).toBe('h264');
     expect(faults(video, 'hevc_8').map((fault) => fault.what)).toEqual(['codec']);
@@ -126,16 +172,11 @@ describe.skipIf(!available)('preparing a file with the FFmpeg on this machine', 
   // happens to have. What protects an operator from the same gap is that a
   // backend which fails is followed by the next one, which `ingest.test.ts`
   // covers without needing the silicon.
-  for (const backend of ['hevc_nvenc', 'hevc_mf'] as const) {
+  for (const backend of ['hevc_nvenc', 'hevc_mf', 'libkvazaar'] as const) {
     it.skipIf(!encoders.has(backend))(
       `produces a file the server accepts, with ${backend}`,
       async () => {
-        const source = await makeSource(`source-${backend}.mp4`, [
-          '-c:v',
-          'libx264',
-          '-pix_fmt',
-          'yuv420p',
-        ]);
+        const source = theRefusedClip();
 
         const seen: number[] = [];
         const outcome = await prepareFile(
@@ -178,7 +219,9 @@ describe.skipIf(!available)('preparing a file with the FFmpeg on this machine', 
     );
   }
 
-  it.skipIf(!encoders.has('hap'))('turns alpha into HAP Alpha, which the server takes', async () => {
+  it.skipIf(!encoders.has('hap') || !rendering)(
+    'turns alpha into HAP Alpha, which the server takes',
+    async () => {
     // The other half of the routing. A file with alpha has nowhere to go but
     // HAP: HEVC would drop it, and dropping alpha silently is the kind of
     // conversion this whole policy exists to prevent.
@@ -220,9 +263,11 @@ describe.skipIf(!available)('preparing a file with the FFmpeg on this machine', 
     } finally {
       await discardFile(outcome.path);
     }
-  }, 120_000);
+    },
+    120_000,
+  );
 
-  it('measures a keyframe interval a header would not give', async () => {
+  it.skipIf(!rendering)('measures a keyframe interval a header would not give', async () => {
     // The one clause no header carries, and the one most "already HEVC" files
     // fail. Two seconds at 25 with a five-second GOP is one keyframe: the
     // whole file.
@@ -258,15 +303,19 @@ describe.skipIf(!available)('preparing a file with the FFmpeg on this machine', 
   it('knows what this machine can encode, from the binary rather than the build', async () => {
     const names = await usableEncoders();
     expect(names.length).toBeGreaterThan(0);
-    // Whatever else it has, an FFmpeg has these.
-    expect(names).toContain('mjpeg');
+    // **No named encoder here, deliberately.** It asserted `mjpeg`, which the
+    // build this client ships does not have; `libkvazaar` would be the same
+    // mistake the other way round, since a developer's FFmpeg does not have
+    // that. Either one asserts which FFmpeg happens to be on the path rather
+    // than anything about this code. What the shipped build must contain is
+    // the build script's business, and `--check` refuses one without a
+    // software encoder in it.
   });
 
   it.skipIf(backendsAvailable(encoders).length > 0)(
     'says so rather than producing something else, on a machine with no HEVC encoder',
     async () => {
-      const source = await makeSource('no-backend.mp4', ['-c:v', 'libx264', '-pix_fmt', 'yuv420p']);
-      const video = await readFully(source);
+      const video = await readFully(theRefusedClip());
       const decided: ReturnType<typeof planFor> = planFor(video, encoders);
       expect(decided.kind).toBe('unavailable');
       if (decided.kind !== 'unavailable') {
