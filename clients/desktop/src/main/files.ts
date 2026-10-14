@@ -14,6 +14,7 @@
 
 import { execFile, spawn } from 'node:child_process';
 
+import { bundledCandidates } from '../shared/bundled-binary.js';
 import { probeFailure } from '../shared/probe-failure.js';
 import { createHash } from 'node:crypto';
 import { createReadStream, existsSync } from 'node:fs';
@@ -83,16 +84,15 @@ function locate(name: string, variable: string): string {
 /**
  * The copy shipped beside this file, when there is one.
  *
- * Electron serves a packaged app out of an archive, and an executable inside
- * one cannot be run — the packaging has to leave `bin/` unpacked, and then the
- * path to it is the archive's path with `.unpacked` on the end. Both are tried
- * rather than asking which case this is, because the answer is a file that
- * exists or does not.
+ * `bundledCandidates` carries the reasoning, which is worth reading: inside a
+ * packaged app this file lives in an archive, `existsSync` answers for paths
+ * inside it, and the one thing that cannot be done with a file in there is run
+ * it.
  */
 function beside(name: string): string | null {
   const suffix = process.platform === 'win32' ? '.exe' : '';
   const here = join(__dirname, 'bin', `${name}${suffix}`);
-  for (const candidate of [here, here.replace(`app.asar${sep}`, `app.asar.unpacked${sep}`)]) {
+  for (const candidate of bundledCandidates(here, sep)) {
     if (existsSync(candidate)) {
       return candidate;
     }

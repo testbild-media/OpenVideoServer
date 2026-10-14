@@ -310,6 +310,29 @@ jobs:
           npm run dist:win --workspace @ovs/desktop -- \
             --config.extraMetadata.version="$upstream-$OVS_PACKAGE_REVISION"
 
+      # **The packaged client, asked where it would run its own FFmpeg from.**
+      #
+      # Everything above this runs the client out of its source tree, where
+      # `dist/bin` is an ordinary directory. In the package it is inside
+      # `app.asar`, Electron patches `fs` to read in there, and the one thing
+      # that cannot be done with a file inside an archive is run it: the lookup
+      # asked whether the archive copy was there, was told yes, and every
+      # `spawn` afterwards failed with `ENOENT` on a file that is plainly
+      # present. The client shipped that way from 0.2.0 to 0.2.20 and told
+      # operators "nothing on this machine answered to 'ffmpeg'".
+      #
+      # Run by the packaged Electron rather than by node, because that patch is
+      # the whole point: under plain node the archive path simply does not
+      # exist, the unpacked one is taken by default, and this would pass while
+      # the product failed.
+      - name: Check the packaged client can start its own FFmpeg
+        shell: bash
+        env:
+          ELECTRON_RUN_AS_NODE: '1'
+        run: |
+          build/client/win-unpacked/OpenVideoServer.exe \
+            tools/packaged-binary-check.cjs build/client/win-unpacked
+
       - name: Say what it is called
         shell: bash
         run: ls -l build/client/*.exe
