@@ -94,18 +94,34 @@ enum Target {
     /// three-plane form, which walks every pixel of every frame to move bytes
     /// that are already there.
     ///
-    /// Split instead, in the copy that was happening anyway. A plane is copied
-    /// out of the decoder's padded rows into tightly packed ones either way
-    /// ([`plane`](VideoSource::plane)); this copies the same bytes into two
-    /// destinations instead of one, so the only cost is a strided write, and
-    /// nothing above it — texture, shader, `DecodedImage` — needs to know a
-    /// card was involved.
+    /// # NV12 is no longer split at all
     ///
-    /// The alternative was a two-plane texture, sampling Cb and Cr from one
-    /// `R8G8` image. It saves this copy's second stream and costs a fourth
-    /// shader path and a second chroma layout everywhere. Not worth it for a
-    /// strided memcpy; worth reconsidering if the copy ever shows up in a
-    /// measurement.
+    /// It was, in the copy that was happening anyway: one strided write into
+    /// two destinations instead of one memcpy into one. The note here said
+    /// that a two-plane texture would save that second stream, cost a fourth
+    /// shader path and a second chroma layout everywhere, and was *worth
+    /// reconsidering if the copy ever showed up in a measurement*.
+    ///
+    /// It showed up. The render thread was measured spending about half its
+    /// time in `memcpy` moving frames, and the wall was running at 28.5 frames
+    /// a second against the 59.94 it is set to with a single clip on it.
+    ///
+    /// The fourth shader path turned out not to be needed: a Vulkan component
+    /// mapping lives on the *view* rather than on the image, so one `R8G8`
+    /// chroma image is bound twice — once as it lies, where `.r` is Cb, and
+    /// once with green swizzled into red, where `.r` is Cr. The shader is
+    /// untouched and the sampler does the work for nothing
+    /// ([`TextureLayout::Nv12`]). What is left of the cost is one more layout,
+    /// which is this arm and [`DecodedImage::interleaved`].
+    ///
+    /// So NV12 — eight-bit, 4:2:0, Cb first — is copied out row by row and
+    /// goes up as it is. The other interleaved layouts still split, because
+    /// there is one two-component texture layout and NV12 is its shape:
+    /// ten-bit P010 would need `R16G16`, 4:2:2 NV16 a differently sized plane,
+    /// and NV21 the other swizzle. Each is a layout, not a flag, and none of
+    /// them is what a card in this building produces.
+    ///
+    /// [`TextureLayout::Nv12`]: crate::vulkan::TextureLayout::Nv12
     Interleaved {
         /// How many luma samples across share one chroma sample.
         subsample_x: u32,
@@ -911,20 +927,26 @@ impl VideoSource {
                     size.width * element as u32,
                     size.height,
                 )?;
-                let (cb, cr) = Self::split(&self.path, picture, wide, tall, blue_first, element)?;
-                DecodedImage::planar(
-                    luma,
-                    cb,
-                    cr,
-                    size,
-                    ChromaFormat {
-                        subsample_x,
-                        subsample_y,
-                        full_range: self.full_range,
-                        matrix: self.matrix,
-                        depth: self.depth,
-                    },
-                )
+                let format = ChromaFormat {
+                    subsample_x,
+                    subsample_y,
+                    full_range: self.full_range,
+                    matrix: self.matrix,
+                    depth: self.depth,
+                };
+                // NV12 goes up as it is: one row-wise copy, and the card
+                // samples both components out of one two-component image.
+                // Everything else interleaved is split here, because NV12 is
+                // the shape of that image — see `DecodedImage::interleaved`.
+                if blue_first && element == 1 && subsample_x == 2 && subsample_y == 2 {
+                    let pairs =
+                        Self::plane(&self.path, picture, 1, wide * 2 * element as u32, tall)?;
+                    DecodedImage::interleaved(luma, pairs, size, format)
+                } else {
+                    let (cb, cr) =
+                        Self::split(&self.path, picture, wide, tall, blue_first, element)?;
+                    DecodedImage::planar(luma, cb, cr, size, format)
+                }
             }
         }
         .ok_or_else(|| MediaError::Undecodable {

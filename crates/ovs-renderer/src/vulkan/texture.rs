@@ -106,6 +106,29 @@ pub enum TextureLayout {
         /// one path. What converges is the shader.
         depth: SampleDepth,
     },
+    /// Two images: luma, and chroma with Cb and Cr interleaved.
+    ///
+    /// **What a card's decoder produces.** NVDEC hands back NV12 — one eight-bit
+    /// luma plane and one half-size plane of Cb and Cr side by side — and a
+    /// picture that is already in the card's memory must not be taken apart on
+    /// the processor to fit a three-plane texture. That would be the copy this
+    /// whole path exists to avoid, with a deinterleave on top of it.
+    ///
+    /// The shader is untouched. It samples Cb from one image and Cr from
+    /// another, so this layout gives it **two views of the same image**: one as
+    /// it is, where `.r` is Cb, and one with the green component swizzled into
+    /// red, where `.r` is Cr. A view costs nothing and a swizzle is free in the
+    /// sampler.
+    ///
+    /// Always 4:2:0 and always eight-bit, because that is what NV12 is. Ten-bit
+    /// material from a card is P010 and is a different layout, not a flag on
+    /// this one.
+    Nv12 {
+        /// Whether the samples use 0–255 rather than 16–235.
+        full_range: bool,
+        /// Which coefficients turn them back into colour.
+        matrix: ColourMatrix,
+    },
 }
 
 impl TextureLayout {
@@ -119,7 +142,9 @@ impl TextureLayout {
     pub fn sample_scale(self) -> f32 {
         match self {
             Self::Planar { depth, .. } => depth.sample_scale(),
-            Self::Rgba | Self::Bgra | Self::Blocks(_) => 1.0,
+            // NV12 is eight-bit by definition, so its samples are already in the
+            // domain the colour constants are written in.
+            Self::Nv12 { .. } | Self::Rgba | Self::Bgra | Self::Blocks(_) => 1.0,
         }
     }
 
@@ -137,32 +162,59 @@ impl TextureLayout {
             // BGRA included — the sampler has already put the components in
             // order by then.
             Self::Rgba | Self::Bgra | Self::Blocks(_) => 0.0,
-            Self::Planar {
+            // NV12 is Y'CbCr like the planar layouts and converts the same
+            // way: how the chroma reached the card is the texture's business,
+            // not the shader's.
+            Self::Nv12 {
+                full_range: false,
+                matrix: ColourMatrix::Bt709,
+            }
+            | Self::Planar {
                 full_range: false,
                 matrix: ColourMatrix::Bt709,
                 ..
             } => 1.0,
-            Self::Planar {
+            Self::Nv12 {
+                full_range: true,
+                matrix: ColourMatrix::Bt709,
+            }
+            | Self::Planar {
                 full_range: true,
                 matrix: ColourMatrix::Bt709,
                 ..
             } => 2.0,
-            Self::Planar {
+            Self::Nv12 {
+                full_range: false,
+                matrix: ColourMatrix::Bt601,
+            }
+            | Self::Planar {
                 full_range: false,
                 matrix: ColourMatrix::Bt601,
                 ..
             } => 3.0,
-            Self::Planar {
+            Self::Nv12 {
+                full_range: true,
+                matrix: ColourMatrix::Bt601,
+            }
+            | Self::Planar {
                 full_range: true,
                 matrix: ColourMatrix::Bt601,
                 ..
             } => 4.0,
-            Self::Planar {
+            Self::Nv12 {
+                full_range: false,
+                matrix: ColourMatrix::Bt2020,
+            }
+            | Self::Planar {
                 full_range: false,
                 matrix: ColourMatrix::Bt2020,
                 ..
             } => 5.0,
-            Self::Planar {
+            Self::Nv12 {
+                full_range: true,
+                matrix: ColourMatrix::Bt2020,
+            }
+            | Self::Planar {
                 full_range: true,
                 matrix: ColourMatrix::Bt2020,
                 ..
@@ -178,6 +230,14 @@ impl TextureLayout {
         }
         if image.is_bgra() {
             return Self::Bgra;
+        }
+        if let Some(chroma) = image.chroma().filter(|chroma| chroma.is_interleaved()) {
+            // `DecodedImage::interleaved` accepts nothing but NV12, so there is
+            // no shape of interleaved picture this layout cannot sample.
+            return Self::Nv12 {
+                full_range: chroma.full_range(),
+                matrix: chroma.matrix(),
+            };
         }
         image.chroma().map_or(Self::Rgba, |chroma| Self::Planar {
             subsample_x: chroma.subsample_x(),
@@ -196,6 +256,17 @@ impl TextureLayout {
             // In texels, not blocks: Vulkan sizes a compressed image the way it
             // sizes any other, and works out the blocks itself.
             Self::Blocks(format) => vec![(width, height, block_format(format))],
+            // Luma at full size, then one half-size plane holding both
+            // chroma components side by side. Two images for three bindings:
+            // `chroma_views` makes the third a swizzled view of the second.
+            Self::Nv12 { .. } => vec![
+                (width, height, vk::Format::R8_UNORM),
+                (
+                    width.div_ceil(2).max(1),
+                    height.div_ceil(2).max(1),
+                    vk::Format::R8G8_UNORM,
+                ),
+            ],
             Self::Planar {
                 subsample_x,
                 subsample_y,
@@ -253,6 +324,14 @@ struct Plane {
 /// A sampled image on the GPU.
 pub struct Texture {
     planes: Vec<Plane>,
+    /// A second view of the chroma plane, where Cr is in the red component.
+    ///
+    /// Only for [`TextureLayout::Nv12`], whose one chroma image holds both
+    /// components side by side while the shader samples them from two bindings.
+    /// A view with the green component swizzled into red is what lets the
+    /// second binding read Cr without a shader branch, a second image or a pass
+    /// over the picture — the sampler does it, and it costs nothing.
+    chroma_as_cr: Option<vk::ImageView>,
     layout: TextureLayout,
     sampler: vk::Sampler,
     staging: vk::Buffer,
@@ -347,8 +426,31 @@ impl Texture {
         let (staging, staging_memory, staging_mapped) =
             Self::create_staging(context, &memory_properties, staging_bytes)?;
 
+        let chroma_as_cr = match (layout, planes.get(1)) {
+            (TextureLayout::Nv12 { .. }, Some(chroma)) => {
+                match Self::swizzled_view(device, chroma.image) {
+                    Ok(view) => Some(view),
+                    Err(error) => {
+                        // Nothing is half-built: the planes and the staging go
+                        // back before the error does.
+                        for plane in &planes {
+                            // SAFETY: created above on this device and not in use.
+                            unsafe {
+                                device.destroy_image_view(plane.view, None);
+                                device.destroy_image(plane.image, None);
+                                device.free_memory(plane.memory, None);
+                            }
+                        }
+                        return Err(error);
+                    }
+                }
+            }
+            _ => None,
+        };
+
         Ok(Self {
             planes,
+            chroma_as_cr,
             layout,
             sampler,
             staging,
@@ -449,6 +551,36 @@ impl Texture {
             height,
             offset,
             bytes,
+        })
+    }
+
+    /// A view of a two-component chroma image with green read as red.
+    ///
+    /// The shader asks its Cr binding for `.r`, and in NV12 Cr is the second
+    /// component. A component mapping is part of the view rather than of the
+    /// image, so one image can be bound twice and read differently each time.
+    fn swizzled_view(device: &ash::Device, image: vk::Image) -> Result<vk::ImageView, VulkanError> {
+        let view_info = vk::ImageViewCreateInfo::default()
+            .image(image)
+            .view_type(vk::ImageViewType::TYPE_2D)
+            .format(vk::Format::R8G8_UNORM)
+            .components(
+                vk::ComponentMapping::default()
+                    .r(vk::ComponentSwizzle::G)
+                    .g(vk::ComponentSwizzle::G)
+                    .b(vk::ComponentSwizzle::G)
+                    .a(vk::ComponentSwizzle::ONE),
+            )
+            .subresource_range(
+                vk::ImageSubresourceRange::default()
+                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                    .level_count(1)
+                    .layer_count(1),
+            );
+        // SAFETY: `image` is bound and `view_info` is fully initialised.
+        unsafe { device.create_image_view(&view_info, None) }.map_err(|result| VulkanError::Call {
+            operation: "vkCreateImageView for the Cr half of an NV12 plane",
+            result,
         })
     }
 
@@ -577,8 +709,11 @@ impl Texture {
     /// same image twice is free and leaving a binding empty is undefined.
     #[must_use]
     pub fn chroma_views(&self) -> (vk::ImageView, vk::ImageView) {
-        match (self.planes.get(1), self.planes.get(2)) {
-            (Some(cb), Some(cr)) => (cb.view, cr.view),
+        match (self.planes.get(1), self.planes.get(2), self.chroma_as_cr) {
+            // NV12: one image, read twice. The swizzled view puts Cr where the
+            // shader looks for it.
+            (Some(chroma), None, Some(as_cr)) => (chroma.view, as_cr),
+            (Some(cb), Some(cr), _) => (cb.view, cr.view),
             _ => (self.view(), self.view()),
         }
     }
@@ -628,19 +763,30 @@ impl Texture {
         let Some(chroma) = image.chroma() else {
             return self.stage_plane(0, image.pixels());
         };
-        // Checked together, so a picture whose Cr plane is short cannot leave
-        // the luma plane written and the colour from the frame before it.
-        if self.planes.len() != 3
-            || !self.fits(0, image.pixels())
-            || !self.fits(1, chroma.cb())
-            || !self.fits(2, chroma.cr())
-        {
+        // Two planes or three, depending on how the decoder handed the colour
+        // over. Checked together either way, so a picture whose last plane is
+        // short cannot leave the luma plane written and the colour from the
+        // frame before it.
+        let shaped = if chroma.is_interleaved() {
+            self.planes.len() == 2 && self.fits(0, image.pixels()) && self.fits(1, chroma.pairs())
+        } else {
+            self.planes.len() == 3
+                && self.fits(0, image.pixels())
+                && self.fits(1, chroma.cb())
+                && self.fits(2, chroma.cr())
+        };
+        if !shaped {
             return Err(VulkanError::Call {
                 operation: "a planar upload is not the size of the texture",
                 result: vk::Result::ERROR_VALIDATION_FAILED_EXT,
             });
         }
         self.stage_plane(0, image.pixels())?;
+        if chroma.is_interleaved() {
+            // One copy, row by row, instead of a strided write into two
+            // destinations. The bytes go up exactly as the card produced them.
+            return self.stage_plane(1, chroma.pairs());
+        }
         self.stage_plane(1, chroma.cb())?;
         self.stage_plane(2, chroma.cr())
     }
@@ -903,6 +1049,16 @@ impl Texture {
         self.staging_memory = vk::DeviceMemory::null();
         self.staging_mapped = std::ptr::null_mut();
         self.sampler = vk::Sampler::null();
+        // Before the planes, because it is a view of one of their images and a
+        // view outliving its image is the one ordering mistake here that the
+        // validation layers would not forgive.
+        if let Some(view) = self.chroma_as_cr.take() {
+            // SAFETY: created by `swizzled_view` on this device, and the caller
+            // has waited for the device to be idle.
+            unsafe {
+                device.destroy_image_view(view, None);
+            }
+        }
         for plane in &mut self.planes {
             plane.destroy(device);
         }
@@ -963,7 +1119,9 @@ pub const fn white_pixel() -> [u8; 4] {
 fn texel_bytes(format: vk::Format) -> Result<u64, VulkanError> {
     match format {
         vk::Format::R8G8B8A8_UNORM | vk::Format::B8G8R8A8_UNORM => Ok(4),
-        vk::Format::R16_UNORM => Ok(2),
+        // Two components of one byte: the chroma plane of an NV12 picture,
+        // where a texel is one Cb beside one Cr.
+        vk::Format::R16_UNORM | vk::Format::R8G8_UNORM => Ok(2),
         vk::Format::R8_UNORM => Ok(1),
         _ => Err(VulkanError::Call {
             operation: "a texture format whose size nobody has written down",

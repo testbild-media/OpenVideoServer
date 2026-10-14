@@ -14,8 +14,11 @@
 //! What the renderer decodes is whatever the operator brought: the server plays
 //! what it is given, so the list is FFmpeg's rather than ours. What
 //! is short instead is the list of *shapes* a decoded picture comes in — RGBA,
-//! or three planes of eight-bit Y, Cb and Cr — because that is what a texture
-//! has to be made of and it is decided here rather than by the file.
+//! three planes of Y, Cb and Cr, or NV12's two with the colour components
+//! alternating — because that is what a texture has to be made of and it is
+//! decided here rather than by the file. The third shape is there because a
+//! card's decoder produces it and nothing on the way to the wall is allowed to
+//! walk a frame on the processor to change it.
 
 mod changeover;
 mod generator;

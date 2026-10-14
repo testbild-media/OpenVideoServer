@@ -5164,6 +5164,99 @@ mod tests {
         about(grey, [128, 128, 128, 255], "mid grey");
     }
 
+    /// Draws a flat NV12 picture and reads the middle of it back.
+    ///
+    /// The same samples as [`planar_colour`], carried the way a card hands them
+    /// over: one luma plane and one half-size plane with Cb and Cr alternating.
+    fn nv12_colour(
+        luma: u8,
+        cb: u8,
+        cr: u8,
+        full_range: bool,
+        matrix: ColourMatrix,
+    ) -> Option<[u8; 4]> {
+        let mut canvas = backend(16, 16)?;
+        let clip = MediaItemId::new();
+        // Cb, Cr, Cb, Cr … across each of the eight rows of eight samples.
+        let pairs: Vec<u8> = [cb, cr].iter().copied().cycle().take(8 * 8 * 2).collect();
+        let picture = DecodedImage::interleaved(
+            vec![luma; 16 * 16],
+            pairs,
+            SizePx::new(16, 16),
+            ChromaFormat {
+                subsample_x: 2,
+                subsample_y: 2,
+                full_range,
+                matrix,
+                depth: crate::media::SampleDepth::Eight,
+            },
+        )
+        .expect("well formed NV12");
+        canvas
+            .set_media_texture(clip, &picture)
+            .expect("uploads NV12");
+        canvas
+            .present(FrameRequest { index: 0 }, &textured_canvas(clip))
+            .expect("renders");
+        Some(canvas.read_pixel(8, 8).expect("reads"))
+    }
+
+    #[test]
+    fn an_nv12_picture_comes_back_as_the_colour_it_encodes() {
+        let _gpu = crate::vulkan::one_gpu_at_a_time();
+        // What a card's decoder produces, drawn without being taken apart on
+        // the processor first. Two images reach three bindings: the chroma
+        // image is bound twice, once as it lies and once with its green
+        // component swizzled into red, so the shader samples Cr out of the
+        // second half of each pair without knowing a card was involved.
+        //
+        // This is the test that catches the swizzle being wrong, and it catches
+        // it loudly: Cb and Cr the wrong way round turns red into blue.
+        let Some(red) = nv12_colour(63, 102, 240, false, ColourMatrix::Bt709) else {
+            return;
+        };
+        about(red, [255, 0, 0, 255], "red");
+
+        let grey = nv12_colour(126, 128, 128, false, ColourMatrix::Bt709).expect("renders");
+        about(grey, [128, 128, 128, 255], "mid grey");
+
+        // Mid grey is the one colour a swapped swizzle cannot be caught by, so
+        // a colour whose two components differ is checked against the three
+        // plane path as well. Same samples, same wall: the whole claim of this
+        // layout is that how the chroma arrived is nobody's business above the
+        // texture.
+        for (luma, cb, cr, what) in [
+            (63, 102, 240, "red"),
+            (173, 42, 26, "green"),
+            (32, 240, 118, "blue"),
+            (210, 16, 146, "a yellow"),
+        ] {
+            let split =
+                planar_colour(luma, cb, cr, 2, false, ColourMatrix::Bt709).expect("renders");
+            let together = nv12_colour(luma, cb, cr, false, ColourMatrix::Bt709).expect("renders");
+            about(
+                together,
+                split,
+                &format!("{what} as NV12 against three planes"),
+            );
+        }
+    }
+
+    #[test]
+    fn a_full_range_nv12_picture_is_told_apart_from_a_narrow_one() {
+        let _gpu = crate::vulkan::one_gpu_at_a_time();
+        // The range reaches the shader through the texture's layout, and the
+        // NV12 layout is a different variant from the planar one: a layout that
+        // forgot to carry the range would draw every clip off a card washed
+        // out, which is the kind of wrong that looks like a grade.
+        let Some(narrow) = nv12_colour(126, 128, 128, false, ColourMatrix::Bt709) else {
+            return;
+        };
+        let full = nv12_colour(126, 128, 128, true, ColourMatrix::Bt709).expect("renders");
+        about(narrow, [128, 128, 128, 255], "mid grey, narrow range");
+        about(full, [126, 126, 126, 255], "the same samples, full range");
+    }
+
     /// One Hap Alpha movie this machine's FFmpeg wrote, as a path.
     ///
     /// Kept rather than deleted between the two calls below, because both want

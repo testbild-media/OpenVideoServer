@@ -15,13 +15,37 @@ pub const MAX_IMAGE_SIDE: u32 = 16_384;
 
 /// The colour planes of a picture that is not RGBA.
 ///
-/// Cb and Cr, tightly packed, each `size` divided by the subsampling factors.
-/// The luma plane is the image's own [`pixels`](DecodedImage::pixels).
+/// Tightly packed, each `size` divided by the subsampling factors. The luma
+/// plane is the image's own [`pixels`](DecodedImage::pixels).
 #[derive(Clone, PartialEq, Eq)]
 pub struct Chroma {
-    cb: Vec<u8>,
-    cr: Vec<u8>,
+    samples: Samples,
     format: ChromaFormat,
+}
+
+/// Whether the two colour components arrived apart or together.
+///
+/// Two shapes rather than one because the two kinds of decoder produce two
+/// shapes, and the whole argument of this module is that a decoder's output is
+/// handed over as it is. A software decoder writes three planes; a card writes
+/// two, with Cb and Cr alternating in the second. Bringing the second to the
+/// first means walking every chroma sample of every frame on the processor —
+/// which is the copy this path exists to avoid.
+#[derive(Clone, PartialEq, Eq)]
+enum Samples {
+    /// Cb and Cr in planes of their own.
+    ///
+    /// What every software decoder and every NDI source produces.
+    Split { cb: Vec<u8>, cr: Vec<u8> },
+    /// Both components in one plane, alternating, two samples an element pair.
+    ///
+    /// What a card produces: NVDEC hands back NV12 and there is no option to
+    /// ask it for anything else. Sampled on the card from one two-component
+    /// image — see [`TextureLayout::Interleaved`] — so nothing separates them
+    /// at any point between the decoder and the wall.
+    ///
+    /// [`TextureLayout::Interleaved`]: crate::vulkan::TextureLayout::Interleaved
+    Together(Vec<u8>),
 }
 
 /// How many bits a sample of a planar picture carries.
@@ -167,15 +191,48 @@ pub enum ColourMatrix {
 
 impl Chroma {
     /// The Cb plane, tightly packed, row by row from the top.
+    ///
+    /// Empty when the components arrived [`interleaved`](Self::is_interleaved),
+    /// which has no Cb plane to point at. Ask that first.
     #[must_use]
     pub fn cb(&self) -> &[u8] {
-        &self.cb
+        match &self.samples {
+            Samples::Split { cb, .. } => cb,
+            Samples::Together(_) => &[],
+        }
     }
 
     /// The Cr plane, tightly packed, row by row from the top.
+    ///
+    /// Empty when the components arrived [`interleaved`](Self::is_interleaved).
     #[must_use]
     pub fn cr(&self) -> &[u8] {
-        &self.cr
+        match &self.samples {
+            Samples::Split { cr, .. } => cr,
+            Samples::Together(_) => &[],
+        }
+    }
+
+    /// Whether one plane holds both components, alternating.
+    ///
+    /// True for a picture a card decoded. The texture layout and the shader
+    /// both change on this, so anything turning a picture into pixels has to
+    /// ask — [`cb`](Self::cb) and [`cr`](Self::cr) are empty when it is true.
+    #[must_use]
+    pub const fn is_interleaved(&self) -> bool {
+        matches!(self.samples, Samples::Together(_))
+    }
+
+    /// The one plane holding both components, when they arrived together.
+    ///
+    /// Two samples an element pair, Cb first unless the picture says otherwise.
+    /// Empty for a picture whose components arrived apart.
+    #[must_use]
+    pub fn pairs(&self) -> &[u8] {
+        match &self.samples {
+            Samples::Together(pairs) => pairs,
+            Samples::Split { .. } => &[],
+        }
     }
 
     /// How these planes are arranged and what they mean.
@@ -367,10 +424,58 @@ impl DecodedImage {
         size: SizePx,
         format: ChromaFormat,
     ) -> Option<Self> {
+        Self::with_samples(luma, Samples::Split { cb, cr }, size, format)
+    }
+
+    /// Wraps a luma plane and one plane holding both colour components.
+    ///
+    /// What a card's decoder produces, carried as it produced it. Cb comes
+    /// first in each pair — NV12 and NV16, the two layouts NVDEC hands back —
+    /// and a picture with Cr first is split by whoever decoded it rather than
+    /// described here, because one order on the card means one image view and
+    /// no choice to get wrong per frame.
+    ///
+    /// This is NV12 and nothing else: eight bits a sample, 4:2:0, Cb first.
+    /// Every other interleaved layout is split into planes by whoever decoded
+    /// it and takes [`Self::planar`] — ten-bit P010, 4:2:2 NV16, Cr-first
+    /// NV21. That is not a limitation being worked around but the invariant
+    /// that makes this safe: there is exactly one two-component texture layout
+    /// on the card, and a picture that cannot be sampled by it cannot be built
+    /// here. A picture that is no shape the card can read is refused at its
+    /// constructor rather than being found out at upload time, when the only
+    /// thing left to do is drop a frame.
+    ///
+    /// Returns `None` for any other shape, and unless both planes are exactly
+    /// the size they should be, for the same reason [`Self::planar`] does.
+    #[must_use]
+    pub fn interleaved(
+        luma: Vec<u8>,
+        pairs: Vec<u8>,
+        size: SizePx,
+        format: ChromaFormat,
+    ) -> Option<Self> {
+        if format.depth.is_ten_bit() || format.subsample_x != 2 || format.subsample_y != 2 {
+            return None;
+        }
+        Self::with_samples(luma, Samples::Together(pairs), size, format)
+    }
+
+    /// Checks a luma plane and its colour samples against the size they claim.
+    ///
+    /// The one place either shape is measured, so a plane short by a row is
+    /// refused the same way however it arrived — and a texture upload reading
+    /// past the end of a buffer is the one mistake in this module that is not
+    /// recoverable.
+    fn with_samples(
+        luma: Vec<u8>,
+        samples: Samples,
+        size: SizePx,
+        format: ChromaFormat,
+    ) -> Option<Self> {
         if !matches!(format.subsample_x, 1 | 2) || !matches!(format.subsample_y, 1 | 2) {
             return None;
         }
-        let chroma = Chroma { cb, cr, format };
+        let chroma = Chroma { samples, format };
         // A sample is one element, and an element is one byte at eight bits
         // and two at ten. Checking in samples and multiplying here means a
         // ten-bit picture with an eight-bit plane count is refused rather than
@@ -378,11 +483,19 @@ impl DecodedImage {
         let element = format.depth.bytes() as u64;
         let luma_wanted = u64::from(size.width) * u64::from(size.height) * element;
         let plane = chroma.plane_size(size);
-        let chroma_wanted = u64::from(plane.width) * u64::from(plane.height) * element;
-        if u64::try_from(luma.len()).ok()? != luma_wanted
-            || u64::try_from(chroma.cb.len()).ok()? != chroma_wanted
-            || u64::try_from(chroma.cr.len()).ok()? != chroma_wanted
-        {
+        let samples_across = u64::from(plane.width) * u64::from(plane.height);
+        let held = match &chroma.samples {
+            // One plane each, or one plane of both: the same samples either
+            // way, which is the point of carrying both shapes.
+            Samples::Split { cb, cr } => {
+                let wanted = samples_across * element;
+                u64::try_from(cb.len()).ok()? == wanted && u64::try_from(cr.len()).ok()? == wanted
+            }
+            Samples::Together(pairs) => {
+                u64::try_from(pairs.len()).ok()? == samples_across * 2 * element
+            }
+        };
+        if u64::try_from(luma.len()).ok()? != luma_wanted || !held {
             return None;
         }
         Some(Self {
@@ -467,8 +580,17 @@ impl DecodedImage {
             &self.pixels,
             y as usize * self.size.width as usize + x as usize,
         );
-        let mut blue = sample(&chroma.cb, chroma_at) - 0.5;
-        let mut red = sample(&chroma.cr, chroma_at) - 0.5;
+        // Two planes or one: in one plane the two components alternate, so the
+        // same sample index is reached by doubling it and stepping one along.
+        let (blue_sample, red_sample) = match &chroma.samples {
+            Samples::Split { cb, cr } => (sample(cb, chroma_at), sample(cr, chroma_at)),
+            Samples::Together(pairs) => (
+                sample(pairs, chroma_at * 2),
+                sample(pairs, chroma_at * 2 + 1),
+            ),
+        };
+        let mut blue = blue_sample - 0.5;
+        let mut red = red_sample - 0.5;
         if !chroma.format.full_range {
             luma = (luma - 16.0 / 255.0) * (255.0 / 219.0);
             blue *= 255.0 / 224.0;
@@ -507,7 +629,10 @@ impl DecodedImage {
             + self
                 .chroma
                 .as_ref()
-                .map_or(0, |chroma| chroma.cb.len() + chroma.cr.len())
+                .map_or(0, |chroma| match &chroma.samples {
+                    Samples::Split { cb, cr } => cb.len() + cr.len(),
+                    Samples::Together(pairs) => pairs.len(),
+                })
     }
 
     /// The first plane, to be written over.
@@ -706,6 +831,97 @@ mod tests {
             "red read back as {got:?}"
         );
         assert_eq!(got[3], 255, "planar video is opaque");
+    }
+
+    #[test]
+    fn a_card_s_picture_is_the_same_picture_as_the_processor_s() {
+        // The same samples carried both ways. If these two disagreed, every
+        // clip a card decodes would be drawn in a different colour from the
+        // same clip on the processor — and the two paths swap over on whether
+        // a driver happens to be installed, which is the worst possible way
+        // for a colour to depend on a machine.
+        let size = SizePx::new(4, 4);
+        for (luma, cb, cr, what) in [
+            (63u8, 102u8, 240u8, "red"),
+            (173, 42, 26, "green"),
+            (32, 240, 118, "blue"),
+            (126, 128, 128, "mid grey"),
+        ] {
+            let split =
+                DecodedImage::planar(vec![luma; 16], vec![cb; 4], vec![cr; 4], size, format(2, 2))
+                    .expect("three planes");
+            // Cb, Cr, Cb, Cr … which is what the card writes.
+            let pairs: Vec<u8> = [cb, cr].iter().copied().cycle().take(8).collect();
+            let together = DecodedImage::interleaved(vec![luma; 16], pairs, size, format(2, 2))
+                .expect("two planes");
+
+            assert!(!split.chroma().expect("planar").is_interleaved());
+            assert!(together.chroma().expect("planar").is_interleaved());
+            assert_eq!(
+                together.byte_size(),
+                split.byte_size(),
+                "{what}: the same samples are the same number of bytes"
+            );
+            for y in 0..4 {
+                for x in 0..4 {
+                    assert_eq!(
+                        together.pixel(x, y),
+                        split.pixel(x, y),
+                        "{what} at {x},{y}: two planes against three"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_picture_no_card_can_sample_is_refused_at_its_constructor() {
+        // The two-component texture layout is NV12's shape and nothing else,
+        // so these are the shapes that must never reach it. Refused here means
+        // the decoder splits them into planes instead; refused at upload time
+        // would mean a dropped frame and a line in a log.
+        let size = SizePx::new(4, 4);
+        let luma = vec![16u8; 16];
+        let ten_bit = ChromaFormat {
+            depth: SampleDepth::TenLow,
+            ..format(2, 2)
+        };
+        assert!(
+            DecodedImage::interleaved(vec![16u8; 32], vec![128u8; 16], size, ten_bit).is_none(),
+            "P010 has to be split"
+        );
+        assert!(
+            DecodedImage::interleaved(luma.clone(), vec![128u8; 16], size, format(2, 1)).is_none(),
+            "interleaved 4:2:2 has to be split"
+        );
+        // And the ordinary check: a plane short of a picture.
+        assert!(
+            DecodedImage::interleaved(luma.clone(), vec![128u8; 7], size, format(2, 2)).is_none(),
+            "one sample short"
+        );
+        assert!(
+            DecodedImage::interleaved(luma, vec![128u8; 8], size, format(2, 2)).is_some(),
+            "and the shape that is right"
+        );
+    }
+
+    #[test]
+    fn an_interleaved_picture_points_at_no_plane_of_its_own() {
+        // `cb` and `cr` answer for a shape that has neither, and they answer
+        // emptily rather than with half the pairs. Anything that reads them
+        // without asking `is_interleaved` first gets nothing, which fails the
+        // size check it is about to make instead of uploading the wrong bytes.
+        let image = DecodedImage::interleaved(
+            vec![16u8; 16],
+            vec![128u8; 8],
+            SizePx::new(4, 4),
+            format(2, 2),
+        )
+        .expect("two planes");
+        let chroma = image.chroma().expect("planar");
+        assert!(chroma.cb().is_empty());
+        assert!(chroma.cr().is_empty());
+        assert_eq!(chroma.pairs().len(), 8);
     }
 
     #[test]
