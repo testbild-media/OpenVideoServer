@@ -60,6 +60,25 @@ nsis:
   # A show machine and an operator's laptop are different arguments, and the
   # person installing it is the one who knows which this is.
   allowToChangeInstallationDirectory: true
+  # **Silent installation is broken, and the window is not.** Measured on
+  # 2026-10-14 with the published 0.2.20 installer, on a machine whose profile
+  # is `C:\Users\Jason Kuhr`:
+  #
+  # | how it was run                      | what happened                     |
+  # |-------------------------------------|-----------------------------------|
+  # | double-clicked, through the pages   | 83 files in the default location  |
+  # | `/S /D=C:\Temp\ovs-nospace`         | 83 files there                    |
+  # | `/S /D=C:\Temp\ovs with space`      | 83 files in `C:\Temp\ovs`         |
+  # | `/S /currentuser`                   | nothing, exit 0, registry entry   |
+  # |                                     | naming `C:\Users\Jason`           |
+  #
+  # An assisted installer reads `/D=` itself rather than letting NSIS hand it
+  # over whole, and it stops at the first space — so a silent install lands in
+  # a truncated directory, and when that directory is one a standard user may
+  # not create (anything directly under `C:\Users`) it lands nowhere at all and
+  # still exits 0. Nobody installing this by hand will meet that; anyone
+  # scripting it will, so: pass `/D=` a path with no spaces in it, or do not
+  # pass `/S`.
   perMachine: false
   createDesktopShortcut: true
   createStartMenuShortcut: true
