@@ -1072,8 +1072,15 @@ fn flag_of(manifest: &GeneratorManifest, values: &ParameterMap, key: &str) -> bo
 }
 
 /// Converts linear RGBA to the eight-bit values a texture holds.
+///
+/// `+ 0.5` and a truncating cast rather than `round`, which is a call into
+/// libm: on the owner's machine on 2026-10-14, `roundf` was **a fifth of the
+/// render thread** -- four calls a pixel, two million pixels, sixty times a
+/// second. For a value already clamped into `0..=1` the two agree exactly,
+/// because rounding half away from zero and rounding half up are the same
+/// thing when there is no negative side.
 fn to_bytes(colour: [f32; 4]) -> [u8; 4] {
-    let channel = |value: f32| (value.clamp(0.0, 1.0) * 255.0).round() as u8;
+    let channel = |value: f32| (value.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
     [
         channel(colour[0]),
         channel(colour[1]),
@@ -1479,22 +1486,75 @@ fn draw_noise(
         1.0
     };
 
-    for (index, pixel) in pixels.as_chunks_mut::<4>().0.iter_mut().enumerate() {
-        let x = (index % width) as f32 / scale;
-        let y = (index / width) as f32 / scale;
+    // **The four corners belong to the cell, not to the pixel.** `value_noise`
+    // hashes all four of them for every pixel it is asked about, and a cell
+    // covers `scale x scale` pixels -- so at the default scale the same four
+    // numbers were hashed sixty-four times over. Each hash is three 64-bit
+    // multiplies, and a coloured field needs four hashes, three fields deep.
+    //
+    // Measured on the owner's machine on 2026-10-14: this generator alone took
+    // the wall to **9 fps**, with `draw_kind` and `roundf` together two thirds
+    // of the render thread. The arithmetic below is the same arithmetic in the
+    // same order; what changes is how often the hashing happens.
+    //
+    // The grey field is also no longer drawn when colouring. It was computed
+    // for every pixel and then thrown away, which is a quarter of the work of a
+    // coloured field for nothing.
+    let fade = |t: f32| t * t * (3.0 - 2.0 * t);
+    let fields: [u64; 3] = if coloured {
+        [
+            field.wrapping_add(1),
+            field.wrapping_add(2),
+            field.wrapping_add(3),
+        ]
+    } else {
+        [field, field, field]
+    };
+    let depth = if coloured { 3 } else { 1 };
 
-        let grey = 0.5 + (value_noise(x, y, field) - 0.5) * amount;
-        let rgb = if coloured {
-            [
-                0.5 + (value_noise(x, y, field.wrapping_add(1)) - 0.5) * amount,
-                0.5 + (value_noise(x, y, field.wrapping_add(2)) - 0.5) * amount,
-                0.5 + (value_noise(x, y, field.wrapping_add(3)) - 0.5) * amount,
-            ]
-        } else {
-            [grey, grey, grey]
-        };
+    for (row, line) in pixels.as_chunks_mut::<4>().0.chunks_mut(width).enumerate() {
+        let y = row as f32 / scale;
+        let cell_y = y.floor();
+        let top = cell_y as i64;
+        let fraction_y = fade(y - cell_y);
 
-        *pixel = to_bytes([rgb[0], rgb[1], rgb[2], 1.0]);
+        // The cell this row is walking through, and its corners. `left` only
+        // ever grows along a row, so one comparison a pixel finds the edge.
+        let mut held = i64::MIN;
+        let mut corners = [[0.0_f32; 4]; 3];
+
+        for (column, pixel) in line.iter_mut().enumerate() {
+            let x = column as f32 / scale;
+            let cell_x = x.floor();
+            let left = cell_x as i64;
+            if left != held {
+                for (corner, channel) in corners.iter_mut().zip(fields).take(depth) {
+                    *corner = [
+                        lattice(left, top, channel),
+                        lattice(left + 1, top, channel),
+                        lattice(left, top + 1, channel),
+                        lattice(left + 1, top + 1, channel),
+                    ];
+                }
+                held = left;
+            }
+
+            let fraction_x = fade(x - cell_x);
+            let mut rgb = [0.0_f32; 3];
+            for (channel, corner) in rgb.iter_mut().zip(&corners).take(depth) {
+                let value = mix(
+                    mix(corner[0], corner[1], fraction_x),
+                    mix(corner[2], corner[3], fraction_x),
+                    fraction_y,
+                );
+                *channel = 0.5 + (value - 0.5) * amount;
+            }
+            if !coloured {
+                rgb = [rgb[0], rgb[0], rgb[0]];
+            }
+
+            *pixel = to_bytes([rgb[0], rgb[1], rgb[2], 1.0]);
+        }
     }
 }
 
@@ -1504,6 +1564,13 @@ fn draw_noise(
 /// cells blend into one another instead of showing as squares. `channel`
 /// selects one of several independent fields, which is how coloured noise gets
 /// three that do not move together.
+///
+/// **Only the test uses this now.** `draw_noise` asked it per pixel, and so
+/// hashed each cell's four corners once for every pixel inside that cell; it
+/// walks the cells itself since 2026-10-14. This is kept as the thing that has
+/// to agree, because an optimisation nobody can check against what it replaced
+/// is a rewrite.
+#[cfg(test)]
 fn value_noise(x: f32, y: f32, channel: u64) -> f32 {
     let cell_x = x.floor();
     let cell_y = y.floor();
@@ -1732,6 +1799,92 @@ fn draw_written(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The noise, asked pixel by pixel, which is how it used to be drawn.
+    ///
+    /// `draw_noise` hashes a cell's four corners once and walks the pixels
+    /// inside it; before 2026-10-14 it hashed them again for every pixel, which
+    /// cost the owner's wall three quarters of its frame rate. The arithmetic is
+    /// meant to be the same arithmetic, so this says that in a test rather than
+    /// in a comment.
+    fn noise_per_pixel(
+        width: usize,
+        height: usize,
+        scale: u32,
+        coloured: bool,
+        amount: f32,
+        tick: u32,
+        seed: u64,
+    ) -> Vec<u8> {
+        let field = seed
+            .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+            .wrapping_add(u64::from(tick).wrapping_mul(4));
+        let scale = (scale as f32).max(1.0);
+        let amount = if amount.is_finite() {
+            amount.clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+
+        let mut pixels = vec![0_u8; width * height * 4];
+        for (index, pixel) in pixels.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+            let x = (index % width) as f32 / scale;
+            let y = (index / width) as f32 / scale;
+
+            let grey = 0.5 + (value_noise(x, y, field) - 0.5) * amount;
+            let rgb = if coloured {
+                [
+                    0.5 + (value_noise(x, y, field.wrapping_add(1)) - 0.5) * amount,
+                    0.5 + (value_noise(x, y, field.wrapping_add(2)) - 0.5) * amount,
+                    0.5 + (value_noise(x, y, field.wrapping_add(3)) - 0.5) * amount,
+                ]
+            } else {
+                [grey, grey, grey]
+            };
+
+            *pixel = to_bytes([rgb[0], rgb[1], rgb[2], 1.0]);
+        }
+        pixels
+    }
+
+    #[test]
+    fn the_quicker_noise_draws_the_same_picture() {
+        // Sizes that are not multiples of the scale on purpose: the last cell of
+        // a row is a partial one, and that is where a loop walking cells rather
+        // than pixels goes wrong.
+        for (width, height) in [(64_usize, 48_usize), (31, 17)] {
+            for scale in [1_u32, 3, 8, 64] {
+                for coloured in [false, true] {
+                    for amount in [1.0_f32, 0.35] {
+                        let mut quick = vec![0_u8; width * height * 4];
+                        draw_noise(&mut quick, width, scale, coloured, amount, 7, 0xABCD);
+                        let slow =
+                            noise_per_pixel(width, height, scale, coloured, amount, 7, 0xABCD);
+                        assert_eq!(
+                            quick, slow,
+                            "{width}x{height}, scale {scale}, coloured {coloured}, amount {amount}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_quicker_conversion_rounds_the_same_way() {
+        // `round` is a call into libm and was a fifth of the render thread.
+        // What replaced it has to agree with it everywhere, not nearly
+        // everywhere: a channel one off is a visible band on a wall.
+        for step in 0..=2_000_u32 {
+            let value = step as f32 / 1_000.0 - 0.5;
+            let was = (value.clamp(0.0, 1.0) * 255.0).round() as u8;
+            assert_eq!(to_bytes([value, 0.0, 0.0, 1.0])[0], was, "at {value}");
+        }
+        for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -0.0] {
+            let was = (value.clamp(0.0, 1.0) * 255.0).round() as u8;
+            assert_eq!(to_bytes([value, 0.0, 0.0, 1.0])[0], was, "at {value}");
+        }
+    }
 
     fn size() -> SizePx {
         SizePx::new(64, 64)

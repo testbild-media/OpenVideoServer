@@ -451,6 +451,32 @@ impl Playback {
                 // countdown is drawn again when its second moves, which is what
                 // `generate` decides.
                 if matches!(slot.source, SourceRef::Generator { .. }) {
+                    // **A generator nobody can see is not drawn.**
+                    //
+                    // The rule above keeps a layer's *player* running while it
+                    // is off in the document or muted at the desk, so a clip
+                    // comes back where it would have been rather than at its
+                    // first frame. A generator has no playhead to keep: its
+                    // picture is a function of its tick, and `tick_at` reads
+                    // that from the clock whenever it is next asked. So it can
+                    // be left undrawn and picked up again in one pass.
+                    //
+                    // What it costs otherwise is a full-size picture drawn on
+                    // the processor, every frame, for a layer that is switched
+                    // off. On the owner's machine on 2026-10-14 that was the
+                    // whole of it: with **every layer disabled** the wall still
+                    // ran at 15.6 fps and `draw_kind` was still two thirds of
+                    // the render thread.
+                    //
+                    // `intended` still has it, so the generator is not retired
+                    // and a countdown's anchor survives being hidden -- which is
+                    // the half of owner decision Q16 that does apply here.
+                    if !layer.enabled || !live.enabled {
+                        intended.insert(layer.id);
+                        showing.insert(layer.id, false);
+                        continue;
+                    }
+
                     let drawn = self.generate(
                         Generating {
                             layer_id: layer.id,
@@ -2312,6 +2338,75 @@ mod tests {
                 ovs_types::config::ParameterValue::Color(colour),
             )]),
         }
+    }
+
+    /// A generator whose picture changes with time this test can move.
+    ///
+    /// A strobe at one hertz: its tick is the parity of the half-cycle, taken
+    /// from how long the layer has been up, so half a second is a different
+    /// picture and the test does not have to wait for the wall clock. Noise
+    /// would read the wall clock in milliseconds, and two passes in a test are
+    /// microseconds apart.
+    fn strobe_at_one_hertz() -> SourceRef {
+        SourceRef::Generator {
+            instance_id: ovs_types::id::GeneratorInstanceId::new(),
+            type_id: "ovs.strobe".to_owned(),
+            version: 1,
+            parameters: ovs_types::config::ParameterMap::from([(
+                "hz".to_owned(),
+                ovs_types::config::ParameterValue::Float(1.0),
+            )]),
+        }
+    }
+
+    #[test]
+    fn a_generator_on_a_layer_nobody_can_see_is_not_drawn() {
+        // **Measured on the owner's machine, 2026-10-14.** With *every* layer
+        // disabled the wall still ran at 15.6 fps and `draw_kind` was still two
+        // thirds of the render thread: a full-size picture, on the processor,
+        // sixty times a second, for layers that were switched off.
+        //
+        // A moving generator, because a still one is drawn once and left alone
+        // anyway; this is about the redraw.
+        let (mut state, _layer_id) = show_generating(strobe_at_one_hertz());
+        let mut compositor = HeadlessCompositor::sized(SizePx::new(32, 32));
+        let mut playback = Playback::new(Instant::now(), false);
+        let catalogue = MediaCatalogue::new();
+        let start = Instant::now();
+
+        // **Live at the desk**, which is the owner's case: the layer was
+        // switched off in the document while nobody had muted it. The old rule
+        // left the player running for exactly that pair, so this is the one
+        // arrangement where the drawing had to be stopped and was not.
+        state.layers[0].enabled = true;
+
+        let first = playback.update(&state, &catalogue, &mut compositor, start);
+        assert_eq!(first.uploaded, 1, "drawn while it is on stage");
+
+        // Switched off in the document, which is one of the two ways a layer
+        // leaves the wall.
+        state.show.as_mut().expect("a show").layers[0].enabled = false;
+        let hidden = playback.update(
+            &state,
+            &catalogue,
+            &mut compositor,
+            start + Duration::from_millis(500),
+        );
+        assert_eq!(hidden.uploaded, 0, "not drawn while nobody can see it");
+
+        // And it comes straight back: a generator's picture is a function of
+        // its tick, so there is nothing to catch up on.
+        state.show.as_mut().expect("a show").layers[0].enabled = true;
+        let back = playback.update(
+            &state,
+            &catalogue,
+            &mut compositor,
+            // A different half-cycle from both passes before it: at one hertz
+            // 1.0 s is the same parity as 0.0 s, and a test that asked for the
+            // picture it had already drawn would prove nothing either way.
+            start + Duration::from_millis(1_500),
+        );
+        assert_eq!(back.uploaded, 1, "drawn again the pass it returns");
     }
 
     #[test]
