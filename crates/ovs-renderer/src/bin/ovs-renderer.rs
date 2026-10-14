@@ -324,6 +324,11 @@ fn wanted_panels(
                     // before, so it is built again rather than left on a handle
                     // that may belong to something now unplugged.
                     stage.running.clear();
+                    // And a refusal belonged to the panel that has just gone.
+                    // The one plugged in now may well offer the mode this show
+                    // asks for, and `attainable_now` would otherwise never let
+                    // it be tried again.
+                    stage.refused.clear();
                 }
             }
             // Not fatal: the last reading is still the best answer there is,
@@ -1182,6 +1187,29 @@ fn console_socket() -> std::path::PathBuf {
 /// on the one screen somebody is looking at.
 type ConsoleOutput = Option<(String, ovs_types::config::DisplayMode)>;
 
+/// What is worth building, of what the show asks for.
+///
+/// Everything except a connector that has already refused this exact mode: that
+/// one costs a release of every other output on the card and ends where it
+/// began. A different mode on the same connector is worth trying, because the
+/// refusal was about the pair; so is a mode on a connector that has never
+/// refused anything.
+///
+/// Note what this is *not*: it does not stop the refused output being tried.
+/// `build_panels` is still given everything the show asks for, so any rebuild
+/// that happens for another reason retries it for free -- a mode lookup, no
+/// mode set. What it stops is rebuilding *because* of it.
+fn attainable_now(
+    wanted: &std::collections::BTreeMap<String, ovs_types::config::DisplayMode>,
+    refused: &std::collections::BTreeMap<String, ovs_types::config::DisplayMode>,
+) -> std::collections::BTreeMap<String, ovs_types::config::DisplayMode> {
+    wanted
+        .iter()
+        .filter(|(connector, mode)| refused.get(*connector) != Some(*mode))
+        .map(|(connector, mode)| (connector.clone(), *mode))
+        .collect()
+}
+
 /// Decides what every connector on this card should be, and rebuilds them all.
 ///
 /// **The display outputs are one group.** Creating one while another is
@@ -1207,7 +1235,22 @@ fn follow_displays(
     let panels = wanted_panels(stage, state);
     let console = wanted_console(stage, state);
 
-    if panels == stage.running && console == *console_running {
+    // **Measured against what can be built, not against what was asked for.**
+    // A connector that has already refused this exact mode will refuse it
+    // again, so comparing the wish with what is running finds a difference on
+    // every pass and rebuilds the whole card for it -- and rebuilding releases
+    // every display first, which takes the System screen down and the preview
+    // stream with it.
+    //
+    // On the owner's machine on 2026-10-14 the show asked HDMI-0 for
+    // 1920x1080@59.999 and the panel offers 59.940: **22 full rebuilds a
+    // minute, for two hours**, each one a release-and-adopt of the one screen
+    // somebody was looking at. The refusal was already remembered -- to say it
+    // once rather than two thousand times -- and that same memory is what
+    // decides here whether anything has moved.
+    let attainable = attainable_now(&panels, &stage.refused);
+
+    if attainable == stage.running && console == *console_running {
         return Ok(());
     }
 
@@ -1652,6 +1695,68 @@ mod tests {
     }
 
     const THIS_CARD: &str = "0000:01:00.0";
+
+    /// A mode, short.
+    fn mode(width: u32, height: u32, rate: FrameRate) -> ovs_types::config::DisplayMode {
+        ovs_types::config::DisplayMode::new(SizePx::new(width, height), rate)
+    }
+
+    #[test]
+    fn a_mode_already_refused_is_not_worth_rebuilding_the_card_for() {
+        // The owner's machine, 2026-10-14: the show asks HDMI-0 for 59.999 and
+        // the panel offers 59.940. Before this, the difference between the wish
+        // and what was running was found again on every pass, and the whole
+        // card -- System screen included -- was released and rebuilt for it 22
+        // times a minute.
+        let asked = FrameRate::new(59_999, 1_000);
+        let wanted =
+            std::collections::BTreeMap::from([("HDMI-0".to_owned(), mode(1920, 1080, asked))]);
+        let refused =
+            std::collections::BTreeMap::from([("HDMI-0".to_owned(), mode(1920, 1080, asked))]);
+
+        assert!(attainable_now(&wanted, &refused).is_empty());
+        // Which is what the running set is when nothing could be built, so the
+        // pass finds nothing to do.
+        assert_eq!(
+            attainable_now(&wanted, &refused),
+            std::collections::BTreeMap::new()
+        );
+    }
+
+    #[test]
+    fn a_different_mode_on_the_same_connector_is_tried() {
+        // The operator picks 59.94 after being told what the panel offers. That
+        // is news, and it has to be acted on at once.
+        let refused = std::collections::BTreeMap::from([(
+            "HDMI-0".to_owned(),
+            mode(1920, 1080, FrameRate::new(59_999, 1_000)),
+        )]);
+        let wanted = std::collections::BTreeMap::from([(
+            "HDMI-0".to_owned(),
+            mode(1920, 1080, FrameRate::new(59_940, 1_000)),
+        )]);
+
+        assert_eq!(attainable_now(&wanted, &refused), wanted);
+    }
+
+    #[test]
+    fn a_connector_that_never_refused_anything_is_untouched() {
+        let refused = std::collections::BTreeMap::from([(
+            "HDMI-0".to_owned(),
+            mode(1920, 1080, FrameRate::new(59_999, 1_000)),
+        )]);
+        let wanted = std::collections::BTreeMap::from([
+            (
+                "HDMI-0".to_owned(),
+                mode(1920, 1080, FrameRate::new(59_999, 1_000)),
+            ),
+            ("DP-4".to_owned(), mode(2560, 1440, FrameRate::FPS_60)),
+        ]);
+
+        let worth = attainable_now(&wanted, &refused);
+        assert_eq!(worth.len(), 1);
+        assert!(worth.contains_key("DP-4"));
+    }
 
     #[test]
     fn a_wall_the_show_has_is_driven() {
