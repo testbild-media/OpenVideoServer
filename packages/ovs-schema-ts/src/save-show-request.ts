@@ -199,6 +199,16 @@ export type PieceSource =
        */
       route: Route;
     };
+/**
+ * The most a clip may be prepared at before it is sent to this show.
+ *
+ * **A property of the wall, not of the laptop that happens to be uploading.** What reaches a panel is never the clip: it is the composition, cut into pieces. On the owner's own wall the largest piece is 840x280, taken from a 1366x444 region of a 1080p composition — so a 720-line clip already puts more than one source pixel behind every pixel out there, while a 2160-line one carries 8.3 megapixels across the bus to show 0.235 of them.
+ *
+ * That waste is paid every frame, for ever: a decoded frame is copied into a staging buffer and then onto the card, and the copy at 2160 is four times the copy at 1080 — about 8.7 ms a layer at 1080p, measured 2026-10-14, on a render thread that has 16.7 ms for everything. One house wants 1080 and another is a wall of small panels where 720 is plenty, so the number lives with the show rather than being guessed per file.
+ *
+ * A ceiling, never a target: nothing is ever made bigger, and a clip that is already under it is left exactly as it is.
+ */
+export type UploadCeiling = 'SOURCE' | '2160P' | '1080P' | '720P';
 
 /**
  * Saves a show.
@@ -759,4 +769,10 @@ export interface ShowSettings {
    * Free-form operator notes.
    */
   notes?: string;
+  /**
+   * The most a clip may be prepared at before it is uploaded here.
+   *
+   * Left out of the document when it is `SOURCE`, so a show nobody has decided this for reads exactly as it did before this existed.
+   */
+  upload_ceiling?: UploadCeiling;
 }

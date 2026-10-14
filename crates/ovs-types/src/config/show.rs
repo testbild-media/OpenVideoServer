@@ -227,6 +227,62 @@ pub enum StartupPolicy {
     None,
 }
 
+/// The most a clip may be prepared at before it is sent to this show.
+///
+/// **A property of the wall, not of the laptop that happens to be uploading.**
+/// What reaches a panel is never the clip: it is the composition, cut into
+/// pieces. On the owner's own wall the largest piece is 840x280, taken from a
+/// 1366x444 region of a 1080p composition — so a 720-line clip already puts
+/// more than one source pixel behind every pixel out there, while a 2160-line
+/// one carries 8.3 megapixels across the bus to show 0.235 of them.
+///
+/// That waste is paid every frame, for ever: a decoded frame is copied into a
+/// staging buffer and then onto the card, and the copy at 2160 is four times
+/// the copy at 1080 — about 8.7 ms a layer at 1080p, measured 2026-10-14, on a
+/// render thread that has 16.7 ms for everything. One house wants 1080 and
+/// another is a wall of small panels where 720 is plenty, so the number lives
+/// with the show rather than being guessed per file.
+///
+/// A ceiling, never a target: nothing is ever made bigger, and a clip that is
+/// already under it is left exactly as it is.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
+)]
+pub enum UploadCeiling {
+    /// However big the file is. What a show says until somebody decides.
+    #[default]
+    #[serde(rename = "SOURCE")]
+    Source,
+    /// At most 2160 lines.
+    #[serde(rename = "2160P")]
+    Uhd,
+    /// At most 1080 lines.
+    #[serde(rename = "1080P")]
+    Hd,
+    /// At most 720 lines.
+    #[serde(rename = "720P")]
+    Hd720,
+}
+
+impl UploadCeiling {
+    /// The number of lines, or `None` where the file's own size is kept.
+    #[must_use]
+    pub const fn lines(self) -> Option<u32> {
+        match self {
+            Self::Source => None,
+            Self::Uhd => Some(2160),
+            Self::Hd => Some(1080),
+            Self::Hd720 => Some(720),
+        }
+    }
+
+    /// Whether this is the "leave it alone" value.
+    #[must_use]
+    pub const fn is_source(&self) -> bool {
+        matches!(self, Self::Source)
+    }
+}
+
 /// Show-level preferences that are not part of the show itself.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ShowSettings {
@@ -235,6 +291,12 @@ pub struct ShowSettings {
     /// Free-form operator notes.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub notes: String,
+    /// The most a clip may be prepared at before it is uploaded here.
+    ///
+    /// Left out of the document when it is `SOURCE`, so a show nobody has
+    /// decided this for reads exactly as it did before this existed.
+    #[serde(default, skip_serializing_if = "UploadCeiling::is_source")]
+    pub upload_ceiling: UploadCeiling,
 }
 
 impl Default for ShowSettings {
@@ -242,6 +304,7 @@ impl Default for ShowSettings {
         Self {
             auto_save: true,
             notes: String::new(),
+            upload_ceiling: UploadCeiling::Source,
         }
     }
 }
@@ -588,6 +651,59 @@ mod tests {
     use crate::config::slot::Slot;
     use crate::geometry::RectPx;
     use crate::id::FixtureInstanceId;
+
+    #[test]
+    fn a_show_that_was_never_told_a_ceiling_keeps_its_own_size() {
+        // Every show written before this field existed, which on 2026-10-15 was
+        // all of them. The default has to be "leave the file alone": a client
+        // that started shrinking an operator's material because a document was
+        // silent would be inventing a decision nobody made.
+        let written = r#"{"auto_save": true}"#;
+        let settings: ShowSettings = serde_json::from_str(written).expect("an older show");
+        assert_eq!(settings.upload_ceiling, UploadCeiling::Source);
+        assert_eq!(settings.upload_ceiling.lines(), None);
+    }
+
+    #[test]
+    fn a_ceiling_survives_being_written_and_read_again() {
+        for ceiling in [
+            UploadCeiling::Source,
+            UploadCeiling::Uhd,
+            UploadCeiling::Hd,
+            UploadCeiling::Hd720,
+        ] {
+            let settings = ShowSettings {
+                upload_ceiling: ceiling,
+                ..ShowSettings::default()
+            };
+            let written = serde_json::to_string(&settings).expect("writes");
+            let read: ShowSettings = serde_json::from_str(&written).expect("reads");
+            assert_eq!(read.upload_ceiling, ceiling, "in {written}");
+        }
+    }
+
+    #[test]
+    fn the_ceiling_is_left_out_of_a_document_that_does_not_use_it() {
+        // A show nobody has decided this for reads exactly as it did before the
+        // field existed, which is what keeps a diff of two shows about the show.
+        let plain = serde_json::to_string(&ShowSettings::default()).expect("writes");
+        assert!(!plain.contains("upload_ceiling"), "{plain}");
+
+        let decided = serde_json::to_string(&ShowSettings {
+            upload_ceiling: UploadCeiling::Hd720,
+            ..ShowSettings::default()
+        })
+        .expect("writes");
+        assert!(decided.contains("720P"), "{decided}");
+    }
+
+    #[test]
+    fn every_ceiling_says_how_many_lines_it_means() {
+        assert_eq!(UploadCeiling::Uhd.lines(), Some(2160));
+        assert_eq!(UploadCeiling::Hd.lines(), Some(1080));
+        assert_eq!(UploadCeiling::Hd720.lines(), Some(720));
+        assert_eq!(UploadCeiling::Source.lines(), None);
+    }
 
     fn show_with_two_layers() -> Show {
         let mut show = Show::new("Show");

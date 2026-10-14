@@ -20,11 +20,16 @@ import {
   planFor,
   preparedName,
   progressFrom,
+  ceilingAsWritten,
+  ceilingOf,
+  preparedSize,
   rateAsArgument,
   tagsFor,
   whyItStopped,
   CONSTANT_QUALITY,
   CONVENTIONAL_TAGS,
+  UPLOAD_CEILINGS,
+  UPLOAD_CEILING_LABELS,
   HEVC_BACKENDS,
   MEDIA_FOUNDATION_QUALITY,
 } from '../src/shared/encoder.js';
@@ -371,6 +376,97 @@ describe('how far an encode has got', () => {
   it('refuses a time that is not one', () => {
     expect(progressFrom('out_time_us=N/A')).toBeNull();
     expect(progressFrom('out_time_us=-1')).toBeNull();
+  });
+});
+
+describe('the ceiling an operator sets on an upload', () => {
+  const RATE = { numerator: 25, denominator: 1 };
+
+  it('leaves a clip alone when it is already under the ceiling', () => {
+    // A ceiling, not a target: nothing is ever made bigger. Four times the
+    // bytes for pixels the wall cannot show is the thing being avoided.
+    expect(preparedSize({ width: 1280, height: 720 }, 1080)).toBeNull();
+    expect(preparedSize({ width: 1920, height: 1080 }, 1080)).toBeNull();
+    expect(preparedSize({ width: 3840, height: 2160 }, 'source')).toBeNull();
+  });
+
+  it('brings a 4K clip down to the ceiling, keeping its shape', () => {
+    expect(preparedSize({ width: 3840, height: 2160 }, 1080)).toEqual({
+      width: 1920,
+      height: 1080,
+    });
+    expect(preparedSize({ width: 3840, height: 2160 }, 720)).toEqual({
+      width: 1280,
+      height: 720,
+    });
+  });
+
+  it('keeps both sides a multiple of eight, which Kvazaar insists on', () => {
+    // 1.85:1, where the shape does not land on eight by itself: 1332 lines
+    // across becomes 1336. Four pixels on thirteen hundred, against an encoder
+    // that answers ENOSYS before it looks at a frame.
+    const size = preparedSize({ width: 1998, height: 1080 }, 720);
+    expect(size).toEqual({ width: 1336, height: 720 });
+  });
+
+  it('decides nothing about a picture it was told nothing about', () => {
+    expect(preparedSize({ width: 0, height: 0 }, 720)).toBeNull();
+    expect(preparedSize({ width: Number.NaN, height: 1080 }, 720)).toBeNull();
+  });
+
+  it('puts the scale in front of the encoder, where a filter belongs', () => {
+    const args = hevcArguments('in.mp4', 'out.mp4', 'hevc_nvenc', 8, RATE, CONVENTIONAL_TAGS, [], {
+      width: 1280,
+      height: 720,
+    });
+    const filter = args.indexOf('-vf');
+    expect(filter).toBeGreaterThan(-1);
+    expect(args[filter + 1]).toBe('scale=1280:720:flags=lanczos');
+    expect(filter).toBeLessThan(args.indexOf('-c:v'));
+  });
+
+  it('says nothing about scaling when there is no ceiling to keep', () => {
+    const args = hevcArguments('in.mp4', 'out.mp4', 'hevc_nvenc', 8, RATE, CONVENTIONAL_TAGS);
+    expect(args).not.toContain('-vf');
+  });
+
+  it('scales a HAP file too, which is the heaviest thing this client writes', () => {
+    const args = hapArguments('in.mov', 'out.mov', RATE, [], { width: 1280, height: 720 });
+    expect(args[args.indexOf('-vf') + 1]).toBe('scale=1280:720:flags=lanczos');
+  });
+});
+
+describe('the ceiling as the show writes it', () => {
+  it('reads what a show says', () => {
+    expect(ceilingOf({ upload_ceiling: '720P' })).toBe(720);
+    expect(ceilingOf({ upload_ceiling: '1080P' })).toBe(1080);
+    expect(ceilingOf({ upload_ceiling: '2160P' })).toBe(2160);
+    expect(ceilingOf({ upload_ceiling: 'SOURCE' })).toBe('source');
+  });
+
+  it('reads a show that has never been told as "as it is"', () => {
+    // Every show written before this existed, which is all of them.
+    expect(ceilingOf({})).toBe('source');
+    expect(ceilingOf(null)).toBe('source');
+    expect(ceilingOf(undefined)).toBe('source');
+  });
+
+  it('writes back what it read, for every ceiling there is', () => {
+    for (const ceiling of UPLOAD_CEILINGS) {
+      expect(ceilingOf({ upload_ceiling: ceilingAsWritten(ceiling) })).toBe(ceiling);
+    }
+  });
+
+  it('refuses to understand a word it does not know', () => {
+    // A show from a newer build, or a hand-edited one. Taking the file as it is
+    // beats inventing a ceiling nobody asked for.
+    expect(ceilingOf({ upload_ceiling: '1440P' })).toBe('source');
+  });
+
+  it('offers a label for every ceiling it offers', () => {
+    for (const ceiling of UPLOAD_CEILINGS) {
+      expect(UPLOAD_CEILING_LABELS[String(ceiling)]).toBeTruthy();
+    }
   });
 });
 

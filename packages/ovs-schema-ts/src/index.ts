@@ -160,6 +160,7 @@ export type {
   OutputId,
   PieceId,
   PieceSource,
+  UploadCeiling,
   SaveShowRequest,
   Show,
   Composition,

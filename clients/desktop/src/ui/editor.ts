@@ -56,6 +56,12 @@ import {
   type ParameterMap,
 } from '../shared/modules.js';
 import { hexFromLinear, linearFromHex } from '../shared/colour.js';
+import {
+  ceilingOf,
+  UPLOAD_CEILINGS,
+  UPLOAD_CEILING_LABELS,
+  type UploadCeiling,
+} from '../shared/encoder.js';
 // **No slot editing here.** `assignSlot`, `bankIndices`, `clearSlot`,
 // `findSlot`, `setGeneratorParameter`, `setSlot` and `slotPath` were imported
 // and never called: the remains of a panel that moved to OPTIONS, where a slot
@@ -82,6 +88,7 @@ import {
   renameShow,
   revert,
   setAutoSave,
+  setUploadCeiling,
   setEffectEnabled,
   setEffectParameter,
   setLayer,
@@ -1419,9 +1426,27 @@ export class EditorPanel {
       this.#edit(setAutoSave(show, value)),
     );
 
+    // **On the show, because it is a fact about the wall.** What reaches a panel
+    // is the composition cut into pieces, and on a wall of 840x280 panels a
+    // 720-line clip already has more than one source pixel behind every pixel
+    // out there. Carrying four times that across the bus every frame costs the
+    // render thread and shows nobody anything.
+    const ceiling = this.#select(
+      UPLOAD_CEILINGS.map((value: UploadCeiling) => ({
+        value: String(value),
+        label: UPLOAD_CEILING_LABELS[String(value)] ?? String(value),
+      })),
+      String(ceilingOf(show.settings)),
+      (value) =>
+        this.#edit(
+          setUploadCeiling(show, value === 'source' ? 'source' : (Number(value) as 2160 | 1080 | 720)),
+        ),
+    );
+
     this.#ui.documentFields.replaceChildren(
       this.#field('Name', name, 'name'),
       this.#field('Notes', notes),
+      this.#field('Upload clips at most', ceiling),
       this.#inline('Save automatically on the server', autoSave),
     );
 

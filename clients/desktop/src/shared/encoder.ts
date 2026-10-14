@@ -204,6 +204,124 @@ export const CONSTANT_QUALITY = 18;
  */
 export const MEDIA_FOUNDATION_QUALITY = 70;
 
+/**
+ * The most a prepared clip may be, in lines.
+ *
+ * **Why an operator is asked at all.** A clip is prepared once and played all
+ * evening, and what reaches a wall is never the clip: it is the composition,
+ * cut into pieces, each piece landing on a panel. On the owner's own wall the
+ * largest piece is 840x280, taken from a 1366x444 region of a 1080p
+ * composition — so a 720p clip already puts more than one source pixel behind
+ * every pixel out there, and a 4K one carries 8.3 megapixels across the bus to
+ * show 0.235 of them.
+ *
+ * That waste is not free: every frame is copied into a staging buffer and then
+ * onto the card, on the render thread, and the copy at 2160 is **four times**
+ * the copy at 1080 (measured 2026-10-14: about 8.7 ms a layer at 1080p). The
+ * venue machine's processor is a six-core from 2016, where it costs more than
+ * it does here.
+ *
+ * So: a house that wants 1080 sets 1080, a wall of small panels sets 720, and
+ * material that has to stay as it is stays as it is.
+ */
+export type UploadCeiling = 'source' | 2160 | 1080 | 720;
+
+/**
+ * The ceiling a show asks for, in the terms this code works in.
+ *
+ * The document says `720P`; the arithmetic wants 720. Two vocabularies on
+ * purpose — a show is a file people read and keep for years, and a number in a
+ * filter argument is neither — with the one translation between them in one
+ * place and a test on it.
+ */
+export function ceilingOf(settings: { upload_ceiling?: string | null } | null | undefined): UploadCeiling {
+  switch (settings?.upload_ceiling) {
+    case '2160P':
+      return 2160;
+    case '1080P':
+      return 1080;
+    case '720P':
+      return 720;
+    default:
+      return 'source';
+  }
+}
+
+/** The same the other way, for writing a choice back into a show. */
+export function ceilingAsWritten(ceiling: UploadCeiling): string {
+  switch (ceiling) {
+    case 2160:
+      return '2160P';
+    case 1080:
+      return '1080P';
+    case 720:
+      return '720P';
+    default:
+      return 'SOURCE';
+  }
+}
+
+/** The ceilings an operator may choose, in the order they are offered. */
+export const UPLOAD_CEILINGS: readonly UploadCeiling[] = ['source', 2160, 1080, 720];
+
+/** What each ceiling is called where somebody picks one. */
+export const UPLOAD_CEILING_LABELS: Readonly<Record<string, string>> = {
+  source: 'As it is',
+  2160: '2160p (UHD)',
+  1080: '1080p (HD)',
+  720: '720p',
+};
+
+/**
+ * Picture sizes are kept to a multiple of this.
+ *
+ * Kvazaar refuses a width or height that is not a multiple of eight outright —
+ * FFmpeg's wrapper answers `ENOSYS` before the encoder sees a frame — and no
+ * hardware encoder minds one. Eight is the number that works everywhere rather
+ * than the smallest that would work here.
+ */
+const PICTURE_STEP = 8;
+
+/**
+ * The size a clip should be prepared at, or `null` to leave it alone.
+ *
+ * Never upscales: a ceiling is a ceiling, and a 720p source asked for 2160
+ * gains nothing but four times the bytes. The width follows the source's shape
+ * and is rounded to a multiple of eight, which can move it by at most four
+ * pixels — a thousandth of the picture, against an encoder that would otherwise
+ * refuse the file.
+ */
+export function preparedSize(
+  source: { width: number; height: number },
+  ceiling: UploadCeiling,
+): { width: number; height: number } | null {
+  if (ceiling === 'source') {
+    return null;
+  }
+  const { width, height } = source;
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    // Nothing is known about the picture, so nothing is decided about it.
+    return null;
+  }
+  if (height <= ceiling) {
+    return null;
+  }
+  const scaled = Math.round((width * ceiling) / height);
+  const stepped = Math.max(PICTURE_STEP, Math.round(scaled / PICTURE_STEP) * PICTURE_STEP);
+  return { width: stepped, height: ceiling };
+}
+
+/** The filter that puts a picture at `size`, for an encode that needs one. */
+function scaleArguments(size: { width: number; height: number } | null): string[] {
+  if (size === null) {
+    return [];
+  }
+  // Lanczos, because this only ever makes a picture smaller, and a soft
+  // downscale of a hard-edged graphic is where "the VJ loop looks mushy" comes
+  // from.
+  return ['-vf', `scale=${size.width}:${size.height}:flags=lanczos`];
+}
+
 export function hevcArguments(
   from: string,
   into: string,
@@ -212,6 +330,7 @@ export function hevcArguments(
   rate: FrameRate,
   tags: ColourTags,
   readAs: readonly string[] = [],
+  size: { width: number; height: number } | null = null,
 ): string[] {
   const keyframes = keyframeArguments(backend, rate);
 
@@ -252,6 +371,7 @@ export function hevcArguments(
 
   return [
     ...common(from, [...readAs, ...colour]),
+    ...scaleArguments(size),
     '-c:v',
     backend,
     ...qualityArguments(backend, MOST_BITS_PER_SECOND, rate, tags),
@@ -286,9 +406,11 @@ export function hapArguments(
   into: string,
   rate: FrameRate,
   readAs: readonly string[] = [],
+  size: { width: number; height: number } | null = null,
 ): string[] {
   return [
     ...common(from, readAs),
+    ...scaleArguments(size),
     '-c:v',
     'hap',
     '-format',

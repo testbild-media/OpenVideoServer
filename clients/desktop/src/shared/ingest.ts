@@ -35,9 +35,11 @@ import { ApiFailure } from './api.js';
 import type { ProbedVideo } from './profile.js';
 import {
   planFor,
+  preparedSize,
   tagsFor,
   type ColourTags,
   type HevcBackend,
+  type UploadCeiling,
 } from './encoder.js';
 import { MAX_SIDE } from './limits.js';
 import { faults, passesWithoutReadingPackets, profileOf, type OvsProfile } from './profile.js';
@@ -441,6 +443,8 @@ export interface IngestPorts {
     tags: ColourTags,
     onProgress: (seconds: number) => void,
     stop: AbortSignal,
+    /** The size to prepare at, or `null` to keep the picture as it is. */
+    size: { width: number; height: number } | null,
   ): Promise<PrepareOutcome>;
   /** Removes a file this client made. Best effort, and never the operator's. */
   discard(path: string): Promise<void>;
@@ -530,6 +534,19 @@ export class IngestQueue {
   #items: QueueItem[] = [];
   #busy = false;
   #counter = 0;
+  /**
+   * The most a clip may be prepared at, as the show asks for it.
+   *
+   * One setting for the queue rather than one per row: an evening's material
+   * goes to one wall, and asking per file would be asking the same question
+   * twenty times. It comes from the show, so every client uploading to that
+   * server agrees about it — the wall is the show's property, not this
+   * laptop's.
+   *
+   * `source` until a show says otherwise, which is this client doing nothing it
+   * was not asked to.
+   */
+  #ceiling: UploadCeiling = 'source';
 
   constructor(
     private readonly ports: IngestPorts,
@@ -600,6 +617,22 @@ export class IngestQueue {
     item.stage = { at: 'waiting' };
     this.#report();
     this.#pump();
+  }
+
+  /**
+   * The most a clip may be prepared at, from the next file onwards.
+   *
+   * Changing it leaves an encode that is already running alone: stopping one to
+   * redo it smaller is a decision an operator makes by removing the row, not a
+   * thing a dropdown does behind their back.
+   */
+  setCeiling(ceiling: UploadCeiling): void {
+    this.#ceiling = ceiling;
+  }
+
+  /** What that ceiling is, for a panel that has to show it. */
+  ceiling(): UploadCeiling {
+    return this.#ceiling;
   }
 
   /**
@@ -719,6 +752,9 @@ export class IngestQueue {
     const rate = from.frameRate ?? { numerator: 25, denominator: 1 };
     const ofSeconds = from.durationMs === null ? null : from.durationMs / 1000;
     const tags = tagsFor(from.video ?? {});
+    // Decided here rather than in the encoder, because the probe is what knows
+    // how big the picture is and this is the one place that has both.
+    const size = preparedSize({ width: from.width, height: from.height }, this.#ceiling);
 
     this.#set(item, { at: 'preparing', seconds: 0, ofSeconds, to });
     const stop = new AbortController();
@@ -736,6 +772,7 @@ export class IngestQueue {
           }
         },
         stop.signal,
+        size,
       )
       .finally(() => {
         item.stop = null;

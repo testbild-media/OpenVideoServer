@@ -69,6 +69,7 @@ import {
   MIN_SPEED_SCALE,
   SLOTS_PER_BANK,
 } from './limits.js';
+import { ceilingAsWritten, type UploadCeiling } from './encoder.js';
 import { newId } from './ids.js';
 import {
   connectorKey,
@@ -412,6 +413,21 @@ export function renameShow(show: Show, name: string): Edit {
 /** Turns auto-save on or off. */
 export function setAutoSave(show: Show, autoSave: boolean): Edit {
   return applied({ ...show, settings: { ...show.settings, auto_save: autoSave } });
+}
+
+/**
+ * Sets the most a clip may be prepared at before it is uploaded here.
+ *
+ * On the show rather than in a preference, because it is a fact about the wall
+ * this material is for: a house that runs 1080 and a wall of 840x280 panels
+ * want different answers, and whoever uploads next should not have to know
+ * which building they are in.
+ */
+export function setUploadCeiling(show: Show, ceiling: UploadCeiling): Edit {
+  return applied({
+    ...show,
+    settings: { ...show.settings, upload_ceiling: ceilingAsWritten(ceiling) as never },
+  });
 }
 
 /** Replaces the operator's notes. */

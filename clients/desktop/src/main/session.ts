@@ -54,6 +54,7 @@ import {
   type IngestFiles,
   type QueueItem,
 } from '../shared/ingest.js';
+import { ceilingOf } from '../shared/encoder.js';
 import { COMPOSITION_SURFACE, MASKED_SURFACE } from '../shared/stream.js';
 import { emptyView, toView, type ShowView } from '../shared/view.js';
 import type { Answer, Command, CommandResult, TapResult } from '../shared/types.js';
@@ -175,6 +176,10 @@ export class Session {
         },
         state: (state) => {
           this.#view = toView(state);
+          // **The ceiling comes from the show, not from this laptop.** It is a
+          // property of the wall the material is for, so every client uploading
+          // to this server agrees about it without anybody being told twice.
+          this.#ingest.setCeiling(ceilingOf(state.show?.settings));
           this.listener.view(this.#view);
         },
         telemetry: (telemetry) => this.listener.telemetry(telemetry),

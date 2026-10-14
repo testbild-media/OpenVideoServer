@@ -618,6 +618,13 @@ export async function prepareFile(
   tags: ColourTags,
   onProgress: (seconds: number) => void,
   stop?: AbortSignal,
+  /**
+   * The size to prepare at, or `null` to keep the picture as it is.
+   *
+   * Decided by the queue from the probe and the ceiling an operator set, never
+   * here: this function has the file and not the show it is for.
+   */
+  size: { width: number; height: number } | null = null,
 ): Promise<PrepareOutcome> {
   const directory = await mkdtemp(join(tmpdir(), 'ovs-prepare-'));
   const into = join(directory, preparedName(basenameOf(path), to));
@@ -628,10 +635,10 @@ export async function prepareFile(
   // reported — so the honest answer is the same as having no FFmpeg.
   const args =
     depth === null
-      ? hapArguments(path, into, rate)
+      ? hapArguments(path, into, rate, [], size)
       : backend === null
         ? null
-        : hevcArguments(path, into, backend, depth, rate, tags);
+        : hevcArguments(path, into, backend, depth, rate, tags, [], size);
   if (args === null) {
     await rm(directory, { recursive: true, force: true });
     return { kind: 'unavailable' };
