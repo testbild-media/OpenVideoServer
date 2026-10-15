@@ -2555,7 +2555,7 @@ export class LivePanel {
         : kind === 'media'
           ? 'This server holds no media yet. Import some in MEDIA.'
           : kind === 'inputs'
-            ? 'No NDI senders on this network.'
+            ? 'No NDI\u00AE senders on this network.'
             : `This server publishes no ${kind}.`;
 
     // What the grid is made of, as one string. Which things are in it and in

@@ -46,6 +46,44 @@ The source in this repository is Apache-2.0 and links to nothing on its own. A
       that requirement in 4.0, the headers are MIT, and the driver is loaded at
       runtime rather than linked. `--enable-nonfree` is not used.
 
+  NDI® runtime (libndi), when a build carries one
+
+      **Not open source, and carried by permission rather than by licence
+      compatibility.** The NDI SDK agreement grants it at 2a: "a nonexclusive
+      royalty-free license ... to distribute, only in accordance with the SDK
+      Documentation requirements, object code included in the SDK solely as
+      used by such Products". The SDK itself is confidential and is not in this
+      repository; the runtime is named at package time and is not here either.
+
+      A build that carries it does so under these terms, which 3d of that
+      agreement requires to travel with it, and which therefore apply to you if
+      somebody hands you such a build:
+
+        - the NDI runtime may not be modified, reverse engineered, disassembled
+          or recompiled, nor may its protocols be, whether on the wire or
+          inside the machine, and no attempt may be made to do so;
+        - its technical limitations may not be circumvented;
+        - no proprietary notice or label on or within it may be removed,
+          obscured or altered;
+        - NDI, Inc. and its licensors give no warranty of any kind for it, and
+          disclaim liability for any damage, direct or indirect, arising from
+          its use, to the extent the law allows;
+        - it may not be exported in violation of United States law;
+        - anyone building a product on this one must comply with the NDI SDK
+          licence in turn, and must carry these same terms to their own users.
+
+      The copyright in the NDI runtime is NDI, Inc.'s.
+
+      NDI® is a registered trademark of Vizrt NDI AB. This product is not a
+      product of NDI and nothing here is sponsored or endorsed by them: where
+      the name appears - "NDI - on the network", "the NDI senders on this
+      network" - it says only that this product is compatible with NDI, which
+      is what 3f of the agreement allows it to say.
+
+      A package built without the runtime is unaffected by any of the above. It
+      has no network sources and no network outputs, and says so once in the
+      log; `deploy/README.md` has the rest.
+
   Vulkan loader (libvulkan1)
 
       Apache-2.0. Declared as a dependency and not carried, because the

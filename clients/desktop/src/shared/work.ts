@@ -159,9 +159,18 @@ export const WORK_TABS: readonly TabDefinition<WorkTab>[] = [
     id: 'inputs',
     label: 'INPUTS',
     kind: 'assigns',
+    // **The trademark notice is here because this is where the name is
+    // used.** The NDI SDK licence allows the name only to say a product is
+    // compatible with NDI, and asks for a clear notation that the mark is
+    // theirs wherever it is used; the registered designation goes on the first
+    // use in a view and not on every one. This panel is where an operator
+    // meets the word, so this is where it says whose it is. Nothing here
+    // claims a relationship with them, because there is not one.
     says:
-      'Live sources this machine can take. The NDI senders on this network appear here as they are switched on. ' +
-      'Capture cards and a page are not part of this build, and neither is faked.',
+      'Live sources this machine can take. Cameras and other senders arrive here over NDI\u00AE as they are ' +
+      'switched on. ' +
+      'Capture cards and a page are not part of this build, and neither is faked. ' +
+      'NDI\u00AE is a registered trademark of Vizrt NDI AB.',
     sends: [],
   },
   {

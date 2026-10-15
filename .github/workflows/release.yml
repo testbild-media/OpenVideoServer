@@ -496,8 +496,47 @@ jobs:
           cargo install export-cef-dir --version "=${{ steps.cef.outputs.version }}"
           export-cef-dir -f ~/.local/share/cef
 
+      # **The NDI runtime, if this repository has been given somewhere to get
+      # it.** The SDK licence allows it to be bundled with the product (NOTICE
+      # sets out what that obliges); it does not allow the SDK to be handed
+      # about, and this repository is public, so the library cannot live here.
+      #
+      # It is fetched instead from a URL kept as a repository secret. Without
+      # the secret — a fork, a pull request, anybody else's build — this step
+      # does nothing and the package is the one this project made before, with
+      # no NDI and a line in the log saying so.
+      #
+      # The URL must serve the library itself, not the SDK archive: the SDK is
+      # confidential under 4a and putting it behind a link is still handing it
+      # about.
+      - name: Fetch the NDI runtime, if there is one to fetch
+        id: ndi
+        env:
+          NDI_RUNTIME_URL: ${{ secrets.NDI_RUNTIME_URL }}
+        run: |
+          if [ -z "${NDI_RUNTIME_URL:-}" ]; then
+            echo "no NDI_RUNTIME_URL secret; this package will carry no NDI"
+            exit 0
+          fi
+          mkdir -p build/ndi
+          curl -fsSL --retry 3 -o build/ndi/libndi.so "$NDI_RUNTIME_URL"
+          # A link that quietly serves an error page is a 27-byte "library"
+          # that packages perfectly and never loads.
+          size=$(stat -c%s build/ndi/libndi.so)
+          if [ "$size" -lt 1000000 ]; then
+            echo "what came back is $size bytes, which is not the NDI runtime" >&2
+            exit 1
+          fi
+          echo "runtime=$PWD/build/ndi/libndi.so" >> "$GITHUB_OUTPUT"
+          echo "fetched $size bytes"
+
       - name: Build the package
-        run: ./tools/package.sh
+        run: |
+          if [ -n "${{ steps.ndi.outputs.runtime }}" ]; then
+            ./tools/package.sh --ndi="${{ steps.ndi.outputs.runtime }}"
+          else
+            ./tools/package.sh
+          fi
 
       - name: Say what came out
         run: |

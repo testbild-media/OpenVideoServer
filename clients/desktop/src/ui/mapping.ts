@@ -1169,7 +1169,7 @@ export class MappingPanel {
     const fill = (): void => {
       const sockets = this.#select(
         [
-          { value: NETWORK_OUTPUT, label: 'NDI \u2014 on the network' },
+          { value: NETWORK_OUTPUT, label: 'NDI\u00AE \u2014 on the network' },
           ...connectors.map((connector) => {
             const key = connectorKey(connector.gpu_pci_address, connector.connector);
             return {
@@ -1485,7 +1485,7 @@ export class MappingPanel {
 
     // The network sits in the list with the sockets, so moving a wall onto it
     // and back is the same gesture as moving it between two cards.
-    options.unshift({ value: NETWORK_OUTPUT, label: 'NDI \u2014 on the network' });
+    options.unshift({ value: NETWORK_OUTPUT, label: 'NDI\u00AE \u2014 on the network' });
 
     const chosenSocket = output.on_the_network === true ? NETWORK_OUTPUT : (key ?? '');
     const socket = this.#select(options, chosenSocket, (value) => {

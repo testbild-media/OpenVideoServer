@@ -48,6 +48,7 @@ build=yes
 for argument in "$@"; do
   case "$argument" in
     --no-build) build=no ;;
+    --ndi=*) ndi_runtime="${argument#--ndi=}" ;;
     *) echo "unknown option: $argument" >&2; exit 2 ;;
   esac
 done
@@ -81,6 +82,25 @@ staging="target/package/${package}_${version}_${architecture}"
 # The FFmpeg this package ships. Built rather than found, because what makes
 # it the right one is how it was configured, and a build lying around from
 # something else is not evidence of that.
+# **The NDI runtime, when whoever is building has one to give.**
+#
+# The SDK licence grants it at 2a - "a nonexclusive royalty-free license ... to
+# distribute ... object code included in the SDK solely as used by such
+# Products" - and the SDK documentation says where it goes: "include the NDI
+# DLLs as part of your own application and keep them in your application
+# folders ... Please do not install your NDI DLLs into the system path for this
+# reason." This package has such a folder, with its own FFmpeg in it and an
+# RPATH pointing there, and the renderer opens the library by bare name, so a
+# copy in that folder is found before any the machine happens to have. Proved
+# on PC05 on 2026-10-15: with one in each place, the renderer mapped this one.
+#
+# **It is not in this repository and must not be.** The repository is public;
+# the runtime belongs in the product it is bundled with, not loose in a source
+# tree. It is named at build time instead - by `--ndi=`, or `OVS_NDI_RUNTIME` -
+# so a build without one simply makes the package this project made before,
+# with no NDI and a line in the log saying so.
+ndi_runtime="${OVS_NDI_RUNTIME:-}"
+
 ffmpeg_dir="$PWD/build/ffmpeg-server"
 if [ ! -f "$ffmpeg_dir/lib/libavcodec.so" ] && [ ! -f "$ffmpeg_dir/lib/libavcodec.so.61" ]; then
   echo "no licence-clean FFmpeg in $ffmpeg_dir; building one"
@@ -229,6 +249,36 @@ done
 [ -f "$ffmpeg_dir/CONFIGURATION.txt" ] && install -m 0644 \
   "$ffmpeg_dir/CONFIGURATION.txt" "$staging/usr/share/doc/$package/FFMPEG-CONFIGURATION.txt"
 
+# The NDI runtime, under the name the renderer opens. `readlink -f` because
+# what is named may be the SDK's symlink, and a symlink into a directory the
+# package does not carry would be a library that is not there.
+if [ -n "$ndi_runtime" ]; then
+  ndi_file=$(readlink -f "$ndi_runtime" 2>/dev/null || true)
+  if [ ! -f "$ndi_file" ]; then
+    echo "--ndi names $ndi_runtime, which is not a file" >&2
+    exit 1
+  fi
+  # The soname it will be opened by, read from the library rather than assumed:
+  # a future SDK with a different one would otherwise be staged under a name
+  # nothing looks for, and NDI would go quiet with the file sitting right there.
+  ndi_soname=$(objdump -p "$ndi_file" 2>/dev/null | awk '/SONAME/ { print $2 }')
+  : "${ndi_soname:=libndi.so.6}"
+  install -m 0644 "$ndi_file" "$staging$PRIVATE_LIB/$ndi_soname"
+  echo "carrying the NDI runtime as $ndi_soname ($(du -h "$ndi_file" | cut -f1))"
+
+  # Its licence material, beside FFmpeg's and Chromium's, for the same reason:
+  # shipping somebody else's library and not its licence is the one obligation
+  # that is trivial to forget. 3d of the SDK licence requires the copyright
+  # notice to travel with it.
+  for licence in "$(dirname "$ndi_runtime")"/../../licenses/*.txt \
+                 "$(dirname "$ndi_runtime")"/../../*License*.txt; do
+    [ -f "$licence" ] && install -m 0644 "$licence" \
+      "$staging/usr/share/doc/$package/NDI-$(basename "$licence")"
+  done
+else
+  echo "no NDI runtime named; this package will carry none"
+fi
+
 # It has to be the build that was just staged, not the machine's. Checked here
 # rather than trusted, because the failure is silent: a binary that found
 # Debian's libavcodec works perfectly and is the wrong licence.
@@ -239,6 +289,12 @@ for binary in ovsd ovs-renderer; do
   fi
 done
 install -m 0644 LICENSE "$staging/usr/share/doc/$package/copyright" 2>/dev/null || true
+# **And NOTICE, which was not carried at all until 2026-10-15.** It is the file
+# that says what the carried FFmpeg obliges anybody redistributing this, and
+# since the package may now carry the NDI runtime it is also where 3d of that
+# licence's terms live. A package that leaves it behind is a package whose
+# obligations travel only in a source tree nobody installing it has.
+install -m 0644 NOTICE "$staging/usr/share/doc/$package/NOTICE" 2>/dev/null || true
 install -m 0644 deploy/README.md "$staging/usr/share/doc/$package/README.md"
 
 # The client, if somebody has put one here. The owner asked for it in the
@@ -322,6 +378,15 @@ done
 # minimal Debian and leave a System screen that cannot load its own library.
 [ -f "$staging$PRIVATE_LIB/cef/libcef.so" ] \
   && carried+=("$OLDPWD/$staging$PRIVATE_LIB/cef/libcef.so")
+
+# **And NDI, for the same reason, more quietly.** It is opened at run time and
+# never linked, so `dpkg-shlibdeps` would not hear about it from the binaries.
+# A dependency of its own that the machine lacks makes the `dlopen` fail, and a
+# failed `dlopen` here is one INFO line saying there is no NDI on this machine -
+# which is indistinguishable from a machine that simply has no cameras.
+for library in "$staging$PRIVATE_LIB"/libndi.so.*; do
+  [ -f "$library" ] && carried+=("$OLDPWD/$library")
+done
 
 if [ ${#carried[@]} -gt 0 ]; then
   ( cd "$scratch" && dpkg-shlibdeps -O --ignore-missing-info \
