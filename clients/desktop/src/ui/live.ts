@@ -2283,10 +2283,13 @@ export class LivePanel {
       return;
     }
     if (slot.source.kind === 'ndi') {
-      // A stream has no thumbnail to draw and no strip to scrub: what it looks
-      // like is whatever is being sent this second. Named rather than drawn as
-      // a picture this client does not have.
-      target.replaceChildren(make('span', 'pad-generator', this.#sourceName(slot)));
+      // The mark, as on the tile this pad was dragged from. A stream has no
+      // thumbnail to draw and no strip to scrub — what it looks like is
+      // whatever is being sent this second, and receiving it here to fill a
+      // pad would put a second receiver on the network for every sender
+      // nobody is watching. So the picture says what kind of thing this is
+      // and the label underneath says which one.
+      paintNdiMark(target);
       return;
     }
     const item = slot.source.mediaItemId;
@@ -2730,28 +2733,16 @@ export class LivePanel {
     // is not watching — so the picture says what kind of thing this is, and
     // the text says which one.
     //
-    // **NDI's own file, from the brand assets in the SDK**, and the light one
-    // because this tile is dark: the SDK names its two by the colour of the
-    // mark rather than of what it sits on, so "Dark" is the one for a white
-    // page. A vector, so 92 pixels and 180 are both exactly right.
-    //
-    // Shown whole and never cropped: `object-fit: contain` is what keeps a
-    // tile trimming it, and the mark is 1047 by 550 against a 16:9 box, so a
-    // thin band above and below is the honest way to show it. Altering the
-    // mark is not ours to do, and a crop is an alteration.
+    // **NDI's own file, from the brand assets in the SDK** — see
+    // `paintNdiMark`, which is also what a pad holding one of these shows. A
+    // vector, so 92 pixels and 180 are both exactly right.
     //
     // The machine has moved into the tooltip, where the full name already
     // was. On a rig where three machines each send "Program" the tiles now
     // read alike and only the hover tells them apart; that is the cost of one
     // line of text and it is the owner's call, taken 2026-10-15.
     const picture = make('div', 'browser-tile-picture');
-    const mark = make('img', 'ndi-mark');
-    mark.src = '../assets/ndi.svg';
-    mark.alt = 'NDI';
-    // The tile carries the drag; an image that starts its own would hand the
-    // pad a picture instead of a source.
-    mark.draggable = false;
-    picture.append(mark);
+    paintNdiMark(picture);
     node.append(picture, make('span', 'browser-tile-name', tile.stream));
     node.title = `${tile.name}${NEWLINE}Drag onto a pad to put it there.`;
 
@@ -5026,6 +5017,35 @@ function ordinal(value: number): string {
     ? 'th'
     : ({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[value % 10] ?? 'th';
   return `${value}${suffix}`;
+}
+
+/**
+ * NDI's own mark, from the brand assets in the SDK.
+ *
+ * The light one, because everything it sits on here is dark: the SDK names its
+ * two by the colour of the mark rather than of what is behind it.
+ */
+const NDI_MARK = '../assets/ndi.svg';
+
+/**
+ * Puts the NDI mark in a box, as the picture of a source on the network.
+ *
+ * Shown whole and never cropped — `object-fit: contain` does that — because
+ * the mark is 1047 by 550 against a 16:9 box and a crop is an alteration,
+ * which is not ours to make.
+ */
+function paintNdiMark(target: HTMLElement): void {
+  const existing = target.firstElementChild;
+  if (existing instanceof HTMLImageElement && existing.getAttribute('src') === NDI_MARK) {
+    return;
+  }
+  const mark = make('img', 'ndi-mark');
+  mark.src = NDI_MARK;
+  mark.alt = 'NDI';
+  // The pad or the tile carries the drag; an image that started its own would
+  // hand the target a picture instead of a source.
+  mark.draggable = false;
+  target.replaceChildren(mark);
 }
 
 /**
