@@ -129,11 +129,41 @@ be able to make the second.
   an installer on a machine that has just been given a driver means to finish the
   job, while `apt upgrade` may be running unattended on the afternoon of one.
   `--no-reboot` declines it.
-- **It carries no NDI runtime, and cannot.** The NDI SDK's licence does not let
-  this project redistribute it. So a machine without one has no network sources
-  and no network outputs, and says so once at startup and nowhere else — which
-  is exactly how it was met: a server that "sees no NDI on the network", and one
-  INFO line in the journal that nobody had been told to look for.
+- **It carries no NDI runtime today, which is a decision and not a
+  prohibition.** This said "and cannot — the licence does not let this project
+  redistribute it", and that was wrong. The SDK licence grants, at §2a, "a
+  nonexclusive royalty-free license … to distribute, only in accordance with
+  the SDK Documentation requirements, object code included in the SDK solely as
+  used by such Products". That is how every other product in this field ships
+  with NDI working out of the box.
+
+  What it costs is obligations rather than money, and they fall on the
+  licensee — whoever accepted the SDK agreement — not on this file:
+
+  - the product's own licence must carry the terms §3d sets out: no
+    modification, reverse engineering or circumvention of the SDK, no removal
+    of notices, NDI's warranty and liability disclaimers, export compliance,
+    NDI's copyright notice, and the same terms passed on to anyone building on
+    this;
+  - NDI's trademarks may be used only to say a product is *compatible with*
+    NDI, with the mark noted as theirs and nothing suggesting sponsorship (§3f);
+  - the bundled runtime must be the current SDK at the time it is shipped
+    (§2b), so it joins the list of things a release has to keep up to date.
+
+  **And it would not go where it is now.** The SDK documentation is explicit:
+  "You should include the NDI DLLs as part of your own application and keep
+  them in your application folders … Please do not install your NDI DLLs into
+  the system path for this reason" — the reason being a collision with another
+  application's copy. This package already has an application folder with its
+  own FFmpeg in it and an RPATH pointing there, which is exactly where the
+  runtime would belong. Installing it into `/usr/local/lib`, as the section
+  below does, is what the SDK asks you not to do.
+
+  Until somebody decides to take those obligations on, a machine without the
+  runtime has no network sources and no network outputs, and says so once at
+  startup and nowhere else — which is exactly how it was met: a server that
+  "sees no NDI on the network", and one INFO line in the journal that nobody
+  had been told to look for.
 
   ```bash
   journalctl -u ovs-renderer -b | grep -i ndi
