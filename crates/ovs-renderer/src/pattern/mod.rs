@@ -65,7 +65,6 @@ pub mod pieces;
 
 use ovs_types::geometry::{FrameRate, SizePx};
 
-use crate::media::bands::in_bands;
 use crate::media::DecodedImage;
 
 /// How long the sweep takes to cross, in seconds.
@@ -221,23 +220,24 @@ impl ServicePattern {
         let Self { tile, image, .. } = self;
         let pixels = image.pixels_mut();
 
-        // Eight megabytes of copying for a 1920x1080 picture, every pass, and
-        // every row independent of every other. One row's destination depends
-        // only on its own index, so a band needs nothing but to be told where
-        // it starts.
-        in_bands(pixels, width, |band, first_row| {
-            for (row, line) in band.chunks_mut(stride).enumerate() {
-                let y = first_row + row;
-                let source = (y + height - shift_y) % height;
-                let from = source * stride;
+        // **In one thread, and that is the measured answer.** Eight megabytes
+        // of copying for a 1920x1080 picture every pass, and every row is
+        // independent, so this looks exactly like work to share out. It was,
+        // and on PC05 it was *slower*: 4,158 us a pass in one thread against
+        // 5,427 shared out. Copying is limited by how fast memory will go, not
+        // by how many cores ask it to, and the asking is not free. The noise
+        // field next door is arithmetic and goes twice as fast across the
+        // pool; this is not, and does not.
+        for (row, line) in pixels.chunks_mut(stride).enumerate() {
+            let source = (row + height - shift_y) % height;
+            let from = source * stride;
 
-                // Two copies per row, because the picture wraps: the right-hand
-                // end of the bars comes round to the left.
-                let (left, right) = tile[from..from + stride].split_at(stride - split);
-                line[..split].copy_from_slice(right);
-                line[split..stride].copy_from_slice(left);
-            }
-        });
+            // Two copies per row, because the picture wraps: the right-hand
+            // end of the bars comes round to the left.
+            let (left, right) = tile[from..from + stride].split_at(stride - split);
+            line[..split].copy_from_slice(right);
+            line[split..stride].copy_from_slice(left);
+        }
     }
 
     /// Blends the sweep over what is there.
@@ -276,11 +276,12 @@ impl ServicePattern {
         // straight line and can be walked rather than recomputed.
         let per_pixel = (1.0 / std::f32::consts::SQRT_2) / trail * RAMP_STEPS as f32;
 
-        // Every row's span of the sweep is worked out from the row's own index,
-        // so the bands do not need to agree about anything.
-        in_bands(pixels, columns, |band, first_row| {
-            for (index, line) in band.chunks_mut(stride).enumerate() {
-                let row = (first_row + index) as f32;
+        // In one thread too, for the same reason the drift is: this touches a
+        // diagonal band of the picture rather than all of it, so there is less
+        // work here than in the copy that was measured as not worth sharing.
+        {
+            for (index, line) in pixels.chunks_mut(stride).enumerate() {
+                let row = index as f32;
                 let first = (start * std::f32::consts::SQRT_2 - row).max(0.0) as usize;
                 let last = ((edge * std::f32::consts::SQRT_2 - row).max(0.0) as usize).min(columns);
                 if first >= last {
@@ -307,7 +308,7 @@ impl ServicePattern {
                     }
                 }
             }
-        });
+        }
     }
 
     /// Blends the caption into the middle.
