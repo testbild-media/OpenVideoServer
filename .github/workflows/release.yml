@@ -506,34 +506,54 @@ jobs:
       # does nothing and the package is the one this project made before, with
       # no NDI and a line in the log saying so.
       #
-      # **What the URL must serve: a `.tar.gz` holding the library and its
-      # licence text, and nothing else.** Not the SDK archive — the SDK is
-      # confidential under 4a, and putting it behind a link is still handing it
-      # about. Two files rather than one because the licence text has to travel
-      # with the library: shipping somebody else's library and not its licence
-      # is the one obligation that is trivial to forget, and a bare `.so` on
-      # the end of a link is exactly how it gets forgotten.
+      # **From NDI, every time, so it is always the current one.** 2b of the
+      # agreement requires the bundled runtime to be the latest SDK available
+      # when it is distributed — which is an obligation somebody has to
+      # remember, unless the build simply fetches what NDI publishes today.
       #
-      #   tar czf ndi-runtime.tar.gz \
-      #     -C "NDI SDK for Linux" lib/x86_64-linux-gnu/libndi.so.6.3.2 \
-      #     licenses/libndi_licenses.txt
-      - name: Fetch the NDI runtime, if there is one to fetch
+      # The library is deliberately not in this repository: it is public, and
+      # 3a makes the SDK confidential. What 2a permits is the runtime inside
+      # the product, and the product is the `.deb` this job builds.
+      #
+      # The download is the ordinary SDK installer, a shell script with its
+      # archive appended after `__NDI_ARCHIVE_BEGIN__`. Its payload is taken
+      # out directly rather than by running it and answering its prompt: the
+      # same operation, without printing twenty kilobytes of licence into a
+      # public log. The agreement was accepted by the licensee, and its terms
+      # travel with the package in NOTICE.
+      #
+      # `NDI_RUNTIME_URL` overrides the address, for the day NDI moves the
+      # file — it has moved before — or to pin a version deliberately. Set it
+      # to a tarball of the library and its licence text and this still works.
+      - name: Fetch the NDI runtime
         id: ndi
         env:
           NDI_RUNTIME_URL: ${{ secrets.NDI_RUNTIME_URL }}
         run: |
-          if [ -z "${NDI_RUNTIME_URL:-}" ]; then
-            echo "no NDI_RUNTIME_URL secret; this package will carry no NDI"
-            exit 0
+          url="${NDI_RUNTIME_URL:-https://downloads.ndi.tv/SDK/NDI_SDK_Linux/Install_NDI_SDK_v6_Linux.tar.gz}"
+          rm -rf build/ndi && mkdir -p build/ndi
+          if ! curl -fsSL --retry 3 -o build/ndi-download "$url"; then
+            echo "" >&2
+            echo "the NDI runtime could not be fetched from $url" >&2
+            echo "If NDI has moved it, put the new address in the" >&2
+            echo "NDI_RUNTIME_URL repository secret and run this again." >&2
+            exit 1
           fi
-          mkdir -p build/ndi
-          curl -fsSL --retry 3 -o build/ndi.tar.gz "$NDI_RUNTIME_URL"
-          tar xzf build/ndi.tar.gz -C build/ndi
+          tar xzf build/ndi-download -C build/ndi
 
-          library=$(find build/ndi -name 'libndi.so.*' -type f | head -1)
+          # The installer, if that is what came back: its archive begins on the
+          # line after the marker, which is how the installer reads it too.
+          installer=$(find build/ndi -maxdepth 2 -name 'Install_NDI_SDK*.sh' | head -1)
+          if [ -n "$installer" ]; then
+            begins=$(awk '/^__NDI_ARCHIVE_BEGIN__/ { print NR + 1; exit 0 }' "$installer")
+            ( cd build/ndi && tail -n +"$begins" "$(basename "$installer")" | tar xz )
+            rm -f "$installer"
+          fi
+
+          library=$(find build/ndi -path '*x86_64*' -name 'libndi.so.*.*.*' -type f | head -1)
           if [ -z "$library" ]; then
-            echo "what came back holds no libndi.so.*:" >&2
-            find build/ndi -type f | sed 's/^/  /' >&2
+            echo "what came back holds no x86_64 libndi:" >&2
+            find build/ndi -type f | head -40 | sed 's/^/  /' >&2
             exit 1
           fi
           # A link that quietly serves an error page unpacks to nothing, or to
@@ -545,7 +565,7 @@ jobs:
           fi
 
           echo "runtime=$PWD/$library" >> "$GITHUB_OUTPUT"
-          echo "fetched $(basename "$library"), $size bytes"
+          echo "fetched $(basename "$library"), $size bytes, from $url"
           find build/ndi -iname '*licen*' | sed 's/^/  licence text: /'
 
       - name: Build the package

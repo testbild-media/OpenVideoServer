@@ -162,14 +162,24 @@ be able to make the second.
   **Decided on 2026-10-15: it is carried.** `tools/package.sh --ndi=<file>`
   stages the library in the package's own library folder, under the soname
   read out of the file, and refuses to build if no licence text is found
-  beside it. The release workflow fetches a `.tar.gz` of the library and its
-  licence from a URL held in the `NDI_RUNTIME_URL` repository secret; without
-  the secret nothing is fetched and the package carries no NDI, which is what
-  a fork or a pull request builds.
+  beside it.
+
+  The release workflow fetches the SDK from NDI on every release and takes the
+  library out of it, so what ships is whatever NDI publishes that day — which
+  is what 2b asks for, and an obligation nobody then has to remember. The
+  installer is a shell script with its archive appended after
+  `__NDI_ARCHIVE_BEGIN__`; the payload is taken out directly rather than by
+  running the script and answering its prompt, which is the same operation
+  without printing twenty kilobytes of licence into a public log.
+
+  `NDI_RUNTIME_URL` overrides the address, for the day NDI moves the file — it
+  has moved before — or to pin a version deliberately.
 
   The library is deliberately **not** in this repository: it is public, and
-  the SDK is confidential under 4a of the agreement. What may be distributed
-  is the runtime inside the product, which is what the `.deb` is.
+  the SDK is confidential under 3a of the agreement. What may be distributed
+  is the runtime inside the product, which is what the `.deb` is. That anyone
+  can download the SDK from NDI does not change that: the agreement binds
+  whoever accepted it, however easy the file is to come by.
 
   A package built without the runtime has no network sources and no network
   outputs, and says so once at startup and nowhere else — which is exactly how it was met: a server that
