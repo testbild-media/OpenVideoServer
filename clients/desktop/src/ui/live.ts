@@ -2704,12 +2704,30 @@ export class LivePanel {
     const node = make('div', 'browser-tile ndi-tile');
     node.draggable = true;
 
-    // The stream large and the machine under it. Which way round matters on a
-    // rig where three machines each send "Program": the stream names are
-    // identical and the machine is the only thing that says which one this is.
+    // **The mark as the picture, the stream as the name.** A source has no
+    // thumbnail to show — a receiver that decoded one just to fill a tile
+    // would be a second receiver on the network for every sender an operator
+    // is not watching — so the picture says what kind of thing this is, and
+    // the text says which one.
+    //
+    // Shown whole and never cropped: the tile is 16:9 and so is the file, and
+    // `object-fit: contain` is what keeps a tile of another shape from
+    // trimming it. Altering the mark is not ours to do, and a crop is an
+    // alteration.
+    //
+    // The machine has moved into the tooltip, where the full name already
+    // was. On a rig where three machines each send "Program" the tiles now
+    // read alike and only the hover tells them apart; that is the cost of one
+    // line of text and it is the owner's call, taken 2026-10-15.
     const picture = make('div', 'browser-tile-picture');
-    picture.append(make('span', 'tile-mark', tile.stream));
-    node.append(picture, make('span', 'browser-tile-name', tile.machine));
+    const mark = make('img', 'ndi-mark');
+    mark.src = '../assets/ndi.webp';
+    mark.alt = 'NDI';
+    // The tile carries the drag; an image that starts its own would hand the
+    // pad a picture instead of a source.
+    mark.draggable = false;
+    picture.append(mark);
+    node.append(picture, make('span', 'browser-tile-name', tile.stream));
     node.title = `${tile.name}${NEWLINE}Drag onto a pad to put it there.`;
 
     node.addEventListener('dragstart', (event) => {
