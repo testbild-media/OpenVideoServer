@@ -2710,10 +2710,15 @@ export class LivePanel {
     // is not watching — so the picture says what kind of thing this is, and
     // the text says which one.
     //
-    // Shown whole and never cropped: the tile is 16:9 and so is the file, and
-    // `object-fit: contain` is what keeps a tile of another shape from
-    // trimming it. Altering the mark is not ours to do, and a crop is an
-    // alteration.
+    // **NDI's own file, from the brand assets in the SDK**, and the light one
+    // because this tile is dark: the SDK names its two by the colour of the
+    // mark rather than of what it sits on, so "Dark" is the one for a white
+    // page. A vector, so 92 pixels and 180 are both exactly right.
+    //
+    // Shown whole and never cropped: `object-fit: contain` is what keeps a
+    // tile trimming it, and the mark is 1047 by 550 against a 16:9 box, so a
+    // thin band above and below is the honest way to show it. Altering the
+    // mark is not ours to do, and a crop is an alteration.
     //
     // The machine has moved into the tooltip, where the full name already
     // was. On a rig where three machines each send "Program" the tiles now
@@ -2721,7 +2726,7 @@ export class LivePanel {
     // line of text and it is the owner's call, taken 2026-10-15.
     const picture = make('div', 'browser-tile-picture');
     const mark = make('img', 'ndi-mark');
-    mark.src = '../assets/ndi.webp';
+    mark.src = '../assets/ndi.svg';
     mark.alt = 'NDI';
     // The tile carries the drag; an image that starts its own would hand the
     // pad a picture instead of a source.
