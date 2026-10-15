@@ -42,7 +42,7 @@ mod video;
 
 pub use changeover::{Changeover, NotOpened, Opened, OpeningFor};
 #[cfg(test)]
-pub(crate) use generator::noise_for_test;
+pub(crate) use generator::{generator_for_test, noise_for_test};
 pub use generator::{GeneratorSource, Moment, MAX_GENERATED_SIDE};
 #[cfg(unix)]
 pub use hap_source::HapSource;

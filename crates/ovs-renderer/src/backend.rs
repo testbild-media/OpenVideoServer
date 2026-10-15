@@ -271,6 +271,48 @@ pub enum Generated {
         /// Straight, not premultiplied, as every colour here is.
         colour: [f32; 4],
     },
+
+    /// The commissioning pattern: a grid, bars, an edge and a cross.
+    TestPattern {
+        /// How many pixels apart the ruled lines are.
+        grid: u32,
+        /// Whether the colour bars are drawn across the top.
+        bars: bool,
+    },
+    /// A linear gradient between two colours.
+    Gradient {
+        /// The colour at the near end.
+        from: [f32; 4],
+        /// And at the far one.
+        to: [f32; 4],
+        /// Clockwise from left-to-right, as everything here turns.
+        angle_deg: f32,
+    },
+    /// Ruled lines at a spacing.
+    Grid {
+        /// How many pixels apart the lines are.
+        spacing: u32,
+        /// How many pixels wide each line is.
+        line: u32,
+        /// The lines' colour.
+        line_colour: [f32; 4],
+        /// What they are ruled on.
+        background: [f32; 4],
+    },
+    /// One figure, centred and turned, over a bed.
+    Shape {
+        /// Which figure: 0 an ellipse, 1 a rectangle, 2 a triangle, in the
+        /// order `media::generator::Figure` declares them.
+        figure: u32,
+        /// How wide and how tall, in pixels.
+        extent: [f32; 2],
+        /// Clockwise, in degrees.
+        rotation_deg: f32,
+        /// The figure's own colour.
+        colour: [f32; 4],
+        /// What it is drawn over.
+        background: [f32; 4],
+    },
     /// The service pattern, from a picture of its unmoving parts.
     ///
     /// The one kind here that reads something. Everything that does not move

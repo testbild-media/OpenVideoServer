@@ -46,8 +46,13 @@ struct Generated {
     values: vec4<f32>,
     // The kind's colour, where it has one.
     colour: vec4<f32>,
+    // Its second colour: a gradient's far end, a grid's or a shape's bed.
+    colour_b: vec4<f32>,
     // The noise field's seed: one 64-bit number, low half first.
     field: vec2<u32>,
+    // How big the picture being drawn is. Stated, because most kinds read no
+    // texture and are handed the one-by-one white default.
+    size: vec2<u32>,
     // Which branch below runs.
     kind: u32,
     // Bit 0: the three channels get independent fields.
@@ -68,8 +73,38 @@ var<immediate> generated: Generated;
 const KIND_NOISE: u32 = 0u;
 const KIND_SOLID: u32 = 1u;
 const KIND_PATTERN: u32 = 2u;
+const KIND_TEST_PATTERN: u32 = 3u;
+const KIND_GRADIENT: u32 = 4u;
+const KIND_GRID: u32 = 5u;
+const KIND_SHAPE: u32 = 6u;
 
 const FLAG_COLOURED: u32 = 1u;
+/// The commissioning pattern's bars across the top.
+const FLAG_BARS: u32 = 2u;
+
+/// Which figure a shape draws. `media::generator::Figure`, in the same order.
+const FIGURE_ELLIPSE: u32 = 0u;
+const FIGURE_RECTANGLE: u32 = 1u;
+const FIGURE_TRIANGLE: u32 = 2u;
+
+/// The eight bars, left to right, as a commissioning pattern has them.
+///
+/// `media::generator::BARS`, and in eight-bit values rather than fractions
+/// because that is how they are written there — 255 and 0, not 1.0 and 0.0,
+/// so the two cannot round apart.
+fn bar_colour(index: i32) -> vec3<f32> {
+    var bars = array<vec3<f32>, 8>(
+        vec3<f32>(255.0, 255.0, 255.0),
+        vec3<f32>(255.0, 255.0, 0.0),
+        vec3<f32>(0.0, 255.0, 255.0),
+        vec3<f32>(0.0, 255.0, 0.0),
+        vec3<f32>(255.0, 0.0, 255.0),
+        vec3<f32>(255.0, 0.0, 0.0),
+        vec3<f32>(0.0, 0.0, 255.0),
+        vec3<f32>(0.0, 0.0, 0.0),
+    );
+    return bars[clamp(index, 0, 7)] / 255.0;
+}
 
 // `0x9E3779B97F4A7C15`, `0xC2B2AE3D27D4EB4F`, `0x165667B19E3779F9` and
 // `0xFF51AFD7ED558CCD`, each as its low and high half. The same four constants
@@ -234,10 +269,10 @@ fn sweep_alpha(fraction: f32) -> f32 {
 /// a second read. That used to be four milliseconds of the render thread, and
 /// the whole of it was moving eight megabytes about.
 fn pattern(pixel: vec2<f32>) -> vec4<f32> {
-    let whole = vec2<i32>(textureDimensions(source, 0));
     let side = i32(generated.colour.x);
-    // The bars are the surface; the caption is the strip under them.
-    let size = vec2<i32>(whole.x, whole.y - side);
+    // The bars are the surface; the caption is in a strip under them, which is
+    // why the source is taller than the picture.
+    let size = vec2<i32>(generated.size);
     let here = vec2<i32>(pixel);
 
     // The drift is a read at an offset that wraps, which is the whole of what
@@ -296,6 +331,194 @@ fn pattern(pixel: vec2<f32>) -> vec4<f32> {
     return colour;
 }
 
+/// The commissioning pattern: a grid, bars, an edge and a cross.
+///
+/// `media::generator::draw_test_pattern`, arm for arm and in the same order,
+/// because each of its three parts answers a different question an operator is
+/// asking and a pixel belongs to exactly one of them.
+fn test_pattern(pixel: vec2<f32>) -> vec4<f32> {
+    let size = vec2<i32>(generated.size);
+    let here = vec2<i32>(pixel);
+    let grid = max(i32(generated.values.x), 2);
+    let bars = (generated.flags & FLAG_BARS) != 0u;
+    let bar_height = select(0, size.y / 6, bars);
+    // In proportion to the canvas rather than one pixel wide: a single pixel
+    // on a 1920-wide wall disappears in the console's preview, which is where
+    // somebody checks it from before walking over to look.
+    let stroke = max(max(size.x, size.y) / 240, 1);
+
+    let on_grid = here.x % grid == 0 || here.y % grid == 0;
+    let on_edge = here.x < stroke || here.y < stroke
+        || here.x + stroke >= size.x || here.y + stroke >= size.y;
+    let on_cross = abs(here.x - size.x / 2) <= stroke || abs(here.y - size.y / 2) <= stroke;
+
+    var rgb: vec3<f32>;
+    if here.y < bar_height {
+        rgb = bar_colour(here.x * 8 / max(size.x, 1));
+    } else if on_edge || on_cross {
+        rgb = vec3<f32>(1.0, 0.0, 0.0);
+    } else if on_grid {
+        rgb = vec3<f32>(128.0 / 255.0);
+    } else {
+        rgb = vec3<f32>(16.0 / 255.0);
+    }
+    return vec4<f32>(rgb, 1.0);
+}
+
+/// A linear gradient between two colours.
+///
+/// `media::generator::draw_gradient`. The ramp is normalised across the span
+/// of the canvas's own pixel centres along the angle, so the furthest pixels
+/// each way land exactly on the two declared colours whatever the shape of the
+/// composition - a gradient whose corners fell short of its own end colour
+/// would be an operator setting a colour and never seeing it.
+fn gradient(pixel: vec2<f32>) -> vec4<f32> {
+    let size = vec2<f32>(generated.size);
+    let angle = radians(generated.values.x);
+    let turn = vec2<f32>(cos(angle), sin(angle));
+    let half = size / 2.0;
+
+    var span = abs((size.x - 1.0) * turn.x) + abs((size.y - 1.0) * turn.y);
+    if span <= 0.0 {
+        span = 1.0;
+    }
+    let along = dot(pixel + vec2<f32>(0.5) - half, turn);
+    let position = clamp(along / span + 0.5, 0.0, 1.0);
+    return mix(generated.colour, generated.colour_b, position);
+}
+
+/// Ruled lines at a spacing.
+///
+/// `media::generator::draw_grid`. Measured from the picture's own origin
+/// rather than its centre, so a grid on a composition and the same grid on a
+/// piece cut out of it line up.
+fn grid(pixel: vec2<f32>) -> vec4<f32> {
+    let spacing = max(i32(generated.values.x), 1);
+    let line = max(i32(generated.values.y), 1);
+    let here = vec2<i32>(pixel);
+    let on_line = here.x % spacing < line || here.y % spacing < line;
+    return select(generated.colour_b, generated.colour, on_line);
+}
+
+/// How far a point is from the boundary of an upright ellipse at the origin.
+fn ellipse_distance(point: vec2<f32>, half: vec2<f32>) -> f32 {
+    let scaled = point / half;
+    let equation = dot(scaled, scaled) - 1.0;
+    let slope = 2.0 * length(scaled / half);
+    if slope > 0.0 {
+        return equation / slope;
+    }
+    // The exact centre, where the equation has no slope at all.
+    return -min(half.x, half.y);
+}
+
+/// How far a point is from the boundary of an upright rectangle at the origin.
+fn rectangle_distance(point: vec2<f32>, half: vec2<f32>) -> f32 {
+    let corner = abs(point) - half;
+    return length(max(corner, vec2<f32>(0.0))) + min(max(corner.x, corner.y), 0.0);
+}
+
+/// How far a point is from a line segment.
+fn distance_to_segment(point: vec2<f32>, start: vec2<f32>, finish: vec2<f32>) -> f32 {
+    let along = finish - start;
+    let length_squared = dot(along, along);
+    if length_squared <= 0.0 {
+        return distance(point, start);
+    }
+    let how_far = clamp(dot(point - start, along) / length_squared, 0.0, 1.0);
+    return distance(point, start + along * how_far);
+}
+
+/// How far a point is from the boundary of an upright isosceles triangle.
+///
+/// To each of the three edges and the sign from which side of them the point
+/// is on, rather than from the three edge *lines*: the nearer line would round
+/// the corners off by up to a pixel, and the corner is the whole of what makes
+/// a triangle read as one.
+fn triangle_distance(point: vec2<f32>, half: vec2<f32>) -> f32 {
+    var corners = array<vec2<f32>, 3>(
+        vec2<f32>(0.0, -half.y),
+        vec2<f32>(half.x, half.y),
+        vec2<f32>(-half.x, half.y),
+    );
+
+    var nearest = 1e30;
+    var inside = true;
+    for (var edge = 0; edge < 3; edge = edge + 1) {
+        let start = corners[edge];
+        let finish = corners[(edge + 1) % 3];
+        nearest = min(nearest, distance_to_segment(point, start, finish));
+        let along = finish - start;
+        let offset = point - start;
+        inside = inside && (along.x * offset.y - along.y * offset.x >= 0.0);
+    }
+    return select(nearest, -nearest, inside);
+}
+
+/// Mixes a shape's colour over a bed by how much of the pixel it covers.
+///
+/// `media::generator::over`. Each colour is scaled by its own alpha for the
+/// mix and taken back out afterwards, because what a generator hands over is
+/// straight alpha. Mixing the four channels as written would drag a
+/// half-covered edge towards the bed's *colour* as well as its transparency,
+/// which after the compositor premultiplies is a dark rim around everything an
+/// operator meant to float over the layer below.
+fn over(bed: vec4<f32>, shape: vec4<f32>, coverage: f32) -> vec4<f32> {
+    let alpha = mix(bed.a, shape.a, coverage);
+    if alpha <= 0.0 {
+        return vec4<f32>(mix(bed.rgb, shape.rgb, coverage), 0.0);
+    }
+    return vec4<f32>(
+        mix(bed.rgb * bed.a, shape.rgb * shape.a, coverage) / alpha,
+        alpha,
+    );
+}
+
+/// One figure, centred and turned, over a bed.
+fn shape(pixel: vec2<f32>) -> vec4<f32> {
+    let half = vec2<f32>(generated.values.x, generated.values.y) / 2.0;
+    // A size that is not finite and above zero encloses nothing, so the bed is
+    // the whole of the answer - and asking an ellipse how far a point is from a
+    // boundary of no radius would be a division by nothing.
+    if !(half.x > 0.0 && half.y > 0.0) {
+        return generated.colour_b;
+    }
+
+    let size = vec2<f32>(generated.size);
+    let angle = radians(generated.values.z);
+    let turn = vec2<f32>(cos(angle), sin(angle));
+    let offset = pixel + vec2<f32>(0.5) - size / 2.0;
+
+    // The pixel is turned back into the shape's frame rather than the shape
+    // into the picture's: one rotation either way, and in the shape's own
+    // frame every boundary is arithmetic.
+    let local = vec2<f32>(
+        offset.x * turn.x + offset.y * turn.y,
+        offset.y * turn.x - offset.x * turn.y,
+    );
+
+    var away: f32;
+    let figure = u32(generated.values.w);
+    if figure == FIGURE_RECTANGLE {
+        away = rectangle_distance(local, half);
+    } else if figure == FIGURE_TRIANGLE {
+        away = triangle_distance(local, half);
+    } else {
+        away = ellipse_distance(local, half);
+    }
+
+    // How much of the pixel the shape covers, estimated from the distance to
+    // the boundary: a pixel half a pixel inside is covered, one half a pixel
+    // outside is not, and the band between is the ramp. Deciding inside or out
+    // per pixel puts a staircase on every edge, and an LED wall is the least
+    // forgiving display there is for one.
+    let coverage = clamp(0.5 - away, 0.0, 1.0);
+    if coverage <= 0.0 {
+        return generated.colour_b;
+    }
+    return over(generated.colour_b, generated.colour, coverage);
+}
+
 @fragment
 fn fragment_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // The pixel's own index. `position` is the centre of the pixel, so the
@@ -310,6 +533,18 @@ fn fragment_main(in: VertexOutput) -> @location(0) vec4<f32> {
         }
         case KIND_PATTERN: {
             return pattern(pixel);
+        }
+        case KIND_TEST_PATTERN: {
+            return test_pattern(pixel);
+        }
+        case KIND_GRADIENT: {
+            return gradient(pixel);
+        }
+        case KIND_GRID: {
+            return grid(pixel);
+        }
+        case KIND_SHAPE: {
+            return shape(pixel);
         }
         // A flat fill, which also covers the strobe: the renderer decides on
         // each tick whether the lamp is lit and sends the colour or a clear

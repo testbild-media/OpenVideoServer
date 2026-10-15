@@ -4796,6 +4796,17 @@ impl Compositor for VulkanOffscreenBackend {
         // The description turns into immediates here and nowhere else: the
         // media side describes a picture and this is the only thing that knows
         // what the shader's branches are numbered.
+        // Every kind is told how big the picture is, because most of them read
+        // no texture at all and could not ask one.
+        let blank = GeneratedPush {
+            values: [0.0; 4],
+            colour: [0.0, 0.0, 0.0, 1.0],
+            colour_b: [0.0, 0.0, 0.0, 1.0],
+            field: [0, 0],
+            size: [size.width.max(1), size.height.max(1)],
+            kind: GeneratedPush::SOLID,
+            flags: 0,
+        };
         let push = match what {
             Generated::Noise {
                 scale,
@@ -4804,17 +4815,15 @@ impl Compositor for VulkanOffscreenBackend {
                 field,
             } => GeneratedPush {
                 values: [scale as f32, amount, 0.0, 0.0],
-                colour: [0.0, 0.0, 0.0, 1.0],
                 field: [field as u32, (field >> 32) as u32],
                 kind: GeneratedPush::NOISE,
                 flags: if coloured { GeneratedPush::COLOURED } else { 0 },
+                ..blank
             },
             Generated::Solid { colour } => GeneratedPush {
-                values: [0.0; 4],
                 colour,
-                field: [0, 0],
                 kind: GeneratedPush::SOLID,
-                flags: 0,
+                ..blank
             },
             Generated::Pattern {
                 shift,
@@ -4825,9 +4834,50 @@ impl Compositor for VulkanOffscreenBackend {
             } => GeneratedPush {
                 values: [shift[0] as f32, shift[1] as f32, sweep_start, sweep_trail],
                 colour: [label_side as f32, 0.0, 0.0, 0.0],
-                field: [0, 0],
                 kind: GeneratedPush::PATTERN,
-                flags: 0,
+                ..blank
+            },
+            Generated::TestPattern { grid, bars } => GeneratedPush {
+                values: [grid as f32, 0.0, 0.0, 0.0],
+                kind: GeneratedPush::TEST_PATTERN,
+                flags: if bars { GeneratedPush::BARS } else { 0 },
+                ..blank
+            },
+            Generated::Gradient {
+                from,
+                to,
+                angle_deg,
+            } => GeneratedPush {
+                values: [angle_deg, 0.0, 0.0, 0.0],
+                colour: from,
+                colour_b: to,
+                kind: GeneratedPush::GRADIENT,
+                ..blank
+            },
+            Generated::Grid {
+                spacing,
+                line,
+                line_colour,
+                background,
+            } => GeneratedPush {
+                values: [spacing as f32, line as f32, 0.0, 0.0],
+                colour: line_colour,
+                colour_b: background,
+                kind: GeneratedPush::GRID,
+                ..blank
+            },
+            Generated::Shape {
+                figure,
+                extent,
+                rotation_deg,
+                colour,
+                background,
+            } => GeneratedPush {
+                values: [extent[0], extent[1], rotation_deg, figure as f32],
+                colour,
+                colour_b: background,
+                kind: GeneratedPush::SHAPE,
+                ..blank
             },
         };
         let source = match what {
@@ -7754,7 +7804,9 @@ mod tests {
             let push = GeneratedPush {
                 values: [scale as f32, amount, 0.0, 0.0],
                 colour: [0.0, 0.0, 0.0, 1.0],
+                colour_b: [0.0, 0.0, 0.0, 1.0],
                 field: [field as u32, (field >> 32) as u32],
+                size: [SIDE, SIDE],
                 kind: GeneratedPush::NOISE,
                 flags: if coloured { GeneratedPush::COLOURED } else { 0 },
             };
@@ -7828,7 +7880,9 @@ mod tests {
                     moment.sweep_trail,
                 ],
                 colour: [moment.label_side as f32, 0.0, 0.0, 0.0],
+                colour_b: [0.0, 0.0, 0.0, 1.0],
                 field: [0, 0],
+                size: [SIDE, SIDE],
                 kind: GeneratedPush::PATTERN,
                 flags: 0,
             };
@@ -7859,6 +7913,115 @@ mod tests {
                 on_processor[at_worst]
             );
             println!("at {seconds}s: worst difference {worst}");
+        }
+    }
+
+    #[test]
+    fn the_card_draws_the_other_generators_the_processor_draws() {
+        let _gpu = crate::vulkan::one_gpu_at_a_time();
+        // The four that are arithmetic and nothing else. Each is drawn both
+        // ways and compared byte for byte, because each has a detail that
+        // would survive a glance and not a measurement: the commissioning
+        // pattern's stroke is a fraction of the canvas, the gradient's ramp is
+        // normalised across the pixel *centres*, the grid is measured from the
+        // picture's origin rather than its middle, and a shape's edge is a
+        // coverage ramp rather than a test.
+        const SIDE: u32 = 96;
+        let Some(mut canvas) = backend(SIDE, SIDE) else {
+            return;
+        };
+        let size = SizePx::new(SIDE, SIDE);
+        let key = MediaItemId::new();
+
+        // Both opaque, and that is a property of the measurement rather than
+        // of the generators. What comes back here has been through the
+        // composition, which premultiplies; the processor's picture is straight
+        // alpha. Comparing them is only like for like where alpha is one. The
+        // correction `over` makes for a transparent bed is the same arithmetic
+        // on both sides and is checked where it is written.
+        let red = [1.0_f32, 0.1, 0.2, 1.0];
+        let blue = [0.1_f32, 0.2, 1.0, 1.0];
+        for what in [
+            crate::backend::Generated::TestPattern {
+                grid: 16,
+                bars: true,
+            },
+            crate::backend::Generated::TestPattern {
+                grid: 7,
+                bars: false,
+            },
+            crate::backend::Generated::Gradient {
+                from: red,
+                to: blue,
+                angle_deg: 0.0,
+            },
+            crate::backend::Generated::Gradient {
+                from: red,
+                to: blue,
+                angle_deg: 37.0,
+            },
+            crate::backend::Generated::Grid {
+                spacing: 12,
+                line: 3,
+                line_colour: red,
+                background: blue,
+            },
+            crate::backend::Generated::Shape {
+                figure: 0,
+                extent: [60.0, 40.0],
+                rotation_deg: 0.0,
+                colour: red,
+                background: blue,
+            },
+            crate::backend::Generated::Shape {
+                figure: 1,
+                extent: [50.0, 70.0],
+                rotation_deg: 31.0,
+                colour: red,
+                background: blue,
+            },
+            crate::backend::Generated::Shape {
+                figure: 2,
+                extent: [70.0, 55.0],
+                rotation_deg: 0.0,
+                colour: red,
+                background: blue,
+            },
+            // A shape with no size at all encloses nothing, so the bed is the
+            // whole of the answer. Reachable only from a show written against
+            // another build, and it must not be a canvas of NaN.
+            crate::backend::Generated::Shape {
+                figure: 0,
+                extent: [0.0, 0.0],
+                rotation_deg: 0.0,
+                colour: red,
+                background: blue,
+            },
+        ] {
+            canvas
+                .draw_generated(TextureKey::Media(key), size, what)
+                .expect("the card draws it");
+            let on_card = composed_frame(&mut canvas, &textured_canvas(key), SIDE);
+            let on_processor = crate::media::generator_for_test(what, size);
+
+            let mut worst = 0_i32;
+            let mut at_worst = 0_usize;
+            for (at, (got, want)) in on_card.iter().zip(on_processor.iter()).enumerate() {
+                let difference = i32::from(*got) - i32::from(*want);
+                if difference.abs() > worst.abs() {
+                    worst = difference;
+                    at_worst = at;
+                }
+            }
+            // Two levels: both sides do the same arithmetic in floats, and one
+            // of them is a card that may fuse a multiply and an add.
+            assert!(
+                worst.abs() <= 2,
+                "{what:?}: byte {at_worst} is {} on the card and {} on the processor",
+                on_card[at_worst],
+                on_processor[at_worst]
+            );
+            println!("{what:?}: worst difference {worst}");
         }
     }
 

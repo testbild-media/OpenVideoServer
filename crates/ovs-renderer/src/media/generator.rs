@@ -748,6 +748,69 @@ impl GeneratorSource {
                 field: noise_field(self.seed, tick),
             }),
             Kind::SolidColour { colour } => Some(Generated::Solid { colour: *colour }),
+            Kind::TestPattern { grid, bars } => Some(Generated::TestPattern {
+                grid: *grid,
+                bars: *bars,
+            }),
+            Kind::Gradient {
+                from,
+                to,
+                angle_deg,
+            } => Some(Generated::Gradient {
+                from: *from,
+                to: *to,
+                // The processor falls back to ninety for an angle that is not
+                // a number, rather than filling a wall with whatever `as u8`
+                // makes of NaN. Decided here, so both paths fall back alike.
+                angle_deg: if angle_deg.is_finite() {
+                    *angle_deg
+                } else {
+                    90.0
+                },
+            }),
+            Kind::Grid {
+                spacing,
+                line,
+                line_colour,
+                background,
+            } => Some(Generated::Grid {
+                spacing: *spacing,
+                line: *line,
+                line_colour: *line_colour,
+                background: *background,
+            }),
+            Kind::Shape {
+                figure,
+                width_px,
+                height_px,
+                rotation_deg,
+                colour,
+                background,
+            } => Some(Generated::Shape {
+                figure: match figure {
+                    Figure::Ellipse => 0,
+                    Figure::Rectangle => 1,
+                    Figure::Triangle => 2,
+                },
+                // A size that is not a finite number above zero encloses
+                // nothing; zero reaches the shader as "draw the bed and stop",
+                // which is what the processor does with it.
+                extent: [
+                    if width_px.is_finite() { *width_px } else { 0.0 },
+                    if height_px.is_finite() {
+                        *height_px
+                    } else {
+                        0.0
+                    },
+                ],
+                rotation_deg: if rotation_deg.is_finite() {
+                    *rotation_deg
+                } else {
+                    0.0
+                },
+                colour: *colour,
+                background: *background,
+            }),
             Kind::Strobe { colour, .. } => {
                 // Lit on one half of the cycle and clear on the other, decided
                 // here exactly as the processor decides it. Clear rather than
@@ -901,6 +964,65 @@ pub(crate) fn noise_for_test(
         seed,
     };
     draw_noise(&mut pixels, size.width as usize, 0, field);
+    pixels
+}
+
+/// Draws one card-drawable generator on the processor, for a test on the card
+/// to compare itself against.
+///
+/// The description goes back to the kind it came from, so what this draws is
+/// what a show would have drawn before any of these moved to the card. The
+/// two kinds that are not here — noise, which has its own helper, and the
+/// service pattern, which keeps its own buffer — are drawn through their own
+/// paths.
+#[cfg(test)]
+pub(crate) fn generator_for_test(what: Generated, size: SizePx) -> Vec<u8> {
+    let kind = match what {
+        Generated::TestPattern { grid, bars } => Kind::TestPattern { grid, bars },
+        Generated::Gradient {
+            from,
+            to,
+            angle_deg,
+        } => Kind::Gradient {
+            from,
+            to,
+            angle_deg,
+        },
+        Generated::Grid {
+            spacing,
+            line,
+            line_colour,
+            background,
+        } => Kind::Grid {
+            spacing,
+            line,
+            line_colour,
+            background,
+        },
+        Generated::Shape {
+            figure,
+            extent,
+            rotation_deg,
+            colour,
+            background,
+        } => Kind::Shape {
+            figure: match figure {
+                1 => Figure::Rectangle,
+                2 => Figure::Triangle,
+                _ => Figure::Ellipse,
+            },
+            width_px: extent[0],
+            height_px: extent[1],
+            rotation_deg,
+            colour,
+            background,
+        },
+        Generated::Solid { colour } => Kind::SolidColour { colour },
+        other => panic!("{other:?} is not drawn through `draw_kind`"),
+    };
+
+    let mut pixels = vec![0_u8; size.width as usize * size.height as usize * 4];
+    draw_kind(&kind, size, &mut pixels, 0, 0);
     pixels
 }
 

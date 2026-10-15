@@ -36,8 +36,17 @@ pub struct GeneratedPush {
     pub values: [f32; 4],
     /// The kind's colour, where it has one.
     pub colour: [f32; 4],
+    /// Its second colour: a gradient's far end, a grid's or a shape's bed.
+    pub colour_b: [f32; 4],
     /// The noise field's seed: one 64-bit number, low half first.
     pub field: [u32; 2],
+    /// How big the picture being drawn is.
+    ///
+    /// Stated rather than asked of the target, because most kinds read no
+    /// texture at all and are handed the one-by-one white default: asking that
+    /// its size would have made every gradient a single colour and every grid
+    /// one line, on a machine where it is impossible to see that it is wrong.
+    pub size: [u32; 2],
     /// Which branch of the shader runs.
     pub kind: u32,
     /// Bit 0: the three channels get independent fields.
@@ -51,8 +60,18 @@ impl GeneratedPush {
     pub const SOLID: u32 = 1;
     /// The service pattern: drifting bars, a sweep, and a caption.
     pub const PATTERN: u32 = 2;
+    /// The commissioning pattern: a grid, bars, an edge and a cross.
+    pub const TEST_PATTERN: u32 = 3;
+    /// A linear gradient between two colours.
+    pub const GRADIENT: u32 = 4;
+    /// Ruled lines at a spacing.
+    pub const GRID: u32 = 5;
+    /// One figure, centred and turned, over a bed.
+    pub const SHAPE: u32 = 6;
     /// The three channels get independent noise fields.
     pub const COLOURED: u32 = 1;
+    /// The commissioning pattern draws its colour bars across the top.
+    pub const BARS: u32 = 2;
 
     /// The bytes to push, in the layout the shader declares.
     #[must_use]
@@ -394,11 +413,11 @@ mod tests {
 
     #[test]
     fn the_immediates_are_the_shape_the_shader_declares() {
-        // 48 bytes: four floats, four floats, two unsigned and two more. If
+        // 72 bytes: three colours worth of floats, a seed, a size and two more. If
         // this grows past 128 it stops being pushable on hardware that offers
         // the guaranteed minimum, and the failure would be a pipeline that
         // will not create on somebody else's machine rather than here.
-        assert_eq!(std::mem::size_of::<GeneratedPush>(), 48);
+        assert_eq!(std::mem::size_of::<GeneratedPush>(), 72);
         assert!(std::mem::size_of::<GeneratedPush>() <= 128);
         assert_eq!(std::mem::align_of::<GeneratedPush>(), 4);
     }
@@ -408,15 +427,18 @@ mod tests {
         let push = GeneratedPush {
             values: [1.0, 2.0, 0.0, 0.0],
             colour: [0.0, 0.0, 0.0, 1.0],
+            colour_b: [0.0, 0.0, 0.0, 1.0],
             field: [0xDEAD_BEEF, 0x0102_0304],
+            size: [1920, 1080],
             kind: GeneratedPush::NOISE,
             flags: GeneratedPush::COLOURED,
         };
         let bytes = push.bytes();
-        assert_eq!(bytes.len(), 48);
+        assert_eq!(bytes.len(), 72);
         assert_eq!(&bytes[0..4], &1.0_f32.to_ne_bytes());
-        assert_eq!(&bytes[32..36], &0xDEAD_BEEF_u32.to_ne_bytes());
-        assert_eq!(&bytes[40..44], &GeneratedPush::NOISE.to_ne_bytes());
-        assert_eq!(&bytes[44..48], &GeneratedPush::COLOURED.to_ne_bytes());
+        assert_eq!(&bytes[48..52], &0xDEAD_BEEF_u32.to_ne_bytes());
+        assert_eq!(&bytes[56..60], &1920_u32.to_ne_bytes());
+        assert_eq!(&bytes[64..68], &GeneratedPush::NOISE.to_ne_bytes());
+        assert_eq!(&bytes[68..72], &GeneratedPush::COLOURED.to_ne_bytes());
     }
 }
