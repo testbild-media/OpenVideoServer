@@ -269,12 +269,33 @@ if [ -n "$ndi_runtime" ]; then
   # Its licence material, beside FFmpeg's and Chromium's, for the same reason:
   # shipping somebody else's library and not its licence is the one obligation
   # that is trivial to forget. 3d of the SDK licence requires the copyright
-  # notice to travel with it.
-  for licence in "$(dirname "$ndi_runtime")"/../../licenses/*.txt \
-                 "$(dirname "$ndi_runtime")"/../../*License*.txt; do
-    [ -f "$licence" ] && install -m 0644 "$licence" \
-      "$staging/usr/share/doc/$package/NDI-$(basename "$licence")"
+  # notice to travel with it, and the components inside the runtime have their
+  # own licences to carry.
+  #
+  # Looked for near the library rather than at a fixed place, because what
+  # names it may be an unpacked SDK, a folder a release workflow made, or one
+  # file somebody pointed at. Found none is said out loud: a package that
+  # carries the runtime and not its licences is one nobody should hand on, and
+  # silence is how that happens.
+  ndi_licences=0
+  for licence in "$(dirname "$ndi_file")"/*licen* \
+                 "$(dirname "$ndi_file")"/../*licen* \
+                 "$(dirname "$ndi_file")"/../../licenses/* \
+                 "$(dirname "$ndi_file")"/../../*License*; do
+    if [ -f "$licence" ]; then
+      install -m 0644 "$licence" \
+        "$staging/usr/share/doc/$package/NDI-$(basename "$licence")"
+      ndi_licences=$(( ndi_licences + 1 ))
+    fi
   done
+  if [ "$ndi_licences" -eq 0 ]; then
+    echo "" >&2
+    echo "the NDI runtime is being carried and no licence text was found near" >&2
+    echo "$ndi_file. The SDK licence requires its notices to travel with it." >&2
+    echo "Put libndi_licenses.txt beside the library and build again." >&2
+    exit 1
+  fi
+  echo "and $ndi_licences NDI licence file(s) beside it"
 else
   echo "no NDI runtime named; this package will carry none"
 fi

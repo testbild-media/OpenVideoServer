@@ -506,9 +506,17 @@ jobs:
       # does nothing and the package is the one this project made before, with
       # no NDI and a line in the log saying so.
       #
-      # The URL must serve the library itself, not the SDK archive: the SDK is
-      # confidential under 4a and putting it behind a link is still handing it
-      # about.
+      # **What the URL must serve: a `.tar.gz` holding the library and its
+      # licence text, and nothing else.** Not the SDK archive — the SDK is
+      # confidential under 4a, and putting it behind a link is still handing it
+      # about. Two files rather than one because the licence text has to travel
+      # with the library: shipping somebody else's library and not its licence
+      # is the one obligation that is trivial to forget, and a bare `.so` on
+      # the end of a link is exactly how it gets forgotten.
+      #
+      #   tar czf ndi-runtime.tar.gz \
+      #     -C "NDI SDK for Linux" lib/x86_64-linux-gnu/libndi.so.6.3.2 \
+      #     licenses/libndi_licenses.txt
       - name: Fetch the NDI runtime, if there is one to fetch
         id: ndi
         env:
@@ -519,16 +527,26 @@ jobs:
             exit 0
           fi
           mkdir -p build/ndi
-          curl -fsSL --retry 3 -o build/ndi/libndi.so "$NDI_RUNTIME_URL"
-          # A link that quietly serves an error page is a 27-byte "library"
-          # that packages perfectly and never loads.
-          size=$(stat -c%s build/ndi/libndi.so)
-          if [ "$size" -lt 1000000 ]; then
-            echo "what came back is $size bytes, which is not the NDI runtime" >&2
+          curl -fsSL --retry 3 -o build/ndi.tar.gz "$NDI_RUNTIME_URL"
+          tar xzf build/ndi.tar.gz -C build/ndi
+
+          library=$(find build/ndi -name 'libndi.so.*' -type f | head -1)
+          if [ -z "$library" ]; then
+            echo "what came back holds no libndi.so.*:" >&2
+            find build/ndi -type f | sed 's/^/  /' >&2
             exit 1
           fi
-          echo "runtime=$PWD/build/ndi/libndi.so" >> "$GITHUB_OUTPUT"
-          echo "fetched $size bytes"
+          # A link that quietly serves an error page unpacks to nothing, or to
+          # something tiny that packages perfectly and never loads.
+          size=$(stat -c%s "$library")
+          if [ "$size" -lt 1000000 ]; then
+            echo "$library is $size bytes, which is not the NDI runtime" >&2
+            exit 1
+          fi
+
+          echo "runtime=$PWD/$library" >> "$GITHUB_OUTPUT"
+          echo "fetched $(basename "$library"), $size bytes"
+          find build/ndi -iname '*licen*' | sed 's/^/  licence text: /'
 
       - name: Build the package
         run: |

@@ -159,9 +159,20 @@ be able to make the second.
   runtime would belong. Installing it into `/usr/local/lib`, as the section
   below does, is what the SDK asks you not to do.
 
-  Until somebody decides to take those obligations on, a machine without the
-  runtime has no network sources and no network outputs, and says so once at
-  startup and nowhere else — which is exactly how it was met: a server that
+  **Decided on 2026-10-15: it is carried.** `tools/package.sh --ndi=<file>`
+  stages the library in the package's own library folder, under the soname
+  read out of the file, and refuses to build if no licence text is found
+  beside it. The release workflow fetches a `.tar.gz` of the library and its
+  licence from a URL held in the `NDI_RUNTIME_URL` repository secret; without
+  the secret nothing is fetched and the package carries no NDI, which is what
+  a fork or a pull request builds.
+
+  The library is deliberately **not** in this repository: it is public, and
+  the SDK is confidential under 4a of the agreement. What may be distributed
+  is the runtime inside the product, which is what the `.deb` is.
+
+  A package built without the runtime has no network sources and no network
+  outputs, and says so once at startup and nowhere else — which is exactly how it was met: a server that
   "sees no NDI on the network", and one INFO line in the journal that nobody
   had been told to look for.
 
