@@ -771,6 +771,45 @@ impl GeneratorSource {
         self.size
     }
 
+    /// What the card needs to draw this pass of the service pattern.
+    ///
+    /// `None` for every other kind. Otherwise the pattern's unmoving parts are
+    /// brought up to date — the bars and the caption, which only change when
+    /// the surface does — and handed back **only when they were rebuilt**, so
+    /// that eight megabytes crosses the bus on the pass a mode changed and on
+    /// no other. The moment beside it is where the drift and the sweep have
+    /// got to, which is all that is different from one pass to the next.
+    ///
+    /// Measured on PC05 on 2026-10-15: drawing this on the processor was
+    /// 45% of the render thread, and the whole of it was moving bytes about.
+    pub fn pattern_on_card(
+        &mut self,
+        tick: u32,
+        rate: FrameRate,
+    ) -> Option<(Option<DecodedImage>, crate::pattern::PatternMoment)> {
+        let Kind::ServicePattern { caption } = &self.kind else {
+            return None;
+        };
+        // Cloned rather than borrowed, because the pattern below is written
+        // through `self` while this is read from it. A short string, and only
+        // on the pass that rebuilds.
+        let caption = caption.clone();
+        let stale = self
+            .pattern
+            .as_ref()
+            .is_none_or(|pattern| !pattern.matches(self.size, rate, &caption));
+        if stale {
+            self.pattern = Some(Box::new(ServicePattern::new(self.size, rate, &caption)));
+        }
+
+        let pattern = self.pattern.as_ref()?;
+        let seconds = tick as f32 / PATTERN_TICKS_PER_SECOND as f32;
+        Some((
+            stale.then(|| pattern.source_picture()),
+            pattern.moment(seconds),
+        ))
+    }
+
     /// Forgets which tick is on the GPU, so the next redraw draws again.
     ///
     /// For when something other than this generator has written the layer's

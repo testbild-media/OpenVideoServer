@@ -56,8 +56,18 @@ struct Generated {
 
 var<immediate> generated: Generated;
 
+// The one picture a generator may read: the service pattern's bars with its
+// caption in a strip underneath. Read with `textureLoad` and no sampler, so
+// what comes back is the texel and not a filtered guess at it — the bars are a
+// measurement tool and a soft edge in them would be a lie about the surface.
+//
+// The layout's other bindings (the sampler and the two chroma images a video
+// texture has) are not declared here. A set may hold more than a shader reads.
+@group(0) @binding(0) var source: texture_2d<f32>;
+
 const KIND_NOISE: u32 = 0u;
 const KIND_SOLID: u32 = 1u;
+const KIND_PATTERN: u32 = 2u;
 
 const FLAG_COLOURED: u32 = 1u;
 
@@ -191,6 +201,101 @@ fn noise(pixel: vec2<f32>) -> vec4<f32> {
     return vec4<f32>(vec3<f32>(0.5) + (rgb - vec3<f32>(0.5)) * amount, 1.0);
 }
 
+/// The sweep's brightness across its trail.
+///
+/// `pattern::sweep_alpha`'s ramp, point for point. The processor samples it
+/// into a 256-step table once a frame and reads the table per pixel; a card
+/// has no reason to keep a table, so it walks the nine points. Both end up on
+/// the same curve.
+fn sweep_alpha(fraction: f32) -> f32 {
+    if fraction <= 0.0 {
+        return 0.0;
+    }
+    if fraction >= 1.0 {
+        return 1.0;
+    }
+    var at = array<f32, 9>(0.00, 0.20, 0.40, 0.58, 0.72, 0.84, 0.92, 0.97, 1.00);
+    var height = array<f32, 9>(0.00, 0.02, 0.06, 0.14, 0.28, 0.48, 0.70, 0.88, 1.00);
+
+    for (var step = 1; step < 9; step = step + 1) {
+        if fraction <= at[step] {
+            let span = at[step] - at[step - 1];
+            let along = select(0.0, (fraction - at[step - 1]) / span, span > 0.0);
+            return mix(height[step - 1], height[step], along);
+        }
+    }
+    return 1.0;
+}
+
+/// The service pattern: drifting bars, a sweep over them, and the caption.
+///
+/// Everything that does not move was drawn once on the processor and is in
+/// `source`; what happens here every pass is a read at an offset, a blend and
+/// a second read. That used to be four milliseconds of the render thread, and
+/// the whole of it was moving eight megabytes about.
+fn pattern(pixel: vec2<f32>) -> vec4<f32> {
+    let whole = vec2<i32>(textureDimensions(source, 0));
+    let side = i32(generated.colour.x);
+    // The bars are the surface; the caption is the strip under them.
+    let size = vec2<i32>(whole.x, whole.y - side);
+    let here = vec2<i32>(pixel);
+
+    // The drift is a read at an offset that wraps, which is the whole of what
+    // the processor's two copies a row were doing.
+    let shift = vec2<i32>(i32(generated.values.x), i32(generated.values.y));
+    let taken = (here + size - shift) % size;
+    var colour = textureLoad(source, taken, 0);
+
+    // The sweep runs along the diagonal: how far a pixel is along it is
+    // (x + y) / sqrt(2), and the trail is what turns that into a brightness.
+    //
+    // **The window is the processor's window, to the pixel.** It walks each
+    // row from `first` to `last` and those are truncated, so the pixel exactly
+    // on the leading edge is outside — which at second zero is the top-left
+    // corner, the one pixel a test reads first. Testing the distance alone
+    // instead made that corner white against the processor's grey.
+    let start = generated.values.z;
+    let trail = generated.values.w;
+    if trail > 0.0 {
+        let edge = start + trail;
+        let first = floor(max(start * 1.4142135 - pixel.y, 0.0));
+        let last = floor(min(max(edge * 1.4142135 - pixel.y, 0.0), f32(size.x)));
+        if pixel.x >= first && pixel.x < last {
+            let along = ((pixel.x + pixel.y) / 1.4142135 - start) / trail;
+            // **The processor's arithmetic, not an equivalent of it.** It
+            // samples the ramp into a 256-step table once a frame, truncates
+            // each entry to a 256th, and blends with a shift rather than a
+            // divide. Doing it in floats here instead was five levels out in
+            // the steep part of the ramp - invisible, and five levels is five
+            // levels. This is cheaper to copy than to argue about.
+            let step = min(floor(along * 256.0), 256.0);
+            let alpha = floor(sweep_alpha(step / 256.0) * 256.0);
+            let was = colour.rgb * 255.0;
+            colour = vec4<f32>(
+                (was + floor((vec3<f32>(255.0) - was) * alpha / 256.0)) / 255.0,
+                colour.a,
+            );
+        }
+    }
+
+    // And the caption, over the top, where the processor puts it: a square in
+    // the middle, blended by its own alpha.
+    if side > 0 {
+        let left = (size.x - min(side, size.x)) / 2;
+        let top = (size.y - min(side, size.y)) / 2;
+        let inside = here - vec2<i32>(left, top);
+        if inside.x >= 0 && inside.y >= 0 && inside.x < side && inside.y < side {
+            let over = textureLoad(source, vec2<i32>(inside.x, size.y + inside.y), 0);
+            colour = vec4<f32>(
+                mix(colour.rgb, over.rgb, over.a),
+                colour.a,
+            );
+        }
+    }
+
+    return colour;
+}
+
 @fragment
 fn fragment_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // The pixel's own index. `position` is the centre of the pixel, so the
@@ -202,6 +307,9 @@ fn fragment_main(in: VertexOutput) -> @location(0) vec4<f32> {
     switch generated.kind {
         case KIND_NOISE: {
             return noise(pixel);
+        }
+        case KIND_PATTERN: {
+            return pattern(pixel);
         }
         // A flat fill, which also covers the strobe: the renderer decides on
         // each tick whether the lamp is lit and sends the colour or a clear

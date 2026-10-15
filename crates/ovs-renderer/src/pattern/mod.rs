@@ -98,6 +98,25 @@ struct Caption<'a> {
     tracking: f32,
 }
 
+/// Where a service pattern has got to at one moment.
+///
+/// The numbers a frame of it is, so the card can draw what the processor
+/// would. Carried as one value because taking the drift from one moment and
+/// the sweep from another would be a picture that never existed.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PatternMoment {
+    /// How far the bars have run sideways, in pixels.
+    pub shift_x: u32,
+    /// And upwards.
+    pub shift_y: u32,
+    /// Where the trailing edge of the sweep is, along its own axis.
+    pub sweep_start: f32,
+    /// How long the sweep's trail is.
+    pub sweep_trail: f32,
+    /// How wide the caption's square is, or zero when there is none.
+    pub label_side: u32,
+}
+
 /// A drawn caption, kept so it is not drawn again every frame.
 struct Label {
     pixels: Vec<u8>,
@@ -199,6 +218,75 @@ impl ServicePattern {
         self.sweep(seconds);
         self.caption();
         &self.image
+    }
+
+    /// The bars and the caption as one picture, for the card to sample.
+    ///
+    /// Everything about this pattern that does not move, in one texture: the
+    /// bars at the top, the size of the surface, and the caption in a strip
+    /// under them. One picture rather than two because one picture is one
+    /// texture and one binding — the card reads the bars at a drifting offset
+    /// and the caption where it was put, and the strip costs a few hundred
+    /// rows at the bottom of an image that was going up anyway.
+    ///
+    /// Uploaded when the surface changes and not again. What the card does
+    /// every pass is read this and blend the sweep over it, which is the whole
+    /// of the four milliseconds this used to cost the render thread.
+    #[must_use]
+    pub fn source_picture(&self) -> DecodedImage {
+        let width = self.size.width as usize;
+        let height = self.size.height as usize;
+        let side = self.label.side as usize;
+        let stride = width * 4;
+
+        let mut pixels = vec![0_u8; stride * (height + side)];
+        pixels[..stride * height].copy_from_slice(&self.tile);
+        // The caption's own square, left-aligned in the strip. It is never
+        // wider than the surface — `draw_label` sizes it from the surface — so
+        // a row of it fits in a row of this.
+        for row in 0..side {
+            let from = row * side * 4;
+            let into = stride * height + row * stride;
+            let run = (side * 4).min(stride);
+            pixels[into..into + run].copy_from_slice(&self.label.pixels[from..from + run]);
+        }
+
+        DecodedImage::new(
+            pixels,
+            SizePx::new(self.size.width, self.size.height + self.label.side),
+        )
+        .expect("a buffer the size it was made for")
+    }
+
+    /// Where the pattern has drifted to and how far the sweep has run.
+    ///
+    /// The handful of numbers a frame of this is, worked out once on the
+    /// processor and handed to the card. They are the same numbers
+    /// [`drift`](Self::drift) and [`sweep`](Self::sweep) work out for
+    /// themselves, which is what makes the two paths one picture.
+    #[must_use]
+    pub fn moment(&self, seconds: f32) -> PatternMoment {
+        let width = self.size.width as f32;
+        let height = self.size.height as f32;
+        let trail = SWEEP_TRAIL_1080 * ((width + height) / 3000.0);
+        let reach = (width + height) / std::f32::consts::SQRT_2;
+        let speed = reach / SWEEP_SECONDS;
+        let cycle = SWEEP_SECONDS + trail / speed;
+        let edge = speed * (seconds % cycle);
+
+        PatternMoment {
+            shift_x: wrap(
+                DRIFT_X_1080 * (self.size.width as f32 / 1920.0) * seconds,
+                self.size.width as usize,
+            ) as u32,
+            shift_y: wrap(
+                -DRIFT_Y_1080 * (self.size.height as f32 / 1080.0) * seconds,
+                self.size.height as usize,
+            ) as u32,
+            sweep_start: edge - trail,
+            sweep_trail: trail,
+            label_side: self.label.side,
+        }
     }
 
     /// Copies the bars in, shifted by where they have drifted to.

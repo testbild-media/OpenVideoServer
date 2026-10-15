@@ -49,6 +49,8 @@ impl GeneratedPush {
     pub const NOISE: u32 = 0;
     /// A flat fill, which is also what a strobe is on the tick it is lit.
     pub const SOLID: u32 = 1;
+    /// The service pattern: drifting bars, a sweep, and a caption.
+    pub const PATTERN: u32 = 2;
     /// The three channels get independent noise fields.
     pub const COLOURED: u32 = 1;
 
@@ -84,7 +86,11 @@ impl GeneratedPipeline {
     /// # Errors
     ///
     /// Returns [`VulkanError::Call`] naming the Vulkan call that failed.
-    pub fn new(device: &ash::Device, spirv: &[u8]) -> Result<Self, VulkanError> {
+    pub fn new(
+        device: &ash::Device,
+        spirv: &[u8],
+        set_layout: vk::DescriptorSetLayout,
+    ) -> Result<Self, VulkanError> {
         let render_pass = Self::create_render_pass(device)?;
         let shader = match Self::create_shader(device, spirv) {
             Ok(shader) => shader,
@@ -95,15 +101,22 @@ impl GeneratedPipeline {
             }
         };
 
-        // No descriptor sets at all: a generator reads no picture. Just the
-        // immediates, in both stages — a range that covers a stage which does
-        // not use it is legal and costs nothing, while one that misses a stage
-        // which does is a pipeline the driver may refuse.
+        // One set, of the shape every texture here already has. Most kinds
+        // read no picture at all and are handed the white default — a set must
+        // be bound for a layout that declares one, and binding a texture the
+        // shader never reads costs a bind and nothing else.
+        //
+        // The immediates are declared for both stages. A range that covers a
+        // stage which does not use it is legal and costs nothing, while one
+        // that misses a stage which does is a pipeline the driver may refuse.
+        let set_layouts = [set_layout];
         let ranges = [vk::PushConstantRange::default()
             .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
             .offset(0)
             .size(u32::try_from(std::mem::size_of::<GeneratedPush>()).unwrap_or(128))];
-        let layout_info = vk::PipelineLayoutCreateInfo::default().push_constant_ranges(&ranges);
+        let layout_info = vk::PipelineLayoutCreateInfo::default()
+            .set_layouts(&set_layouts)
+            .push_constant_ranges(&ranges);
         // SAFETY: every borrowed slice outlives the call.
         let layout = match unsafe { device.create_pipeline_layout(&layout_info, None) } {
             Ok(layout) => layout,
@@ -152,6 +165,7 @@ impl GeneratedPipeline {
         command_buffer: vk::CommandBuffer,
         framebuffer: vk::Framebuffer,
         extent: vk::Extent2D,
+        set: vk::DescriptorSet,
         push: &GeneratedPush,
     ) {
         let area = vk::Rect2D {
@@ -182,6 +196,14 @@ impl GeneratedPipeline {
             );
             device.cmd_set_viewport(command_buffer, 0, &viewports);
             device.cmd_set_scissor(command_buffer, 0, &scissors);
+            device.cmd_bind_descriptor_sets(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.layout,
+                0,
+                &[set],
+                &[],
+            );
             device.cmd_push_constants(
                 command_buffer,
                 self.layout,

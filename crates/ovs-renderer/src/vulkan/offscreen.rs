@@ -425,7 +425,7 @@ pub struct OffscreenTarget {
     /// Recorded into the frame's own command buffer rather than submitted
     /// separately, exactly as an upload is: the draw cannot then race the
     /// composition pass that samples what it wrote.
-    pending_generated: Vec<(TextureKey, GeneratedPush)>,
+    pending_generated: Vec<(TextureKey, GeneratedPush, Option<TextureKey>)>,
     /// Pictures handed over this pass, waiting to be copied together.
     ///
     /// Kept between frames so the allocation is made once. Drained by
@@ -3835,6 +3835,7 @@ impl OffscreenTarget {
         key: impl Into<TextureKey>,
         size: ovs_types::geometry::SizePx,
         push: GeneratedPush,
+        source: Option<TextureKey>,
     ) -> Result<(), VulkanError> {
         let key = key.into();
         let device = context.device();
@@ -3842,7 +3843,11 @@ impl OffscreenTarget {
         let height = size.height.max(1);
 
         if self.generated.is_none() {
-            self.generated = Some(GeneratedPipeline::new(device, GENERATOR_SHADER_SPIRV)?);
+            self.generated = Some(GeneratedPipeline::new(
+                device,
+                GENERATOR_SHADER_SPIRV,
+                self.descriptor_layout,
+            )?);
         }
         let render_pass = self
             .generated
@@ -3935,7 +3940,7 @@ impl OffscreenTarget {
             }
         }
 
-        self.pending_generated.push((key, push));
+        self.pending_generated.push((key, push, source));
         Ok(())
     }
 
@@ -3971,12 +3976,26 @@ impl OffscreenTarget {
         let Some(pipeline) = self.generated.as_ref() else {
             return;
         };
-        for (key, push) in &self.pending_generated {
+        for (key, push, source) in &self.pending_generated {
             let Some(bound) = self.textures.get(key) else {
                 continue;
             };
             let Some(framebuffer) = bound.framebuffer else {
                 continue;
+            };
+            // What the pass reads, for the one kind that reads anything. A
+            // kind with no picture of its own is handed the white default:
+            // a set has to be bound for a layout that declares one, and the
+            // shader never samples it.
+            let set = match source {
+                Some(from) => match self.textures.get(from) {
+                    Some(bound) => bound.set,
+                    // Its picture has not arrived yet. Skipped rather than
+                    // drawn against the wrong texture: the layer then shows
+                    // what the last pass left.
+                    None => continue,
+                },
+                None => self.default_texture.set,
             };
             let (width, height) = bound.texture.size();
             // SAFETY: recording is in progress, no render pass is open, and
@@ -3988,6 +4007,7 @@ impl OffscreenTarget {
                     self.command_buffer,
                     framebuffer,
                     vk::Extent2D { width, height },
+                    set,
                     push,
                 );
             }
@@ -4540,9 +4560,10 @@ impl VulkanOffscreenBackend {
         key: impl Into<TextureKey>,
         size: ovs_types::geometry::SizePx,
         push: GeneratedPush,
+        source: Option<TextureKey>,
     ) -> Result<(), VulkanError> {
         self.target
-            .set_generated(&self.context, key.into(), size, push)
+            .set_generated(&self.context, key.into(), size, push, source)
     }
 
     /// Forgets a media item's texture, freeing its memory.
@@ -4795,10 +4816,27 @@ impl Compositor for VulkanOffscreenBackend {
                 kind: GeneratedPush::SOLID,
                 flags: 0,
             },
+            Generated::Pattern {
+                shift,
+                sweep_start,
+                sweep_trail,
+                label_side,
+                ..
+            } => GeneratedPush {
+                values: [shift[0] as f32, shift[1] as f32, sweep_start, sweep_trail],
+                colour: [label_side as f32, 0.0, 0.0, 0.0],
+                field: [0, 0],
+                kind: GeneratedPush::PATTERN,
+                flags: 0,
+            },
+        };
+        let source = match what {
+            Generated::Pattern { source, .. } => Some(source),
+            _ => None,
         };
 
         self.target
-            .set_generated(&self.context, key, size, push)
+            .set_generated(&self.context, key, size, push, source)
             .map(|()| true)
             .map_err(|error| BackendError::UploadFailed {
                 name: self.name.clone(),
@@ -7721,7 +7759,7 @@ mod tests {
                 flags: if coloured { GeneratedPush::COLOURED } else { 0 },
             };
             canvas
-                .set_generated(clip, SizePx::new(SIDE, SIDE), push)
+                .set_generated(clip, SizePx::new(SIDE, SIDE), push, None)
                 .expect("the card can draw a generator");
             let drawn = composed_frame(&mut canvas, &textured_canvas(clip), SIDE);
 
@@ -7751,6 +7789,76 @@ mod tests {
                 );
             }
             println!("scale {scale}, coloured {coloured}: worst difference {worst}");
+        }
+    }
+
+    #[test]
+    fn the_card_draws_the_service_pattern_the_processor_draws() {
+        let _gpu = crate::vulkan::one_gpu_at_a_time();
+        // The pattern is a measurement tool: an operator reads the mode off
+        // the caption and checks the mapping against the bars, so "near
+        // enough" is not a standard it can be held to. The card reads the same
+        // picture of the unmoving parts, drifts it by the same number of
+        // pixels, lifts it by the same ramp and puts the same caption back.
+        const SIDE: u32 = 128;
+        let Some(mut canvas) = backend(SIDE, SIDE) else {
+            return;
+        };
+
+        let mut pattern = crate::pattern::ServicePattern::new(
+            SizePx::new(SIDE, SIDE),
+            ovs_types::geometry::FrameRate::FPS_60,
+            "OUTPUT 1",
+        );
+        let source_key = TextureKey::PatternSource(ovs_types::id::LayerId::new());
+        let drawn_key = MediaItemId::new();
+        canvas
+            .set_media_texture(source_key, &pattern.source_picture())
+            .expect("the unmoving parts go up");
+
+        // Several moments, so the drift is not zero and the sweep is caught
+        // both inside the picture and gone from it.
+        for seconds in [0.0_f32, 0.9, 2.4, 4.8] {
+            let moment = pattern.moment(seconds);
+            let push = GeneratedPush {
+                values: [
+                    moment.shift_x as f32,
+                    moment.shift_y as f32,
+                    moment.sweep_start,
+                    moment.sweep_trail,
+                ],
+                colour: [moment.label_side as f32, 0.0, 0.0, 0.0],
+                field: [0, 0],
+                kind: GeneratedPush::PATTERN,
+                flags: 0,
+            };
+            canvas
+                .set_generated(drawn_key, SizePx::new(SIDE, SIDE), push, Some(source_key))
+                .expect("the card draws a pattern");
+            let on_card = composed_frame(&mut canvas, &textured_canvas(drawn_key), SIDE);
+            let on_processor = pattern.draw(seconds).pixels().to_vec();
+
+            // Three levels. The processor quantises the sweep's ramp into 256
+            // steps and blends in whole 255ths; the card does both in floats.
+            // That is a difference of about one level, and three is still far
+            // inside a wrong offset, a wrong ramp or a caption in the wrong
+            // place, all of which are off by tens or hundreds.
+            let mut worst = 0_i32;
+            let mut at_worst = 0_usize;
+            for (at, (got, want)) in on_card.iter().zip(on_processor.iter()).enumerate() {
+                let difference = i32::from(*got) - i32::from(*want);
+                if difference.abs() > worst.abs() {
+                    worst = difference;
+                    at_worst = at;
+                }
+            }
+            assert!(
+                worst.abs() <= 3,
+                "at {seconds}s: byte {at_worst} is {} on the card and {} on the processor",
+                on_card[at_worst],
+                on_processor[at_worst]
+            );
+            println!("at {seconds}s: worst difference {worst}");
         }
     }
 

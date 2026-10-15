@@ -93,6 +93,14 @@ pub enum TextureKey {
     TestPattern,
     /// The System screen, of which there is one.
     Console,
+    /// What one layer's service pattern is drawn from.
+    ///
+    /// Not a picture any quad names: it is read by the pass that draws that
+    /// layer's pattern on the card, and holds the parts of it that do not
+    /// move - the bars, and the caption in a strip underneath. It lives in the
+    /// same map as the rest because it is a texture with the same lifetime
+    /// rules, and because one map is one place to free them from.
+    PatternSource(LayerId),
 }
 
 impl From<MediaItemId> for TextureKey {

@@ -271,6 +271,24 @@ pub enum Generated {
         /// Straight, not premultiplied, as every colour here is.
         colour: [f32; 4],
     },
+    /// The service pattern, from a picture of its unmoving parts.
+    ///
+    /// The one kind here that reads something. Everything that does not move
+    /// was drawn once on the processor and uploaded under `source`; what the
+    /// card does every pass is read it at a drifting offset, blend the sweep
+    /// over it and put the caption back on top.
+    Pattern {
+        /// How far the bars have run, in pixels.
+        shift: [u32; 2],
+        /// Where the trailing edge of the sweep is, along its own axis.
+        sweep_start: f32,
+        /// How long the sweep's trail is. Zero means there is no sweep.
+        sweep_trail: f32,
+        /// How wide the caption's square is, or zero when there is none.
+        label_side: u32,
+        /// The picture the unmoving parts are in.
+        source: TextureKey,
+    },
 }
 
 /// The canvas every output samples.

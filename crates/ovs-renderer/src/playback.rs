@@ -42,6 +42,9 @@ use ovs_types::live::Transport;
 use ovs_types::media::MediaKind;
 
 use crate::backend::Compositor;
+// Aliased: this module already has a Generated, which is one layer's own
+// generator rather than a description of one for the card.
+use crate::backend::Generated as GeneratedDraw;
 use crate::media::{
     demanded_fps, pass_for, playhead_at, Changeover, FrameSource, GeneratorSource, Moment,
     NotOpened, Opened, OpeningFor, Pass, Player, ShowClock, SourceLength, SyntheticSource,
@@ -1067,6 +1070,48 @@ impl Playback {
         // drawing cost twenty-five milliseconds; here it is a triangle, and
         // redrawing something that has not changed is cheaper than owning the
         // question of whether what is on the card is still what was asked for.
+        // The service pattern reads a picture of its own unmoving parts, so it
+        // goes through its own door: the picture is uploaded on the pass that
+        // rebuilt it and on no other, and then the card drifts, sweeps and
+        // captions it every pass for nothing.
+        if let Some((fresh, moment)) = generated.source.pattern_on_card(tick, rate) {
+            let source = TextureKey::PatternSource(layer_id);
+            let ready = match fresh {
+                Some(picture) => match compositor.upload_texture(source, &picture) {
+                    Ok(()) => true,
+                    Err(error) => {
+                        // Without its bars the card would draw the sweep over
+                        // nothing, so this falls through to the processor.
+                        tracing::warn!("{error}");
+                        false
+                    }
+                },
+                None => true,
+            };
+            if ready {
+                let what = GeneratedDraw::Pattern {
+                    shift: [moment.shift_x, moment.shift_y],
+                    sweep_start: moment.sweep_start,
+                    sweep_trail: moment.sweep_trail,
+                    label_side: moment.label_side,
+                    source,
+                };
+                match compositor.draw_generated(
+                    TextureKey::Layer(layer_id),
+                    generated.source.size(),
+                    what,
+                ) {
+                    Ok(true) => {
+                        self.complained_generators.remove(&layer_id);
+                        self.drawn.insert(layer_id, Drawn::Generator);
+                        return true;
+                    }
+                    Ok(false) => {}
+                    Err(error) => tracing::warn!("{error}"),
+                }
+            }
+        }
+
         if let Some(what) = generated.source.on_card(tick) {
             match compositor.draw_generated(
                 TextureKey::Layer(layer_id),
