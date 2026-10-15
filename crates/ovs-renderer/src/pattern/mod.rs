@@ -824,8 +824,8 @@ mod tests {
             let pixels = pattern.image.pixels();
             let first = pixels[0];
             for row in 0..height {
-                let wanted = u8::try_from((usize::from(first) + row) % height)
-                    .expect("under 256 rows");
+                let wanted =
+                    u8::try_from((usize::from(first) + row) % height).expect("under 256 rows");
                 let at = row * stride;
                 assert!(
                     pixels[at..at + stride].iter().all(|&byte| byte == wanted),
