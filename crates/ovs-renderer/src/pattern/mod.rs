@@ -65,6 +65,7 @@ pub mod pieces;
 
 use ovs_types::geometry::{FrameRate, SizePx};
 
+use crate::media::bands::in_bands;
 use crate::media::DecodedImage;
 
 /// How long the sweep takes to cross, in seconds.
@@ -214,19 +215,29 @@ impl ServicePattern {
         // as "running" rather than "falling".
         let shift_y = wrap(-DRIFT_Y_1080 * scale_y * seconds, height);
 
-        let pixels = self.image.pixels_mut();
         let split = shift_x * 4;
+        // Split the borrow by hand: the rows are read from the tile while they
+        // are written into the image, and both live on `self`.
+        let Self { tile, image, .. } = self;
+        let pixels = image.pixels_mut();
 
-        for y in 0..height {
-            let source = (y + height - shift_y) % height;
-            let (from, to) = (source * stride, y * stride);
+        // Eight megabytes of copying for a 1920x1080 picture, every pass, and
+        // every row independent of every other. One row's destination depends
+        // only on its own index, so a band needs nothing but to be told where
+        // it starts.
+        in_bands(pixels, width, |band, first_row| {
+            for (row, line) in band.chunks_mut(stride).enumerate() {
+                let y = first_row + row;
+                let source = (y + height - shift_y) % height;
+                let from = source * stride;
 
-            // Two copies per row, because the picture wraps: the right-hand end
-            // of the bars comes round to the left.
-            let (left, right) = self.tile[from..from + stride].split_at(stride - split);
-            pixels[to..to + split].copy_from_slice(right);
-            pixels[to + split..to + stride].copy_from_slice(left);
-        }
+                // Two copies per row, because the picture wraps: the right-hand
+                // end of the bars comes round to the left.
+                let (left, right) = tile[from..from + stride].split_at(stride - split);
+                line[..split].copy_from_slice(right);
+                line[split..stride].copy_from_slice(left);
+            }
+        });
     }
 
     /// Blends the sweep over what is there.
@@ -257,6 +268,7 @@ impl ServicePattern {
         }
 
         let stride = self.size.width as usize * 4;
+        let columns = self.size.width as usize;
         let pixels = self.image.pixels_mut();
 
         // How far along the trail one step to the right goes. The distance
@@ -264,35 +276,38 @@ impl ServicePattern {
         // straight line and can be walked rather than recomputed.
         let per_pixel = (1.0 / std::f32::consts::SQRT_2) / trail * RAMP_STEPS as f32;
 
-        for y in 0..self.size.height as usize {
-            let row = y as f32;
-            let first = (start * std::f32::consts::SQRT_2 - row).max(0.0) as usize;
-            let last = ((edge * std::f32::consts::SQRT_2 - row).max(0.0) as usize)
-                .min(self.size.width as usize);
-            if first >= last {
-                continue;
-            }
-
-            let mut along = (((first as f32 + row) / std::f32::consts::SQRT_2 - start) / trail)
-                * RAMP_STEPS as f32;
-
-            for x in first..last {
-                let step = (along as usize).min(RAMP_STEPS);
-                along += per_pixel;
-
-                let alpha = ramp[step];
-                if alpha == 0 {
+        // Every row's span of the sweep is worked out from the row's own index,
+        // so the bands do not need to agree about anything.
+        in_bands(pixels, columns, |band, first_row| {
+            for (index, line) in band.chunks_mut(stride).enumerate() {
+                let row = (first_row + index) as f32;
+                let first = (start * std::f32::consts::SQRT_2 - row).max(0.0) as usize;
+                let last = ((edge * std::f32::consts::SQRT_2 - row).max(0.0) as usize).min(columns);
+                if first >= last {
                     continue;
                 }
 
-                let at = y * stride + x * 4;
-                for channel in 0..3 {
-                    let was = u16::from(pixels[at + channel]);
-                    // 256ths, so the divide is a shift.
-                    pixels[at + channel] = (was + (((255 - was) * alpha) >> 8)) as u8;
+                let mut along = (((first as f32 + row) / std::f32::consts::SQRT_2 - start) / trail)
+                    * RAMP_STEPS as f32;
+
+                for x in first..last {
+                    let step = (along as usize).min(RAMP_STEPS);
+                    along += per_pixel;
+
+                    let alpha = ramp[step];
+                    if alpha == 0 {
+                        continue;
+                    }
+
+                    let at = x * 4;
+                    for channel in 0..3 {
+                        let was = u16::from(line[at + channel]);
+                        // 256ths, so the divide is a shift.
+                        line[at + channel] = (was + (((255 - was) * alpha) >> 8)) as u8;
+                    }
                 }
             }
-        }
+        });
     }
 
     /// Blends the caption into the middle.
@@ -782,6 +797,42 @@ mod tests {
             format_mode(SizePx::new(3840, 2160), FrameRate::FPS_50),
             "3840x2160p50"
         );
+    }
+
+    #[test]
+    fn every_row_of_the_drift_comes_from_the_row_above_the_one_before_it() {
+        // The drift is a rotation of the tile and nothing else: eight megabytes
+        // of copying a pass, now shared out between threads. A band told the
+        // wrong first row would put a block of rows from the wrong place into
+        // the middle of the picture — a seam, which appears only on a machine
+        // with the right number of cores and arrives as a photograph.
+        //
+        // The tile is replaced by one whose rows are each marked with their own
+        // index, so where a row came from is readable rather than guessed at.
+        // Only rows matter here: the sideways part of the drift happens inside
+        // a row and no band can affect it.
+        let size = SizePx::new(64, 90);
+        let mut pattern = ServicePattern::new(size, FrameRate::FPS_60, "SEAM");
+        let (width, height) = (size.width as usize, size.height as usize);
+        let stride = width * 4;
+        for (row, line) in pattern.tile.chunks_mut(stride).enumerate() {
+            line.fill(u8::try_from(row).expect("under 256 rows"));
+        }
+
+        for seconds in [0.0_f32, 0.37, 1.9, 4.5, 17.25] {
+            pattern.drift(seconds);
+            let pixels = pattern.image.pixels();
+            let first = pixels[0];
+            for row in 0..height {
+                let wanted = u8::try_from((usize::from(first) + row) % height)
+                    .expect("under 256 rows");
+                let at = row * stride;
+                assert!(
+                    pixels[at..at + stride].iter().all(|&byte| byte == wanted),
+                    "at {seconds}s, row {row} should have come from tile row {wanted}"
+                );
+            }
+        }
     }
 
     #[test]

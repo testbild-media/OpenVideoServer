@@ -75,6 +75,7 @@ use ovs_types::config::generators::{
 use ovs_types::config::slot::{ParameterMap, ParameterValue};
 use ovs_types::geometry::{FrameRate, SizePx};
 
+use crate::media::bands::in_bands;
 use crate::media::source::{Frame, FrameSource};
 use crate::media::still::{DecodedImage, MediaError};
 use crate::media::text::{self, Pen};
@@ -768,6 +769,24 @@ impl FrameSource for GeneratorSource {
     }
 }
 
+/// Everything one field of noise is made of.
+///
+/// One value rather than five arguments, so a band can be handed the field it
+/// is drawing a piece of.
+#[derive(Clone, Copy)]
+struct NoiseField {
+    /// How many pixels one cell of the lattice covers.
+    scale: u32,
+    /// Whether the three channels get independent fields.
+    coloured: bool,
+    /// How far from mid grey the field reaches, 0 to 1.
+    amount: f32,
+    /// Which frame of the source this is.
+    tick: u32,
+    /// The generator's own seed, so two noise layers do not move together.
+    seed: u64,
+}
+
 /// An empty picture of a size, to be drawn into.
 fn blank(size: SizePx) -> DecodedImage {
     let pixels = vec![0_u8; size.width as usize * size.height as usize * 4];
@@ -841,7 +860,18 @@ fn draw_kind(kind: &Kind, size: SizePx, pixels: &mut [u8], tick: u32, seed: u64)
             scale,
             coloured,
             amount,
-        } => draw_noise(pixels, width, *scale, *coloured, *amount, tick, seed),
+        } => {
+            let noise = NoiseField {
+                scale: *scale,
+                coloured: *coloured,
+                amount: *amount,
+                tick,
+                seed,
+            };
+            in_bands(pixels, width, |band, first_row| {
+                draw_noise(band, width, first_row, noise);
+            });
+        }
         Kind::Text {
             lines,
             cap_px,
@@ -1465,15 +1495,20 @@ fn triangle_distance(x: f32, y: f32, half_width: f32, half_height: f32) -> f32 {
 ///
 /// `amount` fades towards mid grey rather than towards black, so taking the
 /// texture out of a bed under a key does not also take the light out of it.
-fn draw_noise(
-    pixels: &mut [u8],
-    width: usize,
-    scale: u32,
-    coloured: bool,
-    amount: f32,
-    tick: u32,
-    seed: u64,
-) {
+/// `first_row` is where this band starts in the picture, so a band drawn by a
+/// thread of its own lands on exactly the rows it would have had alone.
+///
+/// The field's five settings travel as one value rather than five arguments,
+/// which is also what keeps a band's call to this honest: a thread is handed
+/// the field and its own rows, and nothing else.
+fn draw_noise(pixels: &mut [u8], width: usize, first_row: usize, noise: NoiseField) {
+    let NoiseField {
+        scale,
+        coloured,
+        amount,
+        tick,
+        seed,
+    } = noise;
     // Four independent fields per frame, so the three colour channels keep the
     // separation they always had and the next frame starts past all of them.
     let field = seed
@@ -1513,7 +1548,7 @@ fn draw_noise(
     let depth = if coloured { 3 } else { 1 };
 
     for (row, line) in pixels.as_chunks_mut::<4>().0.chunks_mut(width).enumerate() {
-        let y = row as f32 / scale;
+        let y = (first_row + row) as f32 / scale;
         let cell_y = y.floor();
         let top = cell_y as i64;
         let fraction_y = fade(y - cell_y);
@@ -1857,13 +1892,41 @@ mod tests {
                 for coloured in [false, true] {
                     for amount in [1.0_f32, 0.35] {
                         let mut quick = vec![0_u8; width * height * 4];
-                        draw_noise(&mut quick, width, scale, coloured, amount, 7, 0xABCD);
+                        let field = NoiseField {
+                            scale,
+                            coloured,
+                            amount,
+                            tick: 7,
+                            seed: 0xABCD,
+                        };
+                        draw_noise(&mut quick, width, 0, field);
                         let slow =
                             noise_per_pixel(width, height, scale, coloured, amount, 7, 0xABCD);
                         assert_eq!(
                             quick, slow,
                             "{width}x{height}, scale {scale}, coloured {coloured}, amount {amount}"
                         );
+
+                        // And the same picture again when the rows are shared
+                        // out between threads. A band draws the rows it was
+                        // given and nothing else, so how many bands there were
+                        // must not be visible in the result — if it is, the
+                        // wall shows seams where the threads met.
+                        let mut split = vec![0_u8; width * height * 4];
+                        for count in [2_usize, 3, 7, height + 4] {
+                            split.fill(0);
+                            crate::media::bands::in_rows(
+                                &mut split,
+                                width,
+                                count,
+                                |band, first_row| draw_noise(band, width, first_row, field),
+                            );
+                            assert_eq!(
+                                split, quick,
+                                "{width}x{height} in {count} bands, scale {scale}, \
+                                 coloured {coloured}, amount {amount}"
+                            );
+                        }
                     }
                 }
             }

@@ -20,6 +20,7 @@
 //! card's decoder produces it and nothing on the way to the wall is allowed to
 //! walk a frame on the processor to change it.
 
+pub(crate) mod bands;
 mod changeover;
 mod generator;
 mod geometry;
