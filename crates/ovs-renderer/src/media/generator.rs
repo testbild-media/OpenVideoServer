@@ -186,8 +186,6 @@ pub struct GeneratorSource {
 enum Kind {
     /// One colour, everywhere.
     SolidColour { colour: [f32; 4] },
-    /// A grid, optional colour bars and a centre cross.
-    TestPattern { grid: u32, bars: bool },
     /// This system's own test pattern, the one an output and a composition
     /// show. Only the caption is carried here: everything else about the
     /// picture is the surface it is drawn for, and the pattern keeps its own
@@ -467,16 +465,13 @@ impl GeneratorSource {
             "ovs.solid_colour" => Kind::SolidColour {
                 colour: colour_of(manifest, parameters, "colour"),
             },
-            // **Version two draws a different picture, deliberately.** A
-            // show that names version one still gets the grid and bars it was
-            // saved with; a source list offers only the newest, so this is
-            // what an operator adds today.
-            "ovs.test_pattern" if manifest.version >= 2 => Kind::ServicePattern {
+            // Version 2 and no version 1: the grid-and-bars pattern this once
+            // had is gone, and the one a layer gets is the service pattern
+            // (owner, 2026-10-15: "Nur noch v2 und das wird zum normalen
+            // Testpattern"). A show naming version one is refused, as a show
+            // naming any version this build does not publish is.
+            "ovs.test_pattern" => Kind::ServicePattern {
                 caption: text_of(manifest, parameters, "caption"),
-            },
-            "ovs.test_pattern" => Kind::TestPattern {
-                grid: number_of(manifest, parameters, "grid_px") as u32,
-                bars: flag_of(manifest, parameters, "bars"),
             },
             "ovs.strobe" => Kind::Strobe {
                 colour: colour_of(manifest, parameters, "colour"),
@@ -567,6 +562,46 @@ impl GeneratorSource {
             seed: NEXT_SEED.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             pattern: None,
         })
+    }
+
+    /// Pins the seed, so the same generator draws the same picture twice.
+    ///
+    /// Instances are seeded from a counter, so that two noise layers on one
+    /// wall do not move together. A picture that has to come out the same
+    /// twice — the one on the tile a generator is picked from, checked against
+    /// what this build actually draws — needs that counter out of the way.
+    #[must_use]
+    pub fn with_seed(mut self, seed: u64) -> Self {
+        self.seed = seed;
+        self
+    }
+
+    /// Which single frame of this generator stands for the whole of it.
+    ///
+    /// For the one picture of a generator that does not move: the tile it is
+    /// dragged from, and anything else with room for a frame and not a run.
+    ///
+    /// **Halfway, where there is a halfway.** That is not an arbitrary choice
+    /// of moment: a clock's length is a day, so half of it is exactly
+    /// 12:00:00, and half of a countdown is the middle of its count. The first
+    /// frame would be midnight and a countdown's own starting value — each of
+    /// them a special case of itself.
+    ///
+    /// **Two frames or fewer is the first of them.** A strobe has exactly two,
+    /// lit and clear, and its second one is a picture of nothing at all.
+    ///
+    /// **A free-running source has no halfway**, its length being as far as the
+    /// counter goes: noise and the service pattern get two seconds in. For the
+    /// pattern that is exactly two seconds, its tick being a millisecond; for
+    /// noise it is one field out of billions, no more typical than any other
+    /// and no less.
+    #[must_use]
+    pub fn tick_worth_a_picture(&self) -> u32 {
+        match self.kind.length().frame_count {
+            u32::MAX => PATTERN_TICKS_PER_SECOND * 2,
+            frames if frames <= 2 => 0,
+            frames => frames / 2,
+        }
     }
 
     /// Whether the picture depends on the time as well as on the position.
@@ -748,10 +783,6 @@ impl GeneratorSource {
                 field: noise_field(self.seed, tick),
             }),
             Kind::SolidColour { colour } => Some(Generated::Solid { colour: *colour }),
-            Kind::TestPattern { grid, bars } => Some(Generated::TestPattern {
-                grid: *grid,
-                bars: *bars,
-            }),
             Kind::Gradient {
                 from,
                 to,
@@ -978,7 +1009,6 @@ pub(crate) fn noise_for_test(
 #[cfg(test)]
 pub(crate) fn generator_for_test(what: Generated, size: SizePx) -> Vec<u8> {
     let kind = match what {
-        Generated::TestPattern { grid, bars } => Kind::TestPattern { grid, bars },
         Generated::Gradient {
             from,
             to,
@@ -1047,7 +1077,6 @@ fn draw_kind(kind: &Kind, size: SizePx, pixels: &mut [u8], tick: u32, seed: u64)
                 *pixel = rgba;
             }
         }
-        Kind::TestPattern { grid, bars } => draw_test_pattern(pixels, width, height, *grid, *bars),
         // Never reached: the service pattern keeps its own buffer and is
         // drawn through `redraw_at`. Left as it was found rather than
         // panicking — a layer that is black is something an operator can see
@@ -1356,64 +1385,6 @@ fn to_bytes(colour: [f32; 4]) -> [u8; 4] {
         channel(colour[2]),
         channel(colour[3]),
     ]
-}
-
-/// The eight bars, left to right, as a commissioning pattern has them.
-const BARS: [[u8; 3]; 8] = [
-    [255, 255, 255],
-    [255, 255, 0],
-    [0, 255, 255],
-    [0, 255, 0],
-    [255, 0, 255],
-    [255, 0, 0],
-    [0, 0, 255],
-    [0, 0, 0],
-];
-
-/// Draws the commissioning pattern.
-///
-/// Three things, each for a different question an operator is asking. The grid
-/// finds missing panels and scaling errors — a wall that is scaling will show
-/// uneven lines. The bars check colour and order. The cross finds the centre,
-/// which is what an alignment is measured from.
-fn draw_test_pattern(pixels: &mut [u8], width: usize, height: usize, grid: u32, bars: bool) {
-    let grid = (grid as usize).max(2);
-    let bar_height = if bars { height / 6 } else { 0 };
-
-    // The edge and the cross are drawn in proportion to the canvas rather than
-    // one pixel wide. A single pixel on a 1920-wide wall disappears in the
-    // console's preview, which is where somebody checks it from before walking
-    // over to look — a line that only exists at full size is a line that is not
-    // there when it is needed.
-    let stroke = (width.max(height) / 240).max(1);
-
-    for y in 0..height {
-        for x in 0..width {
-            let offset = (y * width + x) * 4;
-
-            let on_grid = x % grid == 0 || y % grid == 0;
-            let on_edge = x < stroke || y < stroke || x + stroke >= width || y + stroke >= height;
-            let on_cross = x.abs_diff(width / 2) <= stroke || y.abs_diff(height / 2) <= stroke;
-
-            let rgb = if y < bar_height {
-                BARS[(x * BARS.len() / width.max(1)).min(BARS.len() - 1)]
-            } else if on_edge || on_cross {
-                // The edge and the centre in red: both are what somebody is
-                // looking for when they are lining a wall up, and neither
-                // should be mistaken for the grid.
-                [255, 0, 0]
-            } else if on_grid {
-                [128, 128, 128]
-            } else {
-                [16, 16, 16]
-            };
-
-            pixels[offset] = rgb[0];
-            pixels[offset + 1] = rgb[1];
-            pixels[offset + 2] = rgb[2];
-            pixels[offset + 3] = 255;
-        }
-    }
 }
 
 /// Draws a linear gradient between two colours.
@@ -2238,26 +2209,18 @@ mod tests {
         assert_eq!(pixel(&frame.image, 1, 1), [255, 255, 255, 255]);
     }
 
-    /// The six generators whose picture is a function of position alone.
-    const STILLS: [&str; 5] = [
-        "ovs.solid_colour",
-        "ovs.test_pattern",
-        "ovs.gradient",
-        "ovs.grid",
-        "ovs.shape",
-    ];
+    /// The generators whose picture is a function of position alone.
+    const STILLS: [&str; 4] = ["ovs.solid_colour", "ovs.gradient", "ovs.grid", "ovs.shape"];
 
     /// The ones whose picture is a function of time as well as position.
     const TIMEPIECES: [&str; 4] = ["ovs.clock", "ovs.countdown", "ovs.strobe", "ovs.noise"];
 
     #[test]
     fn a_still_generator_has_one_frame_and_no_timeline() {
-        // Six of the eight do not change over time, so there is nothing for a
-        // playhead to run along and no buffer to keep. Noise included: value
-        // noise at a fixed scale is a function of position, and giving it a
-        // timeline would cost a fill of the whole composition every frame for a
-        // motion nothing asked for. The shape included for the same reason: its
-        // rotation is an angle somebody set, not a speed.
+        // Four of them are a function of position alone, so there is nothing
+        // for a playhead to run along and no buffer to keep. The shape among
+        // them: its rotation is an angle somebody set, not a speed. Noise is
+        // not, and has not been since it was made to move every frame.
         for type_id in STILLS {
             let source =
                 GeneratorSource::new(type_id, 1, &ParameterMap::new(), size()).expect("published");
@@ -2461,12 +2424,14 @@ mod tests {
     #[test]
     fn the_test_pattern_a_slot_offers_now_is_the_service_pattern() {
         // The owner, 2026-10-12: "den möchte ich da sehen und keinen
-        // Generischen". Version one is still published and still draws its
-        // grid, so a show saved with it opens unchanged; version two is what a
-        // source list offers, and it is the picture an output shows.
-        let still = GeneratorSource::new("ovs.test_pattern", 1, &ParameterMap::new(), size())
-            .expect("published");
-        assert!(!still.changes_over_time(), "version one is a still");
+        // Generischen", and 2026-10-15: "Testpattern v1 soll nicht
+        // existieren." The grid-and-bars pattern that was version one is gone,
+        // which is a thing a build can say: a show naming it is refused rather
+        // than shown the nearest picture.
+        assert!(
+            GeneratorSource::new("ovs.test_pattern", 1, &ParameterMap::new(), size()).is_none(),
+            "version one is published again"
+        );
 
         let service = service_pattern();
         assert!(service.changes_over_time(), "version two moves");
@@ -2561,6 +2526,63 @@ mod tests {
 
         assert_eq!(source.length().frame_count, 86_400);
         assert_eq!(source.length().duration_ms, 86_400_000);
+    }
+
+    #[test]
+    fn the_frame_worth_a_picture_of_a_clock_is_noon() {
+        // What every generator's tile rests on. Halfway through a source a day
+        // long is twelve o'clock, so the clock on a tile reads a time a crew
+        // would read off a wall — and not the midnight its first frame is.
+        let source =
+            GeneratorSource::new("ovs.clock", 1, &ParameterMap::new(), size()).expect("published");
+
+        assert_eq!(source.tick_worth_a_picture(), 43_200);
+        assert_eq!(
+            clock_text(source.tick_worth_a_picture(), true, true).as_bytes(),
+            b"12:00:00"
+        );
+    }
+
+    #[test]
+    fn the_frame_worth_a_picture_of_a_strobe_is_the_lit_half() {
+        // Halfway through two frames is the second of them, and a strobe's
+        // second frame is clear: a tile drawn from it would be a picture of an
+        // empty pad, which is the one thing a tile must not look like.
+        let source = strobe(10.0);
+
+        assert_eq!(source.length().frame_count, 2);
+        assert_eq!(source.tick_worth_a_picture(), 0);
+    }
+
+    #[test]
+    fn a_free_running_generator_is_worth_a_picture_two_seconds_in() {
+        // Noise and the service pattern are as long as the counter goes, so
+        // half of that is a number about `u32` rather than about the picture —
+        // and at two million seconds a float has lost the fraction the sweep is
+        // positioned by.
+        for source in [noise(), service_pattern()] {
+            assert_eq!(source.length().frame_count, u32::MAX);
+            assert_eq!(source.tick_worth_a_picture(), 2_000);
+        }
+    }
+
+    #[test]
+    fn the_same_seed_draws_the_same_field_twice() {
+        // Two noise layers get different fields from a counter, which is right
+        // on a wall and impossible to check a committed picture against: the
+        // seed decides the field, and a tile's has to be the same one next time.
+        let drawn = |seed: u64| {
+            noise()
+                .with_seed(seed)
+                .frame(2_000)
+                .expect("draws")
+                .image
+                .pixels()
+                .to_vec()
+        };
+
+        assert_eq!(drawn(7), drawn(7));
+        assert_ne!(drawn(7), drawn(8), "and a different one a different field");
     }
 
     #[test]
@@ -2952,7 +2974,6 @@ mod tests {
         // something they recognise, which at minimum means it is not one flat
         // value across the whole canvas for anything but the solid colour.
         for type_id in [
-            "ovs.test_pattern",
             "ovs.gradient",
             "ovs.grid",
             "ovs.shape",
@@ -2982,76 +3003,6 @@ mod tests {
                 "{type_id} draws one flat colour from its own defaults"
             );
         }
-    }
-
-    #[test]
-    fn a_test_pattern_has_an_edge_a_grid_and_a_centre() {
-        // The three things somebody lining up a wall is looking for.
-        let parameters = ParameterMap::from([
-            ("grid_px".to_owned(), ParameterValue::Float(16.0)),
-            ("bars".to_owned(), ParameterValue::Bool(false)),
-        ]);
-        let mut source =
-            GeneratorSource::new("ovs.test_pattern", 1, &parameters, SizePx::new(64, 64))
-                .expect("published");
-        let frame = source.frame(0).expect("draws");
-
-        assert_eq!(pixel(&frame.image, 0, 30), [255, 0, 0, 255], "the edge");
-        assert_eq!(pixel(&frame.image, 32, 40), [255, 0, 0, 255], "the centre");
-        assert_eq!(
-            pixel(&frame.image, 63, 30),
-            [255, 0, 0, 255],
-            "and the far edge"
-        );
-        assert_eq!(
-            pixel(&frame.image, 16, 20),
-            [128, 128, 128, 255],
-            "the grid"
-        );
-        assert_eq!(pixel(&frame.image, 20, 20), [16, 16, 16, 255], "the field");
-    }
-
-    #[test]
-    fn the_edge_and_the_cross_are_thicker_on_a_bigger_canvas() {
-        // A one-pixel line on a 1920-wide wall is invisible in a 240-wide
-        // preview, which is where it is looked at first.
-        let parameters = ParameterMap::from([("bars".to_owned(), ParameterValue::Bool(false))]);
-        let mut source =
-            GeneratorSource::new("ovs.test_pattern", 1, &parameters, SizePx::new(1920, 1080))
-                .expect("published");
-        let frame = source.frame(0).expect("draws");
-
-        // Eight pixels either side of the centre line, at 1920 wide.
-        for offset in 0..8 {
-            assert_eq!(
-                pixel(&frame.image, 960 + offset, 400),
-                [255, 0, 0, 255],
-                "the cross at +{offset}"
-            );
-            assert_eq!(
-                pixel(&frame.image, offset, 400),
-                [255, 0, 0, 255],
-                "the edge"
-            );
-        }
-        assert_ne!(
-            pixel(&frame.image, 200, 400),
-            [255, 0, 0, 255],
-            "and not the whole picture"
-        );
-    }
-
-    #[test]
-    fn colour_bars_are_drawn_across_the_top_when_asked_for() {
-        let parameters = ParameterMap::from([("bars".to_owned(), ParameterValue::Bool(true))]);
-        let mut source =
-            GeneratorSource::new("ovs.test_pattern", 1, &parameters, SizePx::new(64, 64))
-                .expect("published");
-        let frame = source.frame(0).expect("draws");
-
-        // White at the left, black at the right, in the band across the top.
-        assert_eq!(pixel(&frame.image, 1, 3), [255, 255, 255, 255]);
-        assert_eq!(pixel(&frame.image, 62, 3), [0, 0, 0, 255]);
     }
 
     #[test]

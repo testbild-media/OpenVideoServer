@@ -272,13 +272,6 @@ pub enum Generated {
         colour: [f32; 4],
     },
 
-    /// The commissioning pattern: a grid, bars, an edge and a cross.
-    TestPattern {
-        /// How many pixels apart the ruled lines are.
-        grid: u32,
-        /// Whether the colour bars are drawn across the top.
-        bars: bool,
-    },
     /// A linear gradient between two colours.
     Gradient {
         /// The colour at the near end.

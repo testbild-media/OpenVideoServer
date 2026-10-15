@@ -45,7 +45,7 @@ function show(): Show {
         slots: [
           {
             index: 2,
-            source: { kind: 'generator', type_id: 'ovs.test_pattern', version: 1, parameters: {} },
+            source: { kind: 'generator', type_id: 'ovs.test_pattern', version: 2, parameters: {} },
             playback_mode: 'loop',
             direction: 'forward',
             transform: TRANSFORM,

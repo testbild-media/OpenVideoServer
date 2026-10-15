@@ -1650,13 +1650,17 @@ h2 {
 /* Two lines and then an ellipsis. A clip's name is whatever the file was
    called, and one of them is always long enough to push the grid apart. */
 
-/* A generator, an effect and a network sender have no picture. What a generator
-   looks like is whatever the renderer draws it as; a sender's picture would mean
-   receiving the stream here, and a still frame of a live source is a picture of
-   a moment that has already passed. So the tile carries its name on a plain
-   field rather than an approximation of something nobody has rendered. */
+/* A generator's picture is a file the renderer drew of it, shipped with this
+   client, so its tile is plain like a clip's. An effect and a network sender
+   still have none: what an effect looks like depends on what is under it, and
+   a sender's picture would mean receiving the stream to fill a tile — and a
+   still frame of a live source is a picture of a moment that has passed. Both
+   carry their name on a plain field instead.
 
-.generator-tile .browser-tile-picture {
+   `mark-only` is that field, and it is also where a generator lands when this
+   build has no picture of one the server offers: the tile they all had before
+   the pictures existed. */
+.browser-tile-picture.mark-only {
   background: #101016;
   border: 1px dashed var(--edge);
 }

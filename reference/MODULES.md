@@ -25,15 +25,6 @@ Fills the layer with one colour.
 |---|---|---|---|
 | Colour | `colour` | a colour, linear RGBA | 1.00, 1.00, 1.00, 1.00 |
 
-### Test Pattern — `ovs.test_pattern` v1
-
-A grid, colour bars and a centre cross, for lining a wall up.
-
-| Parameter | Key | Takes | Default |
-|---|---|---|---|
-| Grid size | `grid_px` | a number from 8 to 512 | 64 |
-| Colour bars | `bars` | on or off | on |
-
 ### Test Pattern — `ovs.test_pattern` v2
 
 The service pattern: bars, a drift, a sweep and a caption.

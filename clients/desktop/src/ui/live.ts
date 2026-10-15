@@ -2262,21 +2262,27 @@ export class LivePanel {
   /**
    * A slot's picture.
    *
-   * A generator has none and never will, so it shows what it is instead. A media
-   * item whose picture the server has not sent — one registered before
-   * thumbnails existed, or one nothing could be read from — is left empty, and
-   * the name under it is what the operator was going to read anyway. A broken
-   * image is not, and a placeholder that looks like a fault is worse.
+   * A generator's is the one shipped with this client, the same file its tile
+   * in the browser carries: an operator scanning a bank sees what each pad
+   * draws rather than reading ten short words. A media item whose picture the
+   * server has not sent — one registered before thumbnails existed, or one
+   * nothing could be read from — is left empty, and the name under it is what
+   * the operator was going to read anyway. A broken image is not, and a
+   * placeholder that looks like a fault is worse.
    */
   #paintSource(target: HTMLElement, slot: SlotView | null): void {
     if (slot === null) {
       target.replaceChildren();
       return;
     }
-    if (slot.source.kind === 'generator' || slot.source.kind === 'ndi') {
+    if (slot.source.kind === 'generator') {
+      paintGeneratorPicture(target, slot.source, this.#sourceName(slot), 'pad-generator');
+      return;
+    }
+    if (slot.source.kind === 'ndi') {
       // A stream has no thumbnail to draw and no strip to scrub: what it looks
-      // like is whatever is being sent this second. Named, like a generator,
-      // rather than drawn as a picture this client does not have.
+      // like is whatever is being sent this second. Named rather than drawn as
+      // a picture this client does not have.
       target.replaceChildren(make('span', 'pad-generator', this.#sourceName(slot)));
       return;
     }
@@ -2634,11 +2640,8 @@ export class LivePanel {
     const node = make('div', 'browser-tile generator-tile');
     node.draggable = true;
 
-    // A mark rather than a picture. What a generator looks like is whatever
-    // the renderer draws, and a gradient approximated here would be a picture
-    // of something the wall will not show.
     const picture = make('div', 'browser-tile-picture');
-    picture.append(make('span', 'tile-mark', tile.name));
+    paintGeneratorPicture(picture, tile, tile.name, 'tile-mark');
     node.append(picture, make('span', 'browser-tile-name', tile.name));
     node.title = `${tile.name} — ${tile.description}${NEWLINE}Drag onto a pad to put it there.`;
 
@@ -4974,6 +4977,64 @@ function ordinal(value: number): string {
     ? 'th'
     : ({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[value % 10] ?? 'th';
   return `${value}${suffix}`;
+}
+
+/**
+ * Paints what a generator draws into a box, from a file shipped with this
+ * client.
+ *
+ * **A committed picture rather than a request or a drawing.** What a gradient
+ * looks like is the renderer's business, so a version drawn here in TypeScript
+ * would eventually be a picture of something the wall does not show; and
+ * asking the server for one would have a show machine drawing ten
+ * compositions because somebody opened a list of names. So the renderer draws
+ * them once — `cargo run -p ovs-renderer --bin ovs-generator-pictures` — and
+ * they travel with the client. A Rust test fails if one stops matching what
+ * its generator draws.
+ *
+ * By type *and version*, because a version is a different picture on purpose.
+ * A server offering a generator this client has no file for falls back to the
+ * name on a plain field, which is the tile these had before the pictures
+ * existed; the box remembers which source that was, so a repaint does not
+ * fetch the missing file again.
+ */
+function paintGeneratorPicture(
+  target: HTMLElement,
+  source: { typeId: string; version: number },
+  name: string,
+  markClass: string,
+): void {
+  // `encodeURIComponent` because a type id is whatever the server says it is,
+  // and this is about to be part of a path into the client's own bundle. A
+  // published id is `ovs.noise`, which it leaves alone.
+  const src = `../assets/generators/${encodeURIComponent(source.typeId)}.v${source.version}.png`;
+  if (target.dataset.noPictureFor === src) {
+    return;
+  }
+  const existing = target.firstElementChild;
+  if (existing instanceof HTMLImageElement && existing.getAttribute('src') === src) {
+    return;
+  }
+
+  const drawn = make('img');
+  drawn.src = src;
+  drawn.alt = '';
+  // The tile or the pad carries the drag; an image that started its own would
+  // hand the target a picture instead of a source.
+  drawn.draggable = false;
+  drawn.addEventListener('error', () => {
+    const box = drawn.parentElement;
+    if (box === null) {
+      return;
+    }
+    box.dataset.noPictureFor = src;
+    box.classList.add('mark-only');
+    box.replaceChildren(make('span', markClass, name));
+  });
+
+  delete target.dataset.noPictureFor;
+  target.classList.remove('mark-only');
+  target.replaceChildren(drawn);
 }
 
 /** A stable key for what a slot plays, so a pad is rebuilt when its source changes. */

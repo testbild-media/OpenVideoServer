@@ -4837,12 +4837,6 @@ impl Compositor for VulkanOffscreenBackend {
                 kind: GeneratedPush::PATTERN,
                 ..blank
             },
-            Generated::TestPattern { grid, bars } => GeneratedPush {
-                values: [grid as f32, 0.0, 0.0, 0.0],
-                kind: GeneratedPush::TEST_PATTERN,
-                flags: if bars { GeneratedPush::BARS } else { 0 },
-                ..blank
-            },
             Generated::Gradient {
                 from,
                 to,
@@ -7919,10 +7913,9 @@ mod tests {
     #[test]
     fn the_card_draws_the_other_generators_the_processor_draws() {
         let _gpu = crate::vulkan::one_gpu_at_a_time();
-        // The four that are arithmetic and nothing else. Each is drawn both
+        // The three that are arithmetic and nothing else. Each is drawn both
         // ways and compared byte for byte, because each has a detail that
-        // would survive a glance and not a measurement: the commissioning
-        // pattern's stroke is a fraction of the canvas, the gradient's ramp is
+        // would survive a glance and not a measurement: the gradient's ramp is
         // normalised across the pixel *centres*, the grid is measured from the
         // picture's origin rather than its middle, and a shape's edge is a
         // coverage ramp rather than a test.
@@ -7942,14 +7935,6 @@ mod tests {
         let red = [1.0_f32, 0.1, 0.2, 1.0];
         let blue = [0.1_f32, 0.2, 1.0, 1.0];
         for what in [
-            crate::backend::Generated::TestPattern {
-                grid: 16,
-                bars: true,
-            },
-            crate::backend::Generated::TestPattern {
-                grid: 7,
-                bars: false,
-            },
             crate::backend::Generated::Gradient {
                 from: red,
                 to: blue,

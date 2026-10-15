@@ -73,38 +73,16 @@ var<immediate> generated: Generated;
 const KIND_NOISE: u32 = 0u;
 const KIND_SOLID: u32 = 1u;
 const KIND_PATTERN: u32 = 2u;
-const KIND_TEST_PATTERN: u32 = 3u;
-const KIND_GRADIENT: u32 = 4u;
-const KIND_GRID: u32 = 5u;
-const KIND_SHAPE: u32 = 6u;
+const KIND_GRADIENT: u32 = 3u;
+const KIND_GRID: u32 = 4u;
+const KIND_SHAPE: u32 = 5u;
 
 const FLAG_COLOURED: u32 = 1u;
-/// The commissioning pattern's bars across the top.
-const FLAG_BARS: u32 = 2u;
 
 /// Which figure a shape draws. `media::generator::Figure`, in the same order.
 const FIGURE_ELLIPSE: u32 = 0u;
 const FIGURE_RECTANGLE: u32 = 1u;
 const FIGURE_TRIANGLE: u32 = 2u;
-
-/// The eight bars, left to right, as a commissioning pattern has them.
-///
-/// `media::generator::BARS`, and in eight-bit values rather than fractions
-/// because that is how they are written there — 255 and 0, not 1.0 and 0.0,
-/// so the two cannot round apart.
-fn bar_colour(index: i32) -> vec3<f32> {
-    var bars = array<vec3<f32>, 8>(
-        vec3<f32>(255.0, 255.0, 255.0),
-        vec3<f32>(255.0, 255.0, 0.0),
-        vec3<f32>(0.0, 255.0, 255.0),
-        vec3<f32>(0.0, 255.0, 0.0),
-        vec3<f32>(255.0, 0.0, 255.0),
-        vec3<f32>(255.0, 0.0, 0.0),
-        vec3<f32>(0.0, 0.0, 255.0),
-        vec3<f32>(0.0, 0.0, 0.0),
-    );
-    return bars[clamp(index, 0, 7)] / 255.0;
-}
 
 // `0x9E3779B97F4A7C15`, `0xC2B2AE3D27D4EB4F`, `0x165667B19E3779F9` and
 // `0xFF51AFD7ED558CCD`, each as its low and high half. The same four constants
@@ -331,40 +309,6 @@ fn pattern(pixel: vec2<f32>) -> vec4<f32> {
     return colour;
 }
 
-/// The commissioning pattern: a grid, bars, an edge and a cross.
-///
-/// `media::generator::draw_test_pattern`, arm for arm and in the same order,
-/// because each of its three parts answers a different question an operator is
-/// asking and a pixel belongs to exactly one of them.
-fn test_pattern(pixel: vec2<f32>) -> vec4<f32> {
-    let size = vec2<i32>(generated.size);
-    let here = vec2<i32>(pixel);
-    let grid = max(i32(generated.values.x), 2);
-    let bars = (generated.flags & FLAG_BARS) != 0u;
-    let bar_height = select(0, size.y / 6, bars);
-    // In proportion to the canvas rather than one pixel wide: a single pixel
-    // on a 1920-wide wall disappears in the console's preview, which is where
-    // somebody checks it from before walking over to look.
-    let stroke = max(max(size.x, size.y) / 240, 1);
-
-    let on_grid = here.x % grid == 0 || here.y % grid == 0;
-    let on_edge = here.x < stroke || here.y < stroke
-        || here.x + stroke >= size.x || here.y + stroke >= size.y;
-    let on_cross = abs(here.x - size.x / 2) <= stroke || abs(here.y - size.y / 2) <= stroke;
-
-    var rgb: vec3<f32>;
-    if here.y < bar_height {
-        rgb = bar_colour(here.x * 8 / max(size.x, 1));
-    } else if on_edge || on_cross {
-        rgb = vec3<f32>(1.0, 0.0, 0.0);
-    } else if on_grid {
-        rgb = vec3<f32>(128.0 / 255.0);
-    } else {
-        rgb = vec3<f32>(16.0 / 255.0);
-    }
-    return vec4<f32>(rgb, 1.0);
-}
-
 /// A linear gradient between two colours.
 ///
 /// `media::generator::draw_gradient`. The ramp is normalised across the span
@@ -533,9 +477,6 @@ fn fragment_main(in: VertexOutput) -> @location(0) vec4<f32> {
         }
         case KIND_PATTERN: {
             return pattern(pixel);
-        }
-        case KIND_TEST_PATTERN: {
-            return test_pattern(pixel);
         }
         case KIND_GRADIENT: {
             return gradient(pixel);

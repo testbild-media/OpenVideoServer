@@ -148,47 +148,27 @@ pub const SOLID_COLOUR_V1: GeneratorManifest = GeneratorManifest {
     }],
 };
 
-/// A commissioning pattern.
-///
-/// What somebody points at an LED wall before a show: a grid to find missing
-/// panels and scaling errors, bars to check colour, and a cross to find the
-/// centre. It exists because the alternative is an operator hunting for a test
-/// clip on a memory stick, in a venue, an hour before doors.
-pub const TEST_PATTERN_V1: GeneratorManifest = GeneratorManifest {
-    type_id: "ovs.test_pattern",
-    version: 1,
-    name: "Test Pattern",
-    description: "A grid, colour bars and a centre cross, for lining a wall up.",
-    parameters: &[
-        ParameterDefinition {
-            key: "grid_px",
-            name: "Grid size",
-            kind: ParameterKind::Number {
-                min: 8.0,
-                max: 512.0,
-                default: 64.0,
-            },
-            dmx: Some(DmxChannel::Coarse),
-        },
-        ParameterDefinition {
-            key: "bars",
-            name: "Colour bars",
-            kind: ParameterKind::Toggle { default: true },
-            dmx: Some(DmxChannel::Coarse),
-        },
-    ],
-};
-
 /// The service pattern, on a layer.
 ///
-/// **Version 2 draws a different picture from version 1, deliberately.** The
-/// first was a grid, bars and a centre cross, drawn once and left alone — and
-/// beside it this system already had a test pattern of its own, the one an
-/// output and a composition show, with colour bars over a black-level ramp, a
-/// picture that drifts, a sweep every five seconds and a caption naming the
-/// surface and its mode. Two answers to one question, and the lesser one was
-/// what a layer offered (owner, 2026-10-12: "den möchte ich da sehen und
-/// keinen Generischen").
+/// **There is no version 1, and the gap is the point.** It was a grid, bars
+/// and a centre cross, drawn once and left alone — and beside it this system
+/// already had a test pattern of its own, the one an output and a composition
+/// show. Two answers to one question, and the lesser one was what a layer
+/// offered (owner, 2026-10-12: "den möchte ich da sehen und keinen
+/// Generischen"), so version 2 drew the service pattern instead. Three days
+/// later the first went (owner, 2026-10-15: "Testpattern v1 soll nicht
+/// existieren. Nur noch v2 und das wird zum normalen Testpattern").
+///
+/// **The number stays 2 although nothing is below it.** A version is what a
+/// saved show names — four slots of the show on the machine in the hall name
+/// this one — and renumbering it would be editing those shows from here. A
+/// manifest is immutable once published; removing one is a decision about what
+/// this build offers, and renumbering another is a decision about documents
+/// that are not ours.
+///
+/// What the picture is for: colour bars over a black-level ramp, a picture
+/// that drifts, a sweep every five seconds and a caption naming the surface
+/// and its mode.
 ///
 /// **What the drift and the sweep are for**, and why they are worth what they
 /// cost: a frozen output and a live one showing a still look identical from
@@ -334,10 +314,10 @@ pub const GRADIENT_V1: GeneratorManifest = GeneratorManifest {
 /// Ruled lines on a background.
 ///
 /// Content rather than a diagnostic, which is what separates it from
-/// [`TEST_PATTERN_V1`]: a grid behind a band, a floor receding, a scaffold
-/// behind a key. All of those want a grid and none of them want colour bars and
-/// a centre cross drawn over it, so the two are different generators rather than
-/// one with a switch.
+/// [`TEST_PATTERN_V2`]: a grid behind a band, a floor receding, a scaffold
+/// behind a key. All of those want a grid and none of them want bars, a drift
+/// and a caption drawn over it, so the two are different generators rather
+/// than one with a switch.
 ///
 /// Published as white lines on black at sixty-four pixels, which reads as a grid
 /// on every composition size this product targets rather than as a pale field on
@@ -862,12 +842,10 @@ pub const TEXT_V1: GeneratorManifest = GeneratorManifest {
 };
 
 /// Every generator this build publishes.
-pub const PUBLISHED: [GeneratorManifest; 11] = [
+pub const PUBLISHED: [GeneratorManifest; 10] = [
     SOLID_COLOUR_V1,
-    // Both, and in this order. A catalogue offers the newest of a type and a
-    // show is served whichever version it names, so v1 is here to keep a show
-    // that already uses it opening the way it was left — not to be offered.
-    TEST_PATTERN_V1,
+    // Version 2 and no version 1, which is the one place in this file where a
+    // manifest was removed rather than retired: see its own documentation.
     TEST_PATTERN_V2,
     STROBE_V1,
     GRADIENT_V1,
@@ -933,10 +911,10 @@ mod tests {
         // Clamping is what a live control does with a fader that has gone too
         // far. This is a show being saved, where the right answer is to say
         // what is wrong.
-        let values = ParameterMap::from([("grid_px".to_owned(), ParameterValue::Float(4096.0))]);
-        let problems = TEST_PATTERN_V1.problems(&values);
+        let values = ParameterMap::from([("spacing_px".to_owned(), ParameterValue::Float(4096.0))]);
+        let problems = GRID_V1.problems(&values);
         assert_eq!(problems.len(), 1);
-        assert!(problems[0].1.contains("between 8 and 512"));
+        assert!(problems[0].1.contains("between 4 and 512"));
     }
 
     #[test]
@@ -1038,11 +1016,11 @@ mod tests {
     }
 
     #[test]
-    fn a_grid_is_a_separate_generator_from_the_commissioning_pattern() {
+    fn a_grid_is_a_separate_generator_from_the_service_pattern() {
         // One is content and one is a diagnostic. A show asking for a grid
-        // behind a band must not get colour bars and a centre cross with it.
-        assert_ne!(GRID_V1.type_id, TEST_PATTERN_V1.type_id);
-        assert!(GRID_V1.parameter("bars").is_none());
+        // behind a band must not get colour bars and a caption with it.
+        assert_ne!(GRID_V1.type_id, TEST_PATTERN_V2.type_id);
+        assert!(GRID_V1.parameter("caption").is_none());
         assert!(GRID_V1.parameter("line_colour").is_some());
     }
 

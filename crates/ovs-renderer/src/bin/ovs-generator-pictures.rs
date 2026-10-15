@@ -1,0 +1,363 @@
+//! The picture on each generator's tile, drawn once and committed.
+//!
+//! ```text
+//! cargo run -p ovs-renderer --bin ovs-generator-pictures
+//! cargo run -p ovs-renderer --bin ovs-generator-pictures -- somewhere/else
+//! ```
+//!
+//! # Why files rather than a request
+//!
+//! A tile wants a picture of what the generator is, so that an operator can
+//! see a list of them without reading it. There are three ways to get one, and
+//! two of them are wrong.
+//!
+//! Drawing it in the client is wrong because what a gradient looks like is the
+//! renderer's business: a second implementation in another language, kept in
+//! step by hand, would eventually show a picture of something the wall does not
+//! draw — and the first time they disagreed, the operator would be the one who
+//! found out.
+//!
+//! Asking the server for it is wrong because it is a show machine. Ten
+//! generators at a composition size, drawn on the processor because somebody
+//! opened a list of names, is work a wall pays for to tell the operator
+//! something that cannot change between runs. The owner's words, 2026-10-15:
+//! "keine Resourcen verschwenden, deshalb statische Vorschaubilder".
+//!
+//! So: the renderer's own picture, drawn here, committed beside the client, and
+//! free at the moment somebody looks at it.
+//!
+//! # What is in them
+//!
+//! Each generator's own output from its published defaults, with nothing added
+//! and nothing composed on top. They are placeholders — enough to see what a
+//! thing is without reading its label — and two of them are honestly almost
+//! nothing: a solid colour and a strobe both draw a flat white field, because
+//! that is what they draw.
+//!
+//! **Drawn at the size a show runs at and averaged down**, rather than drawn
+//! small. Half of these generators are sized in pixels — a shape is 256 across,
+//! text is 108 tall, a grid is ruled every 64 — and on a canvas 320 wide each
+//! of those would be one object filling the frame, which is a picture of the
+//! parameter and not of the generator. At 1920 they are what they are, and
+//! shrinking keeps them that: the tile is a miniature of the wall.
+//!
+//! Which frame comes from [`GeneratorSource::tick_worth_a_picture`], which
+//! explains itself.
+//!
+//! # One file a published manifest
+//!
+//! `ovs.noise.v1.png`: the type and the version, because a version is a
+//! different picture on purpose. Test pattern version one draws a grid with
+//! bars and version two draws the service pattern — a show saved with the
+//! first still plays the first, and a pad showing it the second's picture
+//! would be a pad lying about what pressing it does.
+//!
+//! That is also why the retired types are here. A source list offers neither
+//! the clock nor the countdown (the owner, 2026-10-12: "Was sowieso dann weg
+//! kann und mir keinen Mehrwert bringt: Generator Countdown, Generator
+//! Clock"), and a show saved before that still has them on a pad, where they
+//! still draw. Two files, and nothing in the browser.
+//!
+//! A client resolves a picture by name, so a generator with none shows what it
+//! showed before these existed rather than a wrong picture.
+//!
+//! # Keeping them true
+//!
+//! The test at the bottom draws every generator the catalogue offers and
+//! compares it with the committed file. Change what a generator draws and that
+//! test says so, and says to run this. It is the only thing between a
+//! committed picture and a tile that lies about what a pad will do.
+
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
+
+use ovs_renderer::media::{DecodedImage, FrameSource, GeneratorSource};
+use ovs_types::config::slot::ParameterMap;
+use ovs_types::geometry::SizePx;
+
+/// The size the pictures are drawn at, which is the size a show runs at.
+const WALL: SizePx = SizePx::new(1920, 1080);
+
+/// How much the drawn picture is shrunk by.
+///
+/// 1920 and 1080 are both whole multiples of it, so every pixel of the tile is
+/// the average of exactly six by six of the wall and no resampling filter has
+/// to be chosen, tuned or explained.
+const SHRINK: u32 = 6;
+
+/// The picture on a tile: 320 by 180.
+///
+/// A tile is between 92 and 130 pixels across and may be on a screen with two
+/// device pixels to each of those, so this is oversampled rather than exact —
+/// and the same file is the picture on a pad, which is smaller again.
+const TILE: SizePx = SizePx::new(WALL.width / SHRINK, WALL.height / SHRINK);
+
+/// The seed every picture is drawn with.
+///
+/// Any fixed number. It decides which field of noise this is, one is as
+/// representative as another, and what matters is that it is the same one when
+/// the test draws it again.
+const SEED: u64 = 1;
+
+fn main() -> ExitCode {
+    let into = std::env::args()
+        .nth(1)
+        .map_or_else(pictures_directory, PathBuf::from);
+
+    if let Err(error) = std::fs::create_dir_all(&into) {
+        eprintln!("{}: {error}", into.display());
+        return ExitCode::from(1);
+    }
+
+    for manifest in &ovs_types::config::generators::PUBLISHED {
+        let named = picture_name(manifest.type_id, manifest.version);
+        let Some(picture) = picture_of(manifest.type_id, manifest.version) else {
+            eprintln!("{named}: published and cannot be drawn");
+            return ExitCode::from(1);
+        };
+        let Some(png) = encoded(&picture) else {
+            eprintln!("{named}: could not be encoded");
+            return ExitCode::from(1);
+        };
+
+        let path = into.join(&named);
+        if let Err(error) = std::fs::write(&path, &png) {
+            eprintln!("{}: {error}", path.display());
+            return ExitCode::from(1);
+        }
+
+        println!(
+            "{named:<26} {}x{}  {:>6} bytes",
+            TILE.width,
+            TILE.height,
+            png.len()
+        );
+    }
+
+    println!("into {}", into.display());
+    ExitCode::SUCCESS
+}
+
+/// What one generator's picture is called.
+fn picture_name(type_id: &str, version: u32) -> String {
+    format!("{type_id}.v{version}.png")
+}
+
+/// Where the client keeps them.
+///
+/// From this crate's own place in the tree, so the tool can be run from
+/// anywhere and still write where the client will look.
+fn pictures_directory() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../clients/desktop/assets/generators")
+}
+
+/// One generator's tile-sized picture, from its published defaults.
+///
+/// `None` for a type this build does not publish, which is also the answer for
+/// a version it has retired.
+fn picture_of(type_id: &str, version: u32) -> Option<DecodedImage> {
+    let mut source =
+        GeneratorSource::new(type_id, version, &ParameterMap::new(), WALL)?.with_seed(SEED);
+    let frame = source.frame(source.tick_worth_a_picture()).ok()?;
+    shrunk(&frame.image)
+}
+
+/// Averages each six-by-six block of a picture into one pixel.
+///
+/// # Why the alpha is weighted
+///
+/// Two of these generators draw on a transparent background, and a flat
+/// average of straight alpha darkens every edge: the pixels outside the shape
+/// are transparent *black*, and averaging their colour in is averaging in
+/// black. Weighting each pixel's colour by its own alpha — a premultiplied
+/// average, undone afterwards — gives the edge the shape's colour at the
+/// shape's coverage, which is what the compositor does with it on the wall.
+///
+/// `None` if the picture is not a whole number of blocks across, or is in the
+/// other channel order: both are callers' mistakes rather than situations.
+fn shrunk(image: &DecodedImage) -> Option<DecodedImage> {
+    let from = image.size();
+    if !from.width.is_multiple_of(SHRINK) || !from.height.is_multiple_of(SHRINK) || image.is_bgra()
+    {
+        return None;
+    }
+
+    let to = SizePx::new(from.width / SHRINK, from.height / SHRINK);
+    let source = image.pixels();
+    let block = (SHRINK * SHRINK) as f32;
+    let mut pixels = Vec::with_capacity((to.width as usize) * (to.height as usize) * 4);
+
+    for row in 0..to.height {
+        for column in 0..to.width {
+            let mut weighted = [0.0f32; 3];
+            let mut alpha = 0.0f32;
+            for y in 0..SHRINK {
+                for x in 0..SHRINK {
+                    let at = (((row * SHRINK + y) * from.width + column * SHRINK + x) * 4) as usize;
+                    let taken = source.get(at..at + 4)?;
+                    let coverage = f32::from(taken[3]);
+                    for (channel, sum) in weighted.iter_mut().enumerate() {
+                        *sum += f32::from(taken[channel]) * coverage;
+                    }
+                    alpha += coverage;
+                }
+            }
+
+            for sum in weighted {
+                pixels.push(rounded(if alpha > 0.0 { sum / alpha } else { 0.0 }));
+            }
+            pixels.push(rounded(alpha / block));
+        }
+    }
+
+    DecodedImage::new(pixels, to)
+}
+
+/// The nearest byte to an average.
+fn rounded(value: f32) -> u8 {
+    value.clamp(0.0, 255.0).round() as u8
+}
+
+/// A picture as the bytes of a PNG.
+fn encoded(picture: &DecodedImage) -> Option<Vec<u8>> {
+    let size = picture.size();
+    let buffer = image::RgbaImage::from_raw(size.width, size.height, picture.pixels().to_vec())?;
+    let mut bytes = Vec::new();
+    image::DynamicImage::ImageRgba8(buffer)
+        .write_to(
+            &mut std::io::Cursor::new(&mut bytes),
+            image::ImageFormat::Png,
+        )
+        .ok()?;
+    Some(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What to do when a picture is not what this build draws.
+    const RUN_IT: &str = "run `cargo run -p ovs-renderer --bin ovs-generator-pictures`";
+
+    /// The committed picture of one published manifest, as bytes of RGBA.
+    fn committed(named: &str) -> Vec<u8> {
+        let path = pictures_directory().join(named);
+        let opened = image::open(&path)
+            .unwrap_or_else(|error| panic!("{}: {error} — {RUN_IT}", path.display()));
+        opened.to_rgba8().into_raw()
+    }
+
+    #[test]
+    fn every_published_generator_has_a_committed_picture_of_what_it_draws() {
+        // The whole guard. A generator whose drawing changes, or a new one with
+        // no picture at all, is caught here rather than by an operator dragging
+        // a tile onto a pad and getting something else.
+        for manifest in &ovs_types::config::generators::PUBLISHED {
+            let named = picture_name(manifest.type_id, manifest.version);
+            let drawn = picture_of(manifest.type_id, manifest.version)
+                .unwrap_or_else(|| panic!("{named} cannot be drawn"));
+            assert_eq!(drawn.size(), TILE, "{named}");
+
+            let committed = committed(&named);
+            assert_eq!(
+                committed.len(),
+                drawn.pixels().len(),
+                "{named} is committed at another size — {RUN_IT}"
+            );
+
+            // Two levels rather than nothing, because these are floating-point
+            // pictures: a generator reaches a pixel through sines, square roots
+            // and a lattice, and the last bit of a channel is not a promise two
+            // machines have to keep. A picture that is actually of something
+            // else is out by far more than this.
+            let worst = committed
+                .iter()
+                .zip(drawn.pixels())
+                .map(|(committed, drawn)| committed.abs_diff(*drawn))
+                .max()
+                .unwrap_or(0);
+            assert!(
+                worst <= 2,
+                "{named} draws a different picture than the one committed, out by {worst} — {RUN_IT}"
+            );
+        }
+    }
+
+    #[test]
+    fn nothing_is_committed_that_no_manifest_asks_for() {
+        // The other direction, and the one that catches a generator being
+        // removed: its picture stays in the directory, nothing draws it, and
+        // the guard above never looks at it. A client would not ask for it
+        // either — this is about not shipping a picture of something that no
+        // longer exists.
+        let wanted: std::collections::BTreeSet<String> = ovs_types::config::generators::PUBLISHED
+            .iter()
+            .map(|manifest| picture_name(manifest.type_id, manifest.version))
+            .collect();
+
+        let directory = pictures_directory();
+        let listed = std::fs::read_dir(&directory)
+            .unwrap_or_else(|error| panic!("{}: {error}", directory.display()));
+        for entry in listed {
+            let found = entry.expect("a directory entry").file_name();
+            let found = found.to_string_lossy().to_string();
+            assert!(
+                wanted.contains(&found),
+                "{found} is committed and nothing publishes it — delete it"
+            );
+        }
+    }
+
+    #[test]
+    fn every_picture_but_the_two_flat_ones_shows_more_than_one_colour() {
+        // A placeholder that is one flat field says nothing. Two of them are
+        // exactly that and cannot be otherwise: a solid colour is a solid
+        // colour, and a strobe's lit frame is one too. Named here so that a
+        // third one arriving has to be argued for.
+        for manifest in &ovs_types::config::generators::PUBLISHED {
+            let flat = matches!(manifest.type_id, "ovs.solid_colour" | "ovs.strobe");
+            let picture = picture_of(manifest.type_id, manifest.version)
+                .unwrap_or_else(|| panic!("{} cannot be drawn", manifest.type_id));
+
+            let colours: std::collections::BTreeSet<[u8; 4]> = picture
+                .pixels()
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .copied()
+                .collect();
+            assert_eq!(
+                colours.len() > 1,
+                !flat,
+                "{} and {} colours in its picture",
+                manifest.type_id,
+                colours.len()
+            );
+        }
+    }
+
+    #[test]
+    fn shrinking_takes_the_colour_of_a_corner_rather_than_fading_it() {
+        // The premultiplied average, in the one case where getting it wrong is
+        // visible: a block that is one quarter opaque white and three quarters
+        // nothing. Weighted, that is white at a quarter coverage; flat, it is
+        // dark grey at a quarter coverage, and every edge in the shape and text
+        // pictures would have a dirty rim.
+        let mut pixels = vec![0u8; (SHRINK * SHRINK * 4) as usize];
+        for pixel in pixels
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .take((SHRINK * SHRINK / 4) as usize)
+        {
+            *pixel = [255, 255, 255, 255];
+        }
+
+        let whole =
+            DecodedImage::new(pixels, SizePx::new(SHRINK, SHRINK)).expect("a square of pixels");
+        let one = shrunk(&whole).expect("one pixel");
+
+        assert_eq!(one.size(), SizePx::new(1, 1));
+        assert_eq!(one.pixels(), &[255, 255, 255, 64]);
+    }
+}

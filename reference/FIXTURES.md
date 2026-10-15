@@ -313,15 +313,6 @@ Footprint: **4 channels**. Patch to: **one generator instance in a slot**.
 | 3 | Colour Blue | `colour` | 0 at 0, 1 at 255 | 255 |
 | 4 | Colour Alpha | `colour` | 0 at 0, 1 at 255 | 255 |
 
-## Test Pattern — `ovs.test_pattern` v1
-
-Footprint: **2 channels**. Patch to: **one generator instance in a slot**.
-
-| Channel | Name | Control | Values | Home |
-|---|---|---|---|---|
-| 1 | Grid size | `grid_px` | 8 at 0, 512 at 255 | 28 |
-| 2 | Colour bars | `bars` | on at 128 and above | 255 |
-
 ## Strobe — `ovs.strobe` v1
 
 Footprint: **5 channels**. Patch to: **one generator instance in a slot**.

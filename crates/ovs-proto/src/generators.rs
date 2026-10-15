@@ -41,8 +41,8 @@ pub struct GeneratorCatalogueResponse {
 /// A retired type is left out before this is asked; see `RETIRED`.
 ///
 /// What a catalogue answers is "what can I put in a slot now", and the answer
-/// is one entry a type. An older version is still served to a show that names
-/// it: that is `manifest(type_id, version)`, and it is why both are published.
+/// is one entry a type. An older version, where one is published, is still
+/// served to a show that names it: that is `manifest(type_id, version)`.
 fn is_newest(type_id: &str, version: u32) -> bool {
     !PUBLISHED
         .iter()
@@ -127,19 +127,21 @@ mod tests {
     }
 
     #[test]
-    fn an_older_version_is_still_served_to_a_show_that_names_it() {
-        // The other half of offering only the newest: a show saved against v1
-        // opens drawing what it was left drawing, rather than losing its layer
-        // to a build that no longer admits the version it names.
-        assert!(manifest("ovs.test_pattern", 1).is_some());
-        assert!(manifest("ovs.test_pattern", 2).is_some());
+    fn the_test_pattern_is_published_at_version_two_with_nothing_below_it() {
+        // The one hole in the version numbers, and a deliberate one. Version
+        // one drew a grid, bars and a centre cross and is gone (owner,
+        // 2026-10-15: "Testpattern v1 soll nicht existieren. Nur noch v2 und
+        // das wird zum normalen Testpattern"); the number stays where it is
+        // because saved shows name it.
         assert!(
-            !catalogue()
-                .generators
-                .iter()
-                .any(|generator| generator.type_id == "ovs.test_pattern" && generator.version == 1),
-            "v1 is served but not offered"
+            manifest("ovs.test_pattern", 1).is_none(),
+            "version one is published again"
         );
+        assert!(manifest("ovs.test_pattern", 2).is_some());
+        assert!(catalogue()
+            .generators
+            .iter()
+            .any(|generator| generator.type_id == "ovs.test_pattern" && generator.version == 2));
     }
 
     #[test]

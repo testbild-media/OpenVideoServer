@@ -60,18 +60,14 @@ impl GeneratedPush {
     pub const SOLID: u32 = 1;
     /// The service pattern: drifting bars, a sweep, and a caption.
     pub const PATTERN: u32 = 2;
-    /// The commissioning pattern: a grid, bars, an edge and a cross.
-    pub const TEST_PATTERN: u32 = 3;
     /// A linear gradient between two colours.
-    pub const GRADIENT: u32 = 4;
+    pub const GRADIENT: u32 = 3;
     /// Ruled lines at a spacing.
-    pub const GRID: u32 = 5;
+    pub const GRID: u32 = 4;
     /// One figure, centred and turned, over a bed.
-    pub const SHAPE: u32 = 6;
+    pub const SHAPE: u32 = 5;
     /// The three channels get independent noise fields.
     pub const COLOURED: u32 = 1;
-    /// The commissioning pattern draws its colour bars across the top.
-    pub const BARS: u32 = 2;
 
     /// The bytes to push, in the layout the shader declares.
     #[must_use]
