@@ -444,13 +444,27 @@ jobs:
             cat "dist/checksums/$(basename "$file").sha256"
           done
 
+      # **A tag stops here; a run by hand does not.** Fetching the installer
+      # tolerates its absence, which is right for proving the packaging and
+      # wrong for a tag. On 2026-10-15 `msys2/setup-msys2` failed to install,
+      # the Windows job died before it built anything, and v0.2.31 went out as
+      # a `.deb` 87 MB light whose download page had nothing on it — published,
+      # with nothing but a warning in a log nobody opens to say so. It took
+      # comparing byte sizes with the release before it to notice. The same
+      # commit built cleanly on the very next run, so the cost of stopping is
+      # one more tag and the cost of not stopping is a release that looks fine.
       - name: Say what the package will carry
         shell: bash
         run: |
           ls -l dist/client/ 2>/dev/null || true
-          if ! ls dist/client/* > /dev/null 2>&1; then
-            echo '::warning title=No Windows client::This package carries no installer, so installing it over an older one takes the download page'"'"'s installer away with it. Put one back by hand, or run this workflow again once the client builds.'
+          if ls dist/client/*.exe > /dev/null 2>&1; then
+            exit 0
           fi
+          if [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = "true" ]; then
+            printf '::error title=%s::%s\n' 'No Windows client' 'The Windows job handed over no installer, so this package would carry none and the server'"'"'s download page would be empty. Nothing is published; tag again once the client builds.'
+            exit 1
+          fi
+          echo '::warning title=No Windows client::This package carries no installer, so installing it over an older one takes the download page'"'"'s installer away with it. Put one back by hand, or run this workflow again once the client builds.'
 
       - name: Install the pinned toolchain
         run: |
