@@ -293,7 +293,26 @@ jobs:
           export-cef-dir -f ~/.local/share/cef
 
       - name: Build the package
-        run: ./tools/package.sh
+        run: |
+          set -o pipefail
+          ./tools/package.sh 2>&1 | tee /tmp/package.log
+
+      # **So a failure says why without an account.** Reading an Actions log
+      # needs somebody signed in and downloading one needs a token, but a
+      # workflow command comes back through the public API as an annotation on
+      # the run. `release.yml` has had this since 2026-10-10; this job did not,
+      # and on 2026-10-15 it failed with "exit code 6" and nothing else —
+      # which is a number, not a reason.
+      - name: Say why it failed
+        if: failure()
+        run: |
+          if [ -f /tmp/package.log ]; then
+            printf '::error title=%s::%s\n' 'package.sh' \
+              "$(sed -e 's/%/%25/g' -e 's/\r$//' /tmp/package.log | tail -n 80 | awk '{ printf "%s%%0A", $0 }')"
+          else
+            echo '::error title=package.sh::The step wrote no log at all, so it died before the script started.'
+          fi
+          exit 0
 
       # The maintainer scripts run as root on somebody else's machine, and a
       # syntax error in one strands a half-unpacked install. Cheap to check.
