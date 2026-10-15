@@ -165,10 +165,29 @@ be able to make the second.
   in the current directory, and the library is under `lib/`:
 
   ```bash
-  sudo install -m 0644 "NDI SDK for Linux"/lib/x86_64-linux-gnu/libndi.so.* /usr/local/lib/
+  sudo install -m 0644 \
+    "$(readlink -f "NDI SDK for Linux"/lib/x86_64-linux-gnu/libndi.so.6)" /usr/local/lib/
   sudo ldconfig
   sudo systemctl restart ovs-renderer
   ```
+
+  **One file, and `ldconfig` makes the rest.** The SDK ships `libndi.so` and
+  `libndi.so.6` as symlinks beside the real `libndi.so.6.3.2`, and `install`
+  follows a symlink rather than copying it — so `libndi.so.*` installed three
+  *copies* of twenty-seven megabytes, and `ldconfig` then said
+  `libndi.so.6 is not a symbolic link` on every package operation afterwards.
+  That is what `readlink -f` is for here: it names the real file whatever its
+  version, and `ldconfig` reads the `SONAME` out of it and makes
+  `libndi.so.6` point at it, which is the arrangement the loader expects.
+
+  A machine that already has the copies is tidied the same way:
+
+  ```bash
+  sudo rm /usr/local/lib/libndi.so.6 && sudo ldconfig
+  ```
+
+  Safe while the renderer is running: it holds the file it already opened, and
+  picks up the link the next time it starts.
 
   The same `journalctl` line then names the sources it can see instead. Nothing
   else about the server changes: a machine without it loses NDI and nothing
