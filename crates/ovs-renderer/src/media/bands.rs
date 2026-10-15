@@ -16,96 +16,156 @@
 //! milliseconds, on a machine with twenty cores, in one thread. Everything
 //! here exists to stop that being true.
 //!
-//! # The rule a band has to keep
+//! # Why a pool, and not a thread a band
 //!
-//! A band draws the rows it was given and nothing else, and is told where
-//! those rows sit in the whole picture. The result must not depend on how many
-//! bands there were — otherwise the wall shows seams where the threads met,
+//! The first version of this started a thread per band per frame and divided
+//! the rows equally between them. It was **measured on the machine and it was
+//! not good enough**: the noise field went from 25,532 us to 13,836 — not the
+//! fivefold the development machine had promised — and the service pattern got
+//! *worse*, from 4,158 us to 5,870.
+//!
+//! Two reasons, and one answer to both.
+//!
+//! **The cores are not equal.** PC05's processor is a hybrid: fast cores and
+//! efficiency cores, and `available_parallelism` counts them all the same.
+//! Eight equal bands means the bands that land on an efficiency core finish
+//! long after the others, and a frame is not done until the slowest band is —
+//! so the gain stops at about twice however many cores there are.
+//!
+//! **Starting a thread is not free.** The service pattern draws in two passes,
+//! so it was starting sixteen threads a frame to save four milliseconds of
+//! work, and on that machine the threads cost more than the work did.
+//!
+//! So: **one pool, started once, with more chunks than threads.** A thread that
+//! finishes early takes the next chunk, which is what makes unequal cores
+//! sort themselves out without anybody measuring them; and no thread is ever
+//! started on a frame path. The pool is rayon's, sized here rather than left
+//! at its default, because the default is every core in the machine and the
+//! decoders need some of them.
+//!
+//! # The rule a chunk has to keep
+//!
+//! A chunk draws the rows it was given and nothing else, and is told where
+//! those rows sit in the whole picture. The result must not depend on how the
+//! rows were divided — otherwise the wall shows seams where the threads met,
 //! and a seam that only appears on a machine with a particular number of cores
 //! is the worst kind of fault to be sent a photograph of.
 //!
-//! That rule is what [`in_rows`] exists for: it takes the number of bands as
-//! an argument so a test can force two, three and more against the one-band
-//! picture. A test that asked the machine would compare one band with one band
-//! on a two-core runner and prove nothing.
+//! That rule is what [`in_rows`] exists for: it takes the number of chunks as
+//! an argument so a test can force two, three and more against the one-chunk
+//! picture. A test that asked the machine would compare one chunk with one
+//! chunk on a two-core runner and prove nothing.
 
-/// How many threads a picture is drawn across.
+use std::sync::OnceLock;
+
+use rayon::prelude::*;
+use rayon::{ThreadPool, ThreadPoolBuilder};
+
+/// How many threads draw a picture.
 ///
 /// The same arithmetic the changeover pool uses, and for the same reason: two
 /// cores are left alone whatever the machine has, because one of them is the
-/// render thread's own caller and the others belong to the decoders.
-///
-/// **Eight is where this stops, and it is a choice rather than a limit.** One
-/// frame of 1920x1080 coloured noise, drawn twenty times, on the sixteen-core
-/// development machine:
-///
-/// | bands | a frame |
-/// |---|---|
-/// | 1 | 23.11 ms |
-/// | 2 | 11.84 |
-/// | 4 | 6.28 |
-/// | **8** | **4.91** |
-/// | 12 | 4.08 |
-/// | 16 | 3.48 |
-///
-/// Sixteen is a third quicker again and takes every core in the machine to do
-/// it. A media server is not a benchmark: the decoders, the encoder and the
-/// console all want a core, and a generator that drew in two milliseconds by
-/// starving a decoder would have moved the fault rather than fixed it. Eight
-/// buys the part of the curve that is nearly free.
-pub(crate) fn bands() -> usize {
+/// render thread's own caller and the others belong to the decoders. Capped at
+/// eight, because a media server is not a benchmark — the decoders, the
+/// encoder and the console all want a core, and a generator that drew in two
+/// milliseconds by starving a decoder would have moved the fault rather than
+/// fixed it.
+pub(crate) fn threads() -> usize {
     std::thread::available_parallelism()
         .map_or(1, |cores| cores.get().saturating_sub(2).clamp(1, 8))
 }
 
-/// Draws a picture in horizontal bands, one thread a band.
+/// How many chunks one picture is cut into, for that many threads.
 ///
-/// `width` is in pixels and every picture here is four bytes to one. `draw` is
-/// handed a band and the index of its first row in the whole picture.
+/// Four times the threads rather than one each. Equal shares are the wrong
+/// answer on a processor whose cores are not equal: the frame ends when the
+/// slowest share does. With more chunks than threads a core that is finished
+/// takes another one, and the fast cores end up doing more of the picture
+/// without anybody having to know which cores are fast.
 ///
-/// One band draws in place, with no thread started at all — which is the
-/// answer on a machine with two cores.
-pub(crate) fn in_bands(pixels: &mut [u8], width: usize, draw: impl Fn(&mut [u8], usize) + Sync) {
-    in_rows(pixels, width, bands(), draw);
+/// One frame of 1920x1080 coloured noise, thirty frames, eight threads, on the
+/// sixteen-core development machine:
+///
+/// | chunks | a frame |
+/// |---|---|
+/// | 1 | 23.32 ms |
+/// | 4 | 6.31 |
+/// | 8 | 4.57 |
+/// | 16 | 4.51 |
+/// | **32** | **3.86** |
+/// | 64 | 3.86 |
+///
+/// Flat past thirty-two, which is four a thread. A call that has nothing to
+/// draw costs **2.7 microseconds**, so the service pattern's two passes are
+/// paid for several hundred times over — the version of this that started
+/// threads instead cost that machine more than the drawing did.
+const CHUNKS_A_THREAD: usize = 4;
+
+/// The pool every picture is drawn by, started once.
+///
+/// Named, so the next profile of the renderer says `ovs-draw` rather than a
+/// number — reading a profile on that machine is already hard enough.
+fn pool() -> Option<&'static ThreadPool> {
+    static POOL: OnceLock<Option<ThreadPool>> = OnceLock::new();
+    POOL.get_or_init(|| {
+        ThreadPoolBuilder::new()
+            .num_threads(threads())
+            .thread_name(|index| format!("ovs-draw-{index}"))
+            .build()
+            .map_err(|error| {
+                // Not a reason to stop: drawing in one thread is slow, and a
+                // wall that is slow is still a wall.
+                tracing::warn!(%error, "no drawing pool; generators will draw in one thread");
+                error
+            })
+            .ok()
+    })
+    .as_ref()
 }
 
-/// The same, with the number of bands stated rather than asked of the machine.
+/// Draws a picture in horizontal chunks of rows, across the pool.
+///
+/// `width` is in pixels and every picture here is four bytes to one. `draw` is
+/// handed a chunk and the index of its first row in the whole picture.
+pub(crate) fn in_bands(
+    pixels: &mut [u8],
+    width: usize,
+    draw: impl Fn(&mut [u8], usize) + Send + Sync,
+) {
+    in_rows(pixels, width, threads() * CHUNKS_A_THREAD, draw);
+}
+
+/// The same, with the number of chunks stated rather than worked out.
 ///
 /// What [`in_bands`] is built from, and what a test uses — see the note on the
 /// module about why the count has to be an argument.
-///
-/// Threads are started for each call rather than kept in a pool. At eight
-/// bands and sixty passes a second that is about a fifth of a millisecond a
-/// frame against the twenty it saves, and a pool would be state to own, drain
-/// and shut down in a module that currently owns nothing. Worth revisiting if
-/// a profile ever shows the spawning rather than the drawing.
 pub(crate) fn in_rows(
     pixels: &mut [u8],
     width: usize,
-    bands: usize,
-    draw: impl Fn(&mut [u8], usize) + Sync,
+    chunks: usize,
+    draw: impl Fn(&mut [u8], usize) + Send + Sync,
 ) {
     let rows = pixels.len().checked_div(width * 4).unwrap_or(0);
     if rows == 0 {
         // A layer sized to nothing. The drawer is not called at all rather
-        // than called with an empty band, because "draw these rows" with no
+        // than called with an empty chunk, because "draw these rows" with no
         // rows is a question every drawer would have to answer separately.
         return;
     }
 
-    let bands = bands.clamp(1, rows);
-    if bands <= 1 {
+    let chunks = chunks.clamp(1, rows);
+    let Some(pool) = pool().filter(|_| chunks > 1) else {
         draw(pixels, 0);
         return;
-    }
+    };
 
-    let per_band = rows.div_ceil(bands);
-    let bytes = per_band * width * 4;
-    std::thread::scope(|scope| {
-        for (index, band) in pixels.chunks_mut(bytes).enumerate() {
-            let draw = &draw;
-            scope.spawn(move || draw(band, index * per_band));
-        }
+    let per_chunk = rows.div_ceil(chunks);
+    let bytes = per_chunk * width * 4;
+    pool.install(|| {
+        pixels
+            .par_chunks_mut(bytes)
+            .enumerate()
+            .for_each(|(index, chunk)| draw(chunk, index * per_chunk));
     });
 }
 
@@ -114,18 +174,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_row_is_drawn_exactly_once_however_many_bands_there_are() {
+    fn every_row_is_drawn_exactly_once_however_it_is_divided() {
         // The property the pictures depend on, checked directly rather than
-        // through a generator: each row is visited once, by the band that
+        // through a generator: each row is visited once, by the chunk that
         // holds it, and told the right index.
         for width in [1_usize, 7, 64] {
             for height in [1_usize, 2, 5, 16, 17] {
                 for count in [1_usize, 2, 3, 8, height + 3] {
                     let mut pixels = vec![0_u8; width * height * 4];
-                    in_rows(&mut pixels, width, count, |band, first_row| {
-                        for (row, line) in band.chunks_mut(width * 4).enumerate() {
+                    in_rows(&mut pixels, width, count, |chunk, first_row| {
+                        for (row, line) in chunk.chunks_mut(width * 4).enumerate() {
                             // The row's own index, written into every pixel of
-                            // it, so a band that wrote the wrong rows or was
+                            // it, so a chunk that wrote the wrong rows or was
                             // told the wrong offset cannot agree.
                             let mark = u8::try_from((first_row + row) % 251).unwrap_or(0);
                             line.fill(mark);
@@ -137,7 +197,7 @@ mod tests {
                         let at = row * width * 4;
                         assert!(
                             pixels[at..at + width * 4].iter().all(|&byte| byte == mark),
-                            "{width}x{height} in {count} bands: row {row}"
+                            "{width}x{height} in {count} chunks: row {row}"
                         );
                     }
                 }
@@ -158,8 +218,8 @@ mod tests {
     }
 
     #[test]
-    fn the_band_count_is_at_least_one_whatever_the_machine_says() {
-        assert!(bands() >= 1);
-        assert!(bands() <= 8);
+    fn the_thread_count_leaves_the_machine_something_to_run_on() {
+        assert!(threads() >= 1);
+        assert!(threads() <= 8);
     }
 }

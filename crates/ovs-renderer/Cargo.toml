@@ -43,6 +43,7 @@ ovs-types.workspace = true
 thiserror.workspace = true
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+rayon = "1.12"
 
 # The ProRes decoder, and the only part of this crate that is not built
 # everywhere. FFmpeg's libraries are what every tool in the building already
