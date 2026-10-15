@@ -30,6 +30,7 @@ use crate::effects::EffectPass;
 use crate::media::DecodedImage;
 use crate::scene::{quad_basis, Quad, Scene, TextureKey, TextureRef};
 use crate::vulkan::blend;
+use crate::vulkan::generated::{GeneratedPipeline, GeneratedPush};
 use crate::vulkan::texture::{find_memory_type, white_pixel, Texture, TextureLayout};
 use crate::vulkan::{VulkanContext, VulkanError};
 
@@ -412,6 +413,19 @@ pub struct OffscreenTarget {
     /// lookup happens once per run of quads rather than per quad, and iteration
     /// order being stable makes a test's failure reproducible.
     textures: BTreeMap<TextureKey, Bound>,
+    /// The pipeline generators are drawn by, once something needs one.
+    ///
+    /// Made on the first generator rather than at startup, for the reason the
+    /// scratch images are: a show with no generators in it never builds this,
+    /// and a pipeline that is never used is a pipeline that cannot fail to be
+    /// created on a machine that was going to be fine.
+    generated: Option<GeneratedPipeline>,
+    /// The generators to draw into their textures before this frame's buses.
+    ///
+    /// Recorded into the frame's own command buffer rather than submitted
+    /// separately, exactly as an upload is: the draw cannot then race the
+    /// composition pass that samples what it wrote.
+    pending_generated: Vec<(TextureKey, GeneratedPush)>,
     /// Pictures handed over this pass, waiting to be copied together.
     ///
     /// Kept between frames so the allocation is made once. Drained by
@@ -579,12 +593,39 @@ impl BusUpload {
 struct Bound {
     texture: Texture,
     set: vk::DescriptorSet,
+    /// Where the card draws, for a texture a generator fills.
+    ///
+    /// `None` for every texture the processor fills, which is all of them bar
+    /// the generators: a framebuffer is only needed by something that is
+    /// drawn into, and making one for an image that is only ever copied into
+    /// would be a handle to free for nothing.
+    framebuffer: Option<vk::Framebuffer>,
     /// Whether the pixels still have to be copied to the GPU.
     ///
     /// The copy is recorded into the frame's own command buffer rather than
     /// submitted separately, so an upload costs no extra submit and cannot race
     /// the draw that reads it.
     dirty: bool,
+}
+
+impl Bound {
+    /// Frees the texture, and the framebuffer if this is one the card drew.
+    ///
+    /// One place rather than five. Every path that lets a texture go - a
+    /// resize, a layout change, a layer dropping its media, the teardown -
+    /// has to free both, and the one that forgot would leak a framebuffer per
+    /// resize of a generator rather than fail in any visible way.
+    ///
+    /// The device must be idle, for the reason [`Texture::destroy`] says:
+    /// a frame in flight may still be reading what this frees.
+    fn release(&mut self, device: &ash::Device) {
+        if let Some(framebuffer) = self.framebuffer.take() {
+            // SAFETY: the caller has waited for the device to be idle, so no
+            // frame still refers to it.
+            unsafe { device.destroy_framebuffer(framebuffer, None) };
+        }
+        self.texture.destroy(device);
+    }
 }
 
 /// SPIR-V compiled from `shaders/canvas.wgsl` by the build script.
@@ -598,6 +639,9 @@ const SHADER_SPIRV: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/canvas.spv
 /// Loaded only by a target that has an effect to run, like everything else
 /// about the scratch.
 const EFFECT_SHADER_SPIRV: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/effect.spv"));
+
+/// SPIR-V compiled from `shaders/generator.wgsl` by the build script.
+const GENERATOR_SHADER_SPIRV: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/generator.spv"));
 
 /// Points a descriptor set at a texture's planes and sampler.
 fn point_set_at(device: &ash::Device, set: vk::DescriptorSet, texture: &Texture) {
@@ -941,6 +985,7 @@ impl OffscreenTarget {
         let default_texture = Bound {
             texture,
             set,
+            framebuffer: None,
             dirty: true,
         };
 
@@ -977,6 +1022,8 @@ impl OffscreenTarget {
             bound_buses: [None; BUS_COUNT],
             default_texture,
             textures: BTreeMap::new(),
+            generated: None,
+            pending_generated: Vec::new(),
             queued: Vec::new(),
             instances,
             instances_memory,
@@ -2953,6 +3000,11 @@ impl OffscreenTarget {
 
     /// Notes that the staged texture copies are now the GPU's problem.
     fn mark_uploaded(&mut self) {
+        // The generators were recorded into this frame's command buffer, so
+        // what is left here is spent. Cleared rather than kept: a generator
+        // that was not asked for again this pass has not changed, and its
+        // texture still holds what the last pass drew.
+        self.pending_generated.clear();
         self.default_texture.dirty = false;
         for bound in self.textures.values_mut() {
             bound.dirty = false;
@@ -3015,6 +3067,7 @@ impl OffscreenTarget {
         })?;
 
         self.begin_recording(device)?;
+        self.record_generated(device);
 
         let transparent = vk::ClearValue {
             color: vk::ClearColorValue { float32: BUS_CLEAR },
@@ -3720,7 +3773,7 @@ impl OffscreenTarget {
                 unsafe {
                     let _ = device.device_wait_idle();
                 }
-                bound.texture.destroy(device);
+                bound.release(device);
                 // Left destroyed if this fails, which is why destroying twice
                 // has to be harmless: the entry stays, and the next pass at
                 // this key finds a texture of the wrong size and rebuilds it.
@@ -3754,10 +3807,189 @@ impl OffscreenTarget {
                     Bound {
                         texture,
                         set,
+                        framebuffer: None,
                         dirty: false,
                     },
                 );
                 Ok(())
+            }
+        }
+    }
+
+    /// Draws one generator into the texture at `key`, on the card.
+    ///
+    /// Nothing is copied: the picture is made where it is going to be looked
+    /// at. The texture is an ordinary media texture in every way the
+    /// composition cares about, so a layer showing a generator drawn here is
+    /// indistinguishable downstream from one showing an uploaded picture.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VulkanError`] when the pipeline, the texture or its
+    /// framebuffer cannot be made, or when the canvas already holds
+    /// [`MAX_TEXTURES`] distinct images. The caller then draws the generator
+    /// on the processor instead, which is slower and correct.
+    pub fn set_generated(
+        &mut self,
+        context: &VulkanContext,
+        key: impl Into<TextureKey>,
+        size: ovs_types::geometry::SizePx,
+        push: GeneratedPush,
+    ) -> Result<(), VulkanError> {
+        let key = key.into();
+        let device = context.device();
+        let width = size.width.max(1);
+        let height = size.height.max(1);
+
+        if self.generated.is_none() {
+            self.generated = Some(GeneratedPipeline::new(device, GENERATOR_SHADER_SPIRV)?);
+        }
+        let render_pass = self
+            .generated
+            .as_ref()
+            .map(|pipeline| pipeline.render_pass)
+            .ok_or(VulkanError::Call {
+                operation: "a generator pipeline that was just made is missing",
+                result: vk::Result::ERROR_INITIALIZATION_FAILED,
+            })?;
+
+        let wanted = (width, height);
+        let rebuild = match self.textures.get(&key) {
+            // The same picture as last pass: the texture and its framebuffer
+            // are kept and only what is drawn into them changes.
+            Some(bound) => {
+                bound.framebuffer.is_none()
+                    || bound.texture.size() != wanted
+                    || bound.texture.layout() != TextureLayout::Rgba
+            }
+            None => true,
+        };
+
+        if rebuild {
+            if self.textures.len() >= MAX_TEXTURES && !self.textures.contains_key(&key) {
+                return Err(VulkanError::Call {
+                    operation: "the canvas already holds as many textures as it can",
+                    result: vk::Result::ERROR_OUT_OF_POOL_MEMORY,
+                });
+            }
+
+            let texture = Texture::drawable(context, width, height)?;
+            let framebuffer = match Self::create_generated_framebuffer(
+                device,
+                render_pass,
+                &texture,
+                width,
+                height,
+            ) {
+                Ok(framebuffer) => framebuffer,
+                Err(error) => {
+                    let mut texture = texture;
+                    texture.destroy(device);
+                    return Err(error);
+                }
+            };
+
+            match self.textures.get_mut(&key) {
+                Some(bound) => {
+                    // SAFETY: what is being replaced may still be referenced by
+                    // a frame in flight, so the device must be idle first.
+                    unsafe {
+                        let _ = device.device_wait_idle();
+                    }
+                    if let Some(old) = bound.framebuffer.take() {
+                        // SAFETY: idle, and nothing else holds it.
+                        unsafe { device.destroy_framebuffer(old, None) };
+                    }
+                    bound.release(device);
+                    bound.texture = texture;
+                    bound.framebuffer = Some(framebuffer);
+                    bound.dirty = false;
+                    point_set_at(device, bound.set, &bound.texture);
+                }
+                None => {
+                    let mut texture = texture;
+                    let set = match Self::allocate_set(
+                        device,
+                        self.descriptor_pool,
+                        self.descriptor_layout,
+                        &texture,
+                    ) {
+                        Ok(set) => set,
+                        Err(error) => {
+                            texture.destroy(device);
+                            // SAFETY: made above, pointed at by nothing.
+                            unsafe { device.destroy_framebuffer(framebuffer, None) };
+                            return Err(error);
+                        }
+                    };
+                    self.textures.insert(
+                        key,
+                        Bound {
+                            texture,
+                            set,
+                            framebuffer: Some(framebuffer),
+                            dirty: false,
+                        },
+                    );
+                }
+            }
+        }
+
+        self.pending_generated.push((key, push));
+        Ok(())
+    }
+
+    /// The framebuffer a generator is drawn into.
+    fn create_generated_framebuffer(
+        device: &ash::Device,
+        render_pass: vk::RenderPass,
+        texture: &Texture,
+        width: u32,
+        height: u32,
+    ) -> Result<vk::Framebuffer, VulkanError> {
+        let views = [texture.view()];
+        let info = vk::FramebufferCreateInfo::default()
+            .render_pass(render_pass)
+            .attachments(&views)
+            .width(width)
+            .height(height)
+            .layers(1);
+        // SAFETY: the view outlives the call and belongs to this device.
+        unsafe { device.create_framebuffer(&info, None) }.map_err(|result| VulkanError::Call {
+            operation: "vkCreateFramebuffer for a generator",
+            result,
+        })
+    }
+
+    /// Records this pass's generators, before anything samples them.
+    ///
+    /// A generator whose texture or framebuffer went away between being asked
+    /// for and being drawn is skipped rather than guessed at: the layer then
+    /// shows what the last pass left, which is a held picture rather than a
+    /// black one.
+    fn record_generated(&self, device: &ash::Device) {
+        let Some(pipeline) = self.generated.as_ref() else {
+            return;
+        };
+        for (key, push) in &self.pending_generated {
+            let Some(bound) = self.textures.get(key) else {
+                continue;
+            };
+            let Some(framebuffer) = bound.framebuffer else {
+                continue;
+            };
+            let (width, height) = bound.texture.size();
+            // SAFETY: recording is in progress, no render pass is open, and
+            // the framebuffer was made for this pipeline's render pass against
+            // this texture at this size.
+            unsafe {
+                pipeline.draw(
+                    device,
+                    self.command_buffer,
+                    framebuffer,
+                    vk::Extent2D { width, height },
+                    push,
+                );
             }
         }
     }
@@ -3803,7 +4035,7 @@ impl OffscreenTarget {
                 unsafe {
                     let _ = device.device_wait_idle();
                 }
-                bound.texture.destroy(device);
+                bound.release(device);
                 // As above: destroyed and left in place if the rebuild fails,
                 // rather than a half-built texture nothing will free.
                 bound.texture = Self::staged_texture(context, width, height, layout, image)?;
@@ -3839,6 +4071,7 @@ impl OffscreenTarget {
             Bound {
                 texture,
                 set,
+                framebuffer: None,
                 dirty: true,
             },
         );
@@ -3868,7 +4101,7 @@ impl OffscreenTarget {
         unsafe {
             let _ = device.device_wait_idle();
         }
-        bound.texture.destroy(device);
+        bound.release(device);
         // SAFETY: the set came from this pool, the pool was created with
         // `FREE_DESCRIPTOR_SET`, and the device is idle so nothing is reading
         // it. A failure here is not worth failing the drop over — the memory
@@ -4167,9 +4400,16 @@ impl OffscreenTarget {
         unsafe { device.destroy_sampler(self.sampler, None) };
         self.default_texture.texture.destroy(device);
         for bound in self.textures.values_mut() {
-            bound.texture.destroy(device);
+            bound.release(device);
         }
         self.textures.clear();
+        if let Some(generated) = self.generated.as_mut() {
+            // SAFETY: as above, and every framebuffer made against its render
+            // pass has just been destroyed.
+            unsafe { generated.destroy(device) };
+        }
+        self.generated = None;
+        self.pending_generated.clear();
         // SAFETY: the caller has waited for the device to be idle, so nothing
         // below is in use.
         unsafe {
@@ -4282,6 +4522,27 @@ impl VulkanOffscreenBackend {
     ) -> Result<(), VulkanError> {
         self.target
             .set_media_texture(&self.context, key.into(), image)
+    }
+
+    /// Has the card draw a generator into one key's texture.
+    ///
+    /// Nothing crosses the bus: the picture is made where it will be looked
+    /// at. It is drawn into this frame's command buffer, before anything
+    /// samples it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VulkanError`] when the pipeline, the texture or its
+    /// framebuffer cannot be made, or the canvas is already full. The caller
+    /// then draws the generator on the processor, which is slower and right.
+    pub fn set_generated(
+        &mut self,
+        key: impl Into<TextureKey>,
+        size: ovs_types::geometry::SizePx,
+        push: GeneratedPush,
+    ) -> Result<(), VulkanError> {
+        self.target
+            .set_generated(&self.context, key.into(), size, push)
     }
 
     /// Forgets a media item's texture, freeing its memory.
@@ -4497,6 +4758,48 @@ impl Compositor for VulkanOffscreenBackend {
     ) -> Result<(), BackendError> {
         self.target
             .set_media_texture(&self.context, key, image)
+            .map_err(|error| BackendError::UploadFailed {
+                name: self.name.clone(),
+                reason: error.to_string(),
+            })
+    }
+
+    fn draw_generated(
+        &mut self,
+        key: TextureKey,
+        size: ovs_types::geometry::SizePx,
+        what: crate::backend::Generated,
+    ) -> Result<bool, BackendError> {
+        use crate::backend::Generated;
+
+        // The description turns into immediates here and nowhere else: the
+        // media side describes a picture and this is the only thing that knows
+        // what the shader's branches are numbered.
+        let push = match what {
+            Generated::Noise {
+                scale,
+                coloured,
+                amount,
+                field,
+            } => GeneratedPush {
+                values: [scale as f32, amount, 0.0, 0.0],
+                colour: [0.0, 0.0, 0.0, 1.0],
+                field: [field as u32, (field >> 32) as u32],
+                kind: GeneratedPush::NOISE,
+                flags: if coloured { GeneratedPush::COLOURED } else { 0 },
+            },
+            Generated::Solid { colour } => GeneratedPush {
+                values: [0.0; 4],
+                colour,
+                field: [0, 0],
+                kind: GeneratedPush::SOLID,
+                flags: 0,
+            },
+        };
+
+        self.target
+            .set_generated(&self.context, key, size, push)
+            .map(|()| true)
             .map_err(|error| BackendError::UploadFailed {
                 name: self.name.clone(),
                 reason: error.to_string(),
@@ -7378,6 +7681,77 @@ mod tests {
             .read_scaled(SizePx::new(size, size), &mut frame)
             .expect("reads the frame back");
         frame
+    }
+
+    #[test]
+    fn the_card_draws_the_noise_the_processor_draws() {
+        let _gpu = crate::vulkan::one_gpu_at_a_time();
+        // **The whole claim of drawing generators on the card.** The same
+        // generator still draws on the processor, for the export path and for
+        // the tests that decide what these pictures are, so two
+        // implementations of one picture exist and must not drift. The shader
+        // spells out a 64-bit hash in 32-bit halves because WGSL has no such
+        // type, and a single bit wrong in that arithmetic gives a picture that
+        // is still noise and still wrong — which is exactly the kind of fault
+        // nobody can see by looking.
+        const SIDE: u32 = 64;
+        let Some(mut canvas) = backend(SIDE, SIDE) else {
+            return;
+        };
+        let clip = MediaItemId::new();
+
+        for (scale, coloured, amount, tick) in [
+            (8_u32, true, 1.0_f32, 7_u32),
+            (8, false, 1.0, 7),
+            (1, true, 1.0, 3),
+            (16, true, 0.35, 11),
+        ] {
+            let seed = 0xABCD_u64;
+            // The field the processor works out, handed over as it is: the
+            // shader cannot do the 64-bit multiply that makes it cheaply, and
+            // it is one number a frame rather than one a pixel.
+            let field = seed
+                .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                .wrapping_add(u64::from(tick).wrapping_mul(4));
+            let push = GeneratedPush {
+                values: [scale as f32, amount, 0.0, 0.0],
+                colour: [0.0, 0.0, 0.0, 1.0],
+                field: [field as u32, (field >> 32) as u32],
+                kind: GeneratedPush::NOISE,
+                flags: if coloured { GeneratedPush::COLOURED } else { 0 },
+            };
+            canvas
+                .set_generated(clip, SizePx::new(SIDE, SIDE), push)
+                .expect("the card can draw a generator");
+            let drawn = composed_frame(&mut canvas, &textured_canvas(clip), SIDE);
+
+            let wanted = crate::media::noise_for_test(
+                SizePx::new(SIDE, SIDE),
+                scale,
+                coloured,
+                amount,
+                tick,
+                seed,
+            );
+
+            // Two implementations of the same arithmetic in floats, one of
+            // them on a card that is allowed to fuse a multiply and an add.
+            // Two levels is tight enough to catch a wrong constant, a wrong
+            // shift or a swapped channel, all of which are off by tens.
+            let mut worst = 0_i32;
+            for (at, (got, want)) in drawn.iter().zip(wanted.iter()).enumerate() {
+                let difference = i32::from(*got) - i32::from(*want);
+                if difference.abs() > worst.abs() {
+                    worst = difference;
+                }
+                assert!(
+                    difference.abs() <= 2,
+                    "scale {scale}, coloured {coloured}, amount {amount}: \
+                     byte {at} is {got} on the card and {want} on the processor"
+                );
+            }
+            println!("scale {scale}, coloured {coloured}: worst difference {worst}");
+        }
     }
 
     #[test]

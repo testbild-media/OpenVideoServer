@@ -306,6 +306,25 @@ const fn block_format(format: crate::media::hap::BlockFormat) -> vk::Format {
     }
 }
 
+/// Where one plane sits and what it is made of.
+///
+/// Five numbers that only mean anything together, and travelling as one value
+/// rather than five arguments is what keeps the call that makes a plane
+/// readable at the point it is made.
+#[derive(Clone, Copy)]
+struct PlaneShape {
+    /// How many texels across.
+    width: u32,
+    /// How many texels down.
+    height: u32,
+    /// What one texel is.
+    format: vk::Format,
+    /// Where this plane's bytes start in the shared staging buffer.
+    offset: u64,
+    /// How many bytes those are.
+    bytes: u64,
+}
+
 /// One image of a texture: the whole of an RGBA one, or a plane of a planar one.
 struct Plane {
     image: vk::Image,
@@ -376,6 +395,40 @@ impl Texture {
         height: u32,
         layout: TextureLayout,
     ) -> Result<Self, VulkanError> {
+        Self::build(context, width, height, layout, false)
+    }
+
+    /// Creates an RGBA texture the card can draw into as well as sample.
+    ///
+    /// What a generator drawn on the card lands in. It is an ordinary media
+    /// texture in every way the composition cares about - same format, same
+    /// descriptor set, sampled by the same shader - and differs only in
+    /// carrying `COLOR_ATTACHMENT`, so a framebuffer can name it.
+    ///
+    /// It carries no staging buffer worth the name. A staged one of this size
+    /// would be eight megabytes of host memory per generator for a copy that
+    /// is the whole reason this exists, so [`stage_image`](Self::stage_image)
+    /// on one of these refuses, as it would for any picture of the wrong size.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VulkanError::Call`] naming the Vulkan call that failed.
+    pub fn drawable(context: &VulkanContext, width: u32, height: u32) -> Result<Self, VulkanError> {
+        Self::build(context, width, height, TextureLayout::Rgba, true)
+    }
+
+    /// The whole of both constructors.
+    ///
+    /// `drawn_into` adds the attachment usage and drops the staging buffer to
+    /// nothing, which are the only two differences between a texture the
+    /// processor fills and one the card does.
+    fn build(
+        context: &VulkanContext,
+        width: u32,
+        height: u32,
+        layout: TextureLayout,
+        drawn_into: bool,
+    ) -> Result<Self, VulkanError> {
         let device = context.device();
         let width = width.max(1);
         let height = height.max(1);
@@ -398,15 +451,14 @@ impl Texture {
             } else {
                 u64::from(plane_width) * u64::from(plane_height) * texel_bytes(format)?
             };
-            match Self::create_plane(
-                device,
-                &memory_properties,
-                plane_width,
-                plane_height,
+            let shape = PlaneShape {
+                width: plane_width,
+                height: plane_height,
                 format,
                 offset,
                 bytes,
-            ) {
+            };
+            match Self::create_plane(device, &memory_properties, shape, drawn_into) {
                 Ok(plane) => planes.push(plane),
                 Err(error) => {
                     // Whatever was made before the failure is this function's
@@ -422,7 +474,10 @@ impl Texture {
         }
 
         let sampler = Self::create_sampler(device)?;
-        let staging_bytes = offset.max(1);
+        // A texture the card draws into never has bytes pushed through it, so
+        // it gets the smallest allocation that is legal rather than one the
+        // size of the picture.
+        let staging_bytes = if drawn_into { 1 } else { offset.max(1) };
         let (staging, staging_memory, staging_mapped) =
             Self::create_staging(context, &memory_properties, staging_bytes)?;
 
@@ -465,12 +520,24 @@ impl Texture {
     fn create_plane(
         device: &ash::Device,
         memory_properties: &vk::PhysicalDeviceMemoryProperties,
-        width: u32,
-        height: u32,
-        format: vk::Format,
-        offset: u64,
-        bytes: u64,
+        shape: PlaneShape,
+        drawn_into: bool,
     ) -> Result<Plane, VulkanError> {
+        let PlaneShape {
+            width,
+            height,
+            format,
+            offset,
+            bytes,
+        } = shape;
+        // An attachment as well as a sampled image, for the generators the
+        // card draws. Asking for a usage is a permission, not a cost: what it
+        // changes is what the image may be bound as.
+        let usage = if drawn_into {
+            vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::SAMPLED
+        } else {
+            vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED
+        };
         let image_info = vk::ImageCreateInfo::default()
             .image_type(vk::ImageType::TYPE_2D)
             .format(format)
@@ -483,7 +550,7 @@ impl Texture {
             .array_layers(1)
             .samples(vk::SampleCountFlags::TYPE_1)
             .tiling(vk::ImageTiling::OPTIMAL)
-            .usage(vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED)
+            .usage(usage)
             .sharing_mode(vk::SharingMode::EXCLUSIVE)
             .initial_layout(vk::ImageLayout::UNDEFINED);
 

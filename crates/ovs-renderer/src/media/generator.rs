@@ -75,6 +75,7 @@ use ovs_types::config::generators::{
 use ovs_types::config::slot::{ParameterMap, ParameterValue};
 use ovs_types::geometry::{FrameRate, SizePx};
 
+use crate::backend::Generated;
 use crate::media::bands::in_bands;
 use crate::media::source::{Frame, FrameSource};
 use crate::media::still::{DecodedImage, MediaError};
@@ -722,6 +723,54 @@ impl GeneratorSource {
         self.pattern.as_mut().map(|pattern| pattern.draw(seconds))
     }
 
+    /// What the card would have to draw for this generator, if it can.
+    ///
+    /// `None` for every kind that is still the processor's: the service
+    /// pattern, which is a prepared tile and a caption; and the ones that
+    /// write letters, which need the glyphs. Those are either cheap or rare -
+    /// a clock redraws when its second moves - and the one that was neither
+    /// is here.
+    ///
+    /// Measured on PC05 on 2026-10-15: `ovs.noise` cost the render thread
+    /// 25,532 microseconds a pass against six for a 4K clip decoded on the
+    /// card. That is what this is for.
+    #[must_use]
+    pub fn on_card(&self, tick: u32) -> Option<Generated> {
+        match &self.kind {
+            Kind::Noise {
+                scale,
+                coloured,
+                amount,
+            } => Some(Generated::Noise {
+                scale: *scale,
+                coloured: *coloured,
+                amount: *amount,
+                field: noise_field(self.seed, tick),
+            }),
+            Kind::SolidColour { colour } => Some(Generated::Solid { colour: *colour }),
+            Kind::Strobe { colour, .. } => {
+                // Lit on one half of the cycle and clear on the other, decided
+                // here exactly as the processor decides it. Clear rather than
+                // black: a strobe belongs over whatever is under it.
+                let lit = tick.is_multiple_of(2);
+                Some(Generated::Solid {
+                    colour: if lit {
+                        *colour
+                    } else {
+                        [colour[0], colour[1], colour[2], 0.0]
+                    },
+                })
+            }
+            _ => None,
+        }
+    }
+
+    /// How big a picture this generator draws.
+    #[must_use]
+    pub const fn size(&self) -> SizePx {
+        self.size
+    }
+
     /// Forgets which tick is on the GPU, so the next redraw draws again.
     ///
     /// For when something other than this generator has written the layer's
@@ -785,6 +834,35 @@ struct NoiseField {
     tick: u32,
     /// The generator's own seed, so two noise layers do not move together.
     seed: u64,
+}
+
+/// Draws one field of noise on the processor, for a test on the card to
+/// compare itself against.
+///
+/// The card draws generators now, and the processor still draws them for the
+/// export path and for the tests that decide what these pictures are. Two
+/// implementations of one picture is exactly the pair that drifts, so this is
+/// the way the other one is reachable from the test that checks them against
+/// each other.
+#[cfg(test)]
+pub(crate) fn noise_for_test(
+    size: SizePx,
+    scale: u32,
+    coloured: bool,
+    amount: f32,
+    tick: u32,
+    seed: u64,
+) -> Vec<u8> {
+    let mut pixels = vec![0_u8; size.width as usize * size.height as usize * 4];
+    let field = NoiseField {
+        scale,
+        coloured,
+        amount,
+        tick,
+        seed,
+    };
+    draw_noise(&mut pixels, size.width as usize, 0, field);
+    pixels
 }
 
 /// An empty picture of a size, to be drawn into.
@@ -1509,11 +1587,7 @@ fn draw_noise(pixels: &mut [u8], width: usize, first_row: usize, noise: NoiseFie
         tick,
         seed,
     } = noise;
-    // Four independent fields per frame, so the three colour channels keep the
-    // separation they always had and the next frame starts past all of them.
-    let field = seed
-        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
-        .wrapping_add(u64::from(tick).wrapping_mul(4));
+    let field = noise_field(seed, tick);
     let scale = (scale as f32).max(1.0);
     let amount = if amount.is_finite() {
         amount.clamp(0.0, 1.0)
@@ -1628,6 +1702,21 @@ fn value_noise(x: f32, y: f32, channel: u64) -> f32 {
         fraction_x,
     );
     mix(top_edge, bottom_edge, fraction_y)
+}
+
+/// Which four noise fields a tick uses.
+///
+/// Four per frame, so the three colour channels keep the separation they
+/// always had and the next frame starts past all of them.
+///
+/// **In one place because two things read it.** The processor draws noise with
+/// this, and the card is handed the answer: the shader has no 64-bit multiply
+/// to work it out with, and it is one number a frame rather than one a pixel.
+/// If these two ever disagreed, the same show would be a different picture
+/// depending on which drew it.
+const fn noise_field(seed: u64, tick: u32) -> u64 {
+    seed.wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        .wrapping_add((tick as u64).wrapping_mul(4))
 }
 
 /// Returns the value at one lattice point, in `0.0..=1.0`.

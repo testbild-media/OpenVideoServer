@@ -1056,6 +1056,39 @@ impl Playback {
             since_anchor: now.saturating_duration_since(generated.anchor),
         };
         let tick = generated.source.tick_at(moment).unwrap_or(0);
+
+        // **The card draws it, where it can.** Nothing is drawn on the
+        // processor and nothing crosses the bus: measured on PC05 on
+        // 2026-10-15, a 1920x1080 noise field cost the render thread 25,532
+        // microseconds a pass, against six for a 4K clip decoded on the card.
+        //
+        // Drawn every pass rather than only when the tick moved, as the
+        // processor's path does. The reason that path keeps a tick is that
+        // drawing cost twenty-five milliseconds; here it is a triangle, and
+        // redrawing something that has not changed is cheaper than owning the
+        // question of whether what is on the card is still what was asked for.
+        if let Some(what) = generated.source.on_card(tick) {
+            match compositor.draw_generated(
+                TextureKey::Layer(layer_id),
+                generated.source.size(),
+                what,
+            ) {
+                Ok(true) => {
+                    self.complained_generators.remove(&layer_id);
+                    self.drawn.insert(layer_id, Drawn::Generator);
+                    return true;
+                }
+                // This backend does not draw generators. The processor does,
+                // below, exactly as it always did.
+                Ok(false) => {}
+                Err(error) => {
+                    // Not fatal: fall through and draw it the slow way. A wall
+                    // that is slower is a wall; one that is black is not.
+                    tracing::warn!("{error}");
+                }
+            }
+        }
+
         let uploaded = match generated.source.redraw_at(tick, rate) {
             Some(image) => compositor.upload_texture(TextureKey::Layer(layer_id), image),
             // The second has not moved, so what is on the GPU is still right.

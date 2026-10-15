@@ -17,6 +17,7 @@
 
 mod blend;
 pub mod display;
+pub mod generated;
 pub mod offscreen;
 pub mod present;
 pub mod selection;

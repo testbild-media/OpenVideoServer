@@ -22,6 +22,7 @@ fn main() {
     for (source, output) in [
         ("shaders/canvas.wgsl", "canvas.spv"),
         ("shaders/effect.wgsl", "effect.spv"),
+        ("shaders/generator.wgsl", "generator.spv"),
     ] {
         println!("cargo:rerun-if-changed={source}");
         let text = std::fs::read_to_string(source)

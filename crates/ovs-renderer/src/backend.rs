@@ -15,6 +15,7 @@
 use std::collections::BTreeMap;
 
 use ovs_types::config::DisplayMode;
+use ovs_types::geometry::SizePx;
 use ovs_types::id::OutputId;
 
 use crate::media::DecodedImage;
@@ -241,6 +242,37 @@ pub trait OutputBackend: Send {
     }
 }
 
+/// A generator the card can draw for itself.
+///
+/// What crosses from the media side to the backend: a description rather than
+/// a picture. The point of it is that nothing is drawn on the processor and
+/// nothing is copied onto the card - on PC05 a 1920x1080 noise field cost the
+/// render thread twenty-five milliseconds a pass and eight megabytes of copy,
+/// and a 4K clip decoded on the card cost six microseconds.
+///
+/// Short on purpose. A kind belongs here only when the card can draw exactly
+/// what the processor would, and a test proves it does; everything else keeps
+/// taking the picture it always took.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Generated {
+    /// Value noise, the field already worked out for this tick.
+    Noise {
+        /// How many pixels one cell of the lattice covers.
+        scale: u32,
+        /// Whether the three channels get independent fields.
+        coloured: bool,
+        /// How far from mid grey the field reaches, 0 to 1.
+        amount: f32,
+        /// Which four fields this tick uses.
+        field: u64,
+    },
+    /// A flat fill, which is also what a strobe is on either half of its cycle.
+    Solid {
+        /// Straight, not premultiplied, as every colour here is.
+        colour: [f32; 4],
+    },
+}
+
 /// The canvas every output samples.
 ///
 /// A frame is two passes. The compositor draws the layers once,
@@ -261,6 +293,29 @@ pub trait Compositor: Send {
     /// outputs then present whatever the last successful pass left, which is a
     /// held frame rather than a black one.
     fn compose(&mut self, frame: FrameRequest, scene: &Scene) -> Result<(), BackendError>;
+
+    /// Has the card draw a generator into the texture at `key`.
+    ///
+    /// Returns whether it did. `false` is not a failure: it is a backend that
+    /// does not draw generators, or a kind this one cannot draw, and the
+    /// caller then draws the picture on the processor and uploads it as it
+    /// always did. That fallback is the reason this answers rather than
+    /// refuses - a wall that is slower is a wall, and a wall that is black is
+    /// not.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BackendError`] when the card was asked and could not. The
+    /// caller falls back to the processor for that pass.
+    fn draw_generated(
+        &mut self,
+        key: TextureKey,
+        size: SizePx,
+        what: Generated,
+    ) -> Result<bool, BackendError> {
+        let _ = (key, size, what);
+        Ok(false)
+    }
 
     /// Tells the effect passes what time it is, in seconds.
     ///
