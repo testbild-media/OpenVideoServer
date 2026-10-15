@@ -49,6 +49,7 @@ import {
   MAX_DMX_ADDRESS,
   MAX_FRACTION,
   MAX_PIECE_ORDER,
+  MAX_SLOT_NAME_CHARS,
   MAX_SPEED_SCALE,
   MAX_UNIVERSE,
   MIN_BEATS_PER_BAR,
@@ -224,6 +225,13 @@ describe('the ranges the editor enforces', () => {
     // 2026-09-23). The floor is the only end that needs a number, and it is the
     // one the editor puts on the spinner.
     expect(MIN_SLOT_BEATS).toBe(constant(slotRs, 'MIN_SLOT_BEATS'));
+  });
+
+  it('hold a pad’s name to the length the model does', () => {
+    // The field in OPTIONS stops at this, so that a name an operator can type
+    // is a name the server will take. A client that let them type past it
+    // would refuse the save after the typing rather than before.
+    expect(MAX_SLOT_NAME_CHARS).toBe(constant(slotRs, 'MAX_SLOT_NAME_CHARS'));
   });
 
   it('bound the master clock the way the model does', () => {

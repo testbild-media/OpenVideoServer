@@ -2842,6 +2842,28 @@ h2 {
   font-variant-numeric: tabular-nums;
 }
 
+/* What the operator calls this pad. The full width of the column, because a
+   name is read rather than counted, and `min-width: 0` so that a long one
+   scrolls inside the field instead of widening the panel. */
+.option-name {
+  width: 100%;
+  min-width: 0;
+  padding: 2px 4px;
+  background: #101013;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+}
+
+/* The source's own name, shown where the operator has not given the pad one.
+   Dimmer than a name they typed: it is what the pad is called rather than
+   what it was called. */
+.option-name::placeholder {
+  color: var(--dim);
+}
+
 /* What the sync and the rate together are asking of the decoder.
 
    It sits under the controls that decide it and says nothing at all when a clip

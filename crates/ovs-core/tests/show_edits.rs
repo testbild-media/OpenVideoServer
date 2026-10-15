@@ -361,6 +361,7 @@ async fn how_a_clip_runs_is_changed_with_the_show_on_and_nothing_restarts() {
         .set_playback(
             1,
             &SetSlotRequest {
+                name: None,
                 playback_mode: Some(PlaybackMode::OnceFreeze),
                 direction: Some(PlaybackDirection::Reverse),
                 sync: Some(SlotSync::FreeRun),
@@ -408,6 +409,7 @@ async fn a_field_that_was_not_sent_is_left_alone() {
         .set_playback(
             1,
             &SetSlotRequest {
+                name: None,
                 playback_mode: None,
                 direction: Some(PlaybackDirection::Reverse),
                 sync: None,
@@ -434,6 +436,7 @@ async fn a_beat_count_the_model_refuses_leaves_the_slot_as_it_was() {
         .set_playback(
             1,
             &SetSlotRequest {
+                name: None,
                 playback_mode: None,
                 direction: None,
                 sync: Some(SlotSync::BeatSync { beats: 0 }),
@@ -459,6 +462,7 @@ async fn setting_the_playback_of_a_slot_with_nothing_in_it_says_so() {
         .set_playback(
             7,
             &SetSlotRequest {
+                name: None,
                 playback_mode: Some(PlaybackMode::Loop),
                 direction: None,
                 sync: None,
@@ -469,6 +473,90 @@ async fn setting_the_playback_of_a_slot_with_nothing_in_it_says_so() {
         .await;
 
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn a_pad_takes_a_name_of_its_own_and_gives_it_back() {
+    // The owner, 2026-10-15: "Manchmal kann ja der selbe Inhalt sein, aber mit
+    // anderen Effekte drauf etc. für Dauerhafte installation wäre das noch
+    // gut." Two pads of one clip with different effects on them read alike,
+    // and on an installation that nobody is standing at every week, reading is
+    // all there is.
+    let harness = Harness::start().await;
+
+    let (status, body) = harness
+        .set_playback(
+            1,
+            &SetSlotRequest {
+                name: Some("  Intro – wide  ".to_owned()),
+                playback_mode: None,
+                direction: None,
+                sync: None,
+                speed: None,
+                transform: None,
+            },
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // Trimmed, because a field an operator typed into has whitespace at one
+    // end of it as often as not.
+    assert_eq!(
+        harness.running_slot(1).expect("slot 1").name.as_deref(),
+        Some("Intro – wide")
+    );
+    assert_eq!(
+        harness.stored_slot(1).expect("slot 1 is on disk").name,
+        harness.running_slot(1).expect("slot 1").name,
+        "the running show and the document agree"
+    );
+
+    // And off again. Empty text is how a pad goes back to being named after
+    // what it plays; there is no other way to say it, since an absent field
+    // means "leave this alone".
+    let (status, body) = harness
+        .set_playback(
+            1,
+            &SetSlotRequest {
+                name: Some(String::new()),
+                playback_mode: None,
+                direction: None,
+                sync: None,
+                speed: None,
+                transform: None,
+            },
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(harness.running_slot(1).expect("slot 1").name, None);
+}
+
+#[tokio::test]
+async fn a_name_longer_than_a_pad_may_carry_leaves_the_slot_as_it_was() {
+    // Validated as a whole document, like every other edit here. Sixty-four
+    // characters is the ceiling; what arrives from a console or a script is
+    // not obliged to respect it.
+    let harness = Harness::start().await;
+
+    let (status, _) = harness
+        .set_playback(
+            1,
+            &SetSlotRequest {
+                name: Some("x".repeat(65)),
+                playback_mode: None,
+                direction: None,
+                sync: None,
+                speed: None,
+                transform: None,
+            },
+        )
+        .await;
+    assert_ne!(status, StatusCode::OK, "sixty-five characters is too many");
+    assert_eq!(
+        harness.running_slot(1).expect("slot 1").name,
+        None,
+        "the slot is as it was"
+    );
 }
 
 /// A wall an output could be driving, for the mapping tests.
@@ -649,6 +737,7 @@ async fn a_slot_is_given_a_rate_of_its_own_and_put_back_to_one() {
         .set_playback(
             1,
             &SetSlotRequest {
+                name: None,
                 playback_mode: None,
                 direction: None,
                 sync: None,
@@ -665,6 +754,7 @@ async fn a_slot_is_given_a_rate_of_its_own_and_put_back_to_one() {
         .set_playback(
             1,
             &SetSlotRequest {
+                name: None,
                 playback_mode: Some(PlaybackMode::OnceFreeze),
                 direction: None,
                 sync: None,
@@ -685,6 +775,7 @@ async fn a_slot_is_given_a_rate_of_its_own_and_put_back_to_one() {
         .set_playback(
             1,
             &SetSlotRequest {
+                name: None,
                 playback_mode: None,
                 direction: None,
                 sync: None,
@@ -704,6 +795,7 @@ async fn a_slot_is_given_a_rate_of_its_own_and_put_back_to_one() {
         .set_playback(
             1,
             &SetSlotRequest {
+                name: None,
                 playback_mode: None,
                 direction: None,
                 sync: None,

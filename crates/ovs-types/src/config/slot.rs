@@ -162,6 +162,20 @@ pub struct Slot {
     pub index: u16,
     /// What this slot plays.
     pub source: SourceRef,
+    /// What an operator calls this pad, where they have called it anything.
+    ///
+    /// Absent is the ordinary case and means the pad is named after what it
+    /// plays: the clip's name in the library, or the generator's. A name here
+    /// replaces that on the pad and nowhere else — the library keeps its own
+    /// names, and the same clip in another slot is unaffected.
+    ///
+    /// Why it exists (owner, 2026-10-15): "Manchmal kann ja der selbe Inhalt
+    /// sein, aber mit anderen Effekte drauf etc. für Dauerhafte installation
+    /// wäre das noch gut." Two pads holding one clip with different effects on
+    /// them read alike otherwise, and which is which is then remembered rather
+    /// than read — once a week, in a venue, by whoever is standing there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     /// Whether this slot follows the beat, and over how many beats.
     ///
     /// On the slot rather than on the layer, because it is a property of the
@@ -252,6 +266,15 @@ const fn unit_speed() -> f64 {
 /// and a pass of no beats is a clip that never advances.
 pub const MIN_SLOT_BEATS: u32 = 1;
 
+/// The longest name an operator may give a pad.
+///
+/// Sixty-four characters, which is what a server's own name is held to, so
+/// somebody who has met one limit in this product has met this one. A pad is
+/// far too small to show that much — the label ends in an ellipsis long
+/// before — but where the cut falls is a question for whoever is naming it
+/// and not a reason to refuse what they typed.
+pub const MAX_SLOT_NAME_CHARS: usize = 64;
+
 impl SlotSync {
     /// Whether this is the default, which is the one that is left off the wire.
     #[must_use]
@@ -285,6 +308,8 @@ impl Slot {
         Self {
             index,
             source,
+            // Named after what it plays until somebody says otherwise.
+            name: None,
             sync: SlotSync::default(),
             speed: 1.0,
             playback_mode: PlaybackMode::default(),
@@ -305,6 +330,27 @@ impl Slot {
 
     pub(crate) fn validate(&self, path: &str, out: &mut ValidationErrors) {
         self.transform.validate(&format!("{path}.transform"), out);
+
+        // A name that is there and says nothing is not a name: a pad carrying
+        // an empty string would show nothing where its source's name used to
+        // be, which looks like a pad that lost its clip. Absent is how a pad
+        // says it is called after what it plays, and that is the only way to
+        // say it.
+        if let Some(name) = &self.name {
+            if name.trim().is_empty() {
+                out.push(ValidationError::new(
+                    format!("{path}.name"),
+                    "must not be empty — leave it out to use the source's own name",
+                ));
+            }
+            let length = name.chars().count();
+            if length > MAX_SLOT_NAME_CHARS {
+                out.push(ValidationError::new(
+                    format!("{path}.name"),
+                    format!("must be at most {MAX_SLOT_NAME_CHARS} characters, not {length}"),
+                ));
+            }
+        }
 
         // A rate outside the ladder is a rate no interface offers and no
         // console can send, so it can only come from a hand-edited document.
@@ -510,6 +556,7 @@ mod tests {
     fn source_refs_round_trip_through_json() {
         let slot = Slot {
             index: 7,
+            name: Some("Upstage bars".to_owned()),
             sync: SlotSync::default(),
             speed: 1.0,
             source: SourceRef::Generator {

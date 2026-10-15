@@ -239,6 +239,12 @@ impl Layer {
     /// clip, not the way the slot plays; resetting the rest would quietly undo
     /// work they did on purpose. An empty slot is created with the defaults.
     ///
+    /// A name the pad was given stays for the same reason, and it is the one
+    /// of these settings that is about the pad rather than about the clip:
+    /// "Upstage wash" is where an operator reaches, whatever is in it this
+    /// week. Emptying the pad takes the name with it, because then there is no
+    /// pad left to be called anything.
+    ///
     /// Returns what was there before, so a caller can say what it replaced.
     ///
     /// # Errors

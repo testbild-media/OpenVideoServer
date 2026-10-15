@@ -1204,6 +1204,13 @@
           "format": "uint16",
           "minimum": 0.0
         },
+        "name": {
+          "description": "What an operator calls this pad, where they have called it anything.\n\nAbsent is the ordinary case and means the pad is named after what it plays: the clip's name in the library, or the generator's. A name here replaces that on the pad and nowhere else — the library keeps its own names, and the same clip in another slot is unaffected.\n\nWhy it exists (owner, 2026-10-15): \"Manchmal kann ja der selbe Inhalt sein, aber mit anderen Effekte drauf etc. für Dauerhafte installation wäre das noch gut.\" Two pads holding one clip with different effects on them read alike otherwise, and which is which is then remembered rather than read — once a week, in a venue, by whoever is standing there.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "playback_mode": {
           "description": "End-of-timeline behaviour.",
           "allOf": [

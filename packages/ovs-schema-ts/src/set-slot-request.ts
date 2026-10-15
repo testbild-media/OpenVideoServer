@@ -38,6 +38,12 @@ export interface SetSlotRequest {
    */
   direction?: PlaybackDirection | null;
   /**
+   * What an operator calls this pad.
+   *
+   * **Empty means "no name of its own"**, which puts the pad back to being named after what it plays. Absent means "leave it alone", like every other field here — and a name has to have a way of being taken off again, which a field that can only be absent or set does not.
+   */
+  name?: string | null;
+  /**
    * What happens when the clip reaches the end.
    */
   playback_mode?: PlaybackMode | null;

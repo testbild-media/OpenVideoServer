@@ -44,6 +44,7 @@ function slot(index: number, mediaItemId = `MEDIA${index}`): SlotView {
   return {
     index,
     source: { kind: 'media', mediaItemId },
+    name: null,
     effects: [],
     sync: { kind: 'FREE_RUN' },
     speed: 1,

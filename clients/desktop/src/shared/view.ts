@@ -70,6 +70,15 @@ export interface SlotView {
   /** What it plays, in a form the window can label. */
   source: SlotSource;
   /**
+   * What the operator calls this pad, where they have called it anything.
+   *
+   * `null` is the ordinary case: the pad is named after what it plays. A name
+   * here is on the pad alone — the library and the generator keep theirs — and
+   * it is what two pads of one clip with different effects are told apart by
+   * (owner, 2026-10-15).
+   */
+  name: string | null;
+  /**
    * The slot's own effect chain.
    *
    * The renderer does not run slot chains yet. The server
@@ -321,6 +330,9 @@ export function toView(state: ShowState): ShowView {
         .sort((a, b) => a.index - b.index)
         .map((slot) => ({
           index: slot.index,
+          // A document written before pads had names of their own has none,
+          // which is the same as a pad nobody has named.
+          name: slot.name ?? null,
           source:
             slot.source.kind === 'media'
               ? { kind: 'media', mediaItemId: slot.source.media_item_id }

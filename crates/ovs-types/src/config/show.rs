@@ -920,6 +920,7 @@ mod tests {
         let mut layer = Layer::new("Layer 1", 0);
         layer.slots.push(Slot {
             index: 1,
+            name: None,
             sync: crate::config::slot::SlotSync::default(),
             speed: 1.0,
             source: crate::config::slot::SourceRef::Generator {

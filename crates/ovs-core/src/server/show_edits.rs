@@ -523,10 +523,13 @@ fn slot_of(show: &mut Show, layer_id: LayerId, slot_index: u16) -> ApiResult<&mu
 /// Changes one slot's settings: everything about it but its source.
 ///
 /// Loop or play once, forwards or backwards, its own rate or the show's beat,
-/// and where it sits. All of it is the document rather than live state — it
-/// describes the clip, not what the show is doing with it — and all of it is
-/// decided while watching the wall, which is why it is here and not behind a
-/// save (owner, 2026-09-23).
+/// where it sits, and what the pad is called. All of it is the document rather
+/// than live state — it describes the clip, not what the show is doing with
+/// it — and all of it is decided while watching the wall, which is why it is
+/// here and not behind a save (owner, 2026-09-23).
+///
+/// A name is sent as text, and empty text takes the name off rather than
+/// setting an empty one: see [`SetSlotRequest::name`].
 ///
 /// Nothing is restarted. A clip that is playing goes on playing; what changes
 /// is what it does at the end of this pass, which is where a change of mode
@@ -549,6 +552,14 @@ pub async fn set_slot(
     let mut show = document(&state, target.show_id)?;
     {
         let slot = slot_of(&mut show, target.layer_id, target.slot_index)?;
+        if let Some(name) = request.name {
+            // Trimmed, and nothing left means no name: an operator clearing a
+            // field leaves whitespace behind as often as not, and a pad whose
+            // name is three spaces is a pad with no name on it that the
+            // document says has one.
+            let name = name.trim();
+            slot.name = (!name.is_empty()).then(|| name.to_owned());
+        }
         if let Some(playback_mode) = request.playback_mode {
             slot.playback_mode = playback_mode;
         }

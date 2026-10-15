@@ -2384,6 +2384,7 @@ mod tests {
         layer.slots.push(Slot {
             index: 1,
             source,
+            name: None,
             sync: ovs_types::config::slot::SlotSync::default(),
             speed: 1.0,
             playback_mode: ovs_types::config::PlaybackMode::Loop,
@@ -2702,6 +2703,7 @@ mod tests {
         layer.slots.push(Slot {
             index: 1,
             source: generator,
+            name: None,
             sync: ovs_types::config::slot::SlotSync::default(),
             speed: 1.0,
             playback_mode: ovs_types::config::PlaybackMode::Loop,
@@ -2794,6 +2796,7 @@ mod tests {
         layer.slots.push(Slot {
             index: 1,
             source: SourceRef::Media { media_item_id },
+            name: None,
             sync: ovs_types::config::slot::SlotSync::default(),
             speed: 1.0,
             playback_mode: mode,

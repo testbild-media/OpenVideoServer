@@ -624,6 +624,14 @@ pub struct MediaListItem {
 /// dragging something onto the pad, which is its own endpoint.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SetSlotRequest {
+    /// What an operator calls this pad.
+    ///
+    /// **Empty means "no name of its own"**, which puts the pad back to being
+    /// named after what it plays. Absent means "leave it alone", like every
+    /// other field here — and a name has to have a way of being taken off
+    /// again, which a field that can only be absent or set does not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     /// What happens when the clip reaches the end.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub playback_mode: Option<ovs_types::config::PlaybackMode>,

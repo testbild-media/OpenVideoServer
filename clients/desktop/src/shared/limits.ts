@@ -161,6 +161,9 @@ export const DEFAULT_BLEND_MODE: BlendMode = 'normal';
  */
 export const MAX_SIDE = 8192;
 
+/** The longest name an operator may give a pad (`MAX_SLOT_NAME_CHARS`). */
+export const MAX_SLOT_NAME_CHARS = 64;
+
 /** The fewest beats a slot may be locked to (`MIN_SLOT_BEATS`). */
 export const MIN_SLOT_BEATS = 1;
 /** What a slot locked to the beat is offered when it is switched on. */

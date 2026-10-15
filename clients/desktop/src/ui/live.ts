@@ -107,6 +107,7 @@ import {
   MAX_BPM,
   MAX_BANKS,
   MAX_SLOT_INDEX,
+  MAX_SLOT_NAME_CHARS,
   MIN_BPM,
   MIN_SLOT_BEATS,
   DEFAULT_SLOT_BEATS,
@@ -475,6 +476,8 @@ interface SlotOptionNodes {
   root: HTMLElement;
   /** Which layer the slot belongs to, so the panel can name what it is about. */
   layerId: string;
+  /** What the operator calls this pad. Empty means "after what it plays". */
+  name: HTMLInputElement;
   /** How fast this slot runs through one pass, on either kind of sync. */
   speedSteps: Map<number, HTMLButtonElement>;
   /** What that setting asks of the decoder, when it is worth saying. */
@@ -2335,8 +2338,22 @@ export class LivePanel {
     target.replaceChildren(picture);
   }
 
-  /** What a slot plays, in the operator's words. */
+  /**
+   * What a slot is called, in the operator's words.
+   *
+   * **The name they gave this pad, where they gave it one.** It wins over what
+   * the source is called, which is the whole point of it: two pads of one clip
+   * with different effects on them are the same four words otherwise (owner,
+   * 2026-10-15). Nothing else is affected — the library's name for the clip is
+   * still the library's, and so is the generator's.
+   */
   #sourceName(slot: SlotView): string {
+    const given = slot.name?.trim() ?? '';
+    return given === '' ? this.#sourceOwnName(slot) : given;
+  }
+
+  /** What a slot would be called with no name of its own: what it plays. */
+  #sourceOwnName(slot: SlotView): string {
     if (slot.source.kind === 'generator') {
       return slot.source.typeId.replace(/^ovs\./, '');
     }
@@ -3541,6 +3558,26 @@ export class LivePanel {
     const layerId = layer.id;
     const index = slot.index;
 
+    // **What this pad is called**, and the first row, because it is the thing
+    // an operator reads off the matrix from across a room.
+    //
+    // The owner, 2026-10-15: "Manchmal kann ja der selbe Inhalt sein, aber mit
+    // anderen Effekte drauf etc. für Dauerhafte installation wäre das noch
+    // gut." Left empty, the pad is named after what it plays, and the
+    // placeholder shows what that name is — so an empty field reads as "this
+    // one is called Strobe because that is what is in it" rather than as a
+    // setting nobody has filled in.
+    //
+    // On `change` rather than on every keystroke: this is a document edit, and
+    // one a letter would be one per letter.
+    const name = make('input', 'option-name');
+    name.type = 'text';
+    name.maxLength = MAX_SLOT_NAME_CHARS;
+    name.setAttribute('aria-label', 'What this pad is called');
+    name.addEventListener('change', () => {
+      void this.#setSlot(layerId, index, { name: name.value });
+    });
+
     const playbackMode = make('select', 'layer-blend');
     playbackMode.setAttribute('aria-label', 'What the end of this clip does');
     for (const mode of PLAYBACK_MODES) {
@@ -3672,6 +3709,7 @@ export class LivePanel {
     const clearRow = optionRow('This pad', clear);
 
     root.append(
+      optionRow('Name', name),
       optionRow('Playback', playbackMode),
       optionRow('Direction', direction),
       optionRow('Clip sync', sync),
@@ -3685,6 +3723,7 @@ export class LivePanel {
     return {
       root,
       layerId,
+      name,
       speedSteps,
       rate,
       playbackMode,
@@ -3699,6 +3738,16 @@ export class LivePanel {
   /** Keeps the slot's controls showing what the document says. */
   #updateSlotOptions(nodes: SlotOptionNodes, slot: SlotView): void {
     const settable = (node: HTMLElement): boolean => document.activeElement !== node;
+
+    // Not while it is being typed into: this panel is repainted on every
+    // state the server sends, and a field reset under a hand is a name that
+    // cannot be typed.
+    if (settable(nodes.name)) {
+      nodes.name.value = slot.name ?? '';
+    }
+    // The placeholder is what the pad is called when the field is empty, and
+    // that moves when the source does.
+    nodes.name.placeholder = this.#sourceOwnName(slot);
 
     // Nearest by ratio, as the master's pads are read: the server stores an
     // `f64`, so a value that arrives as 0.9999999 is still 1x and should light
