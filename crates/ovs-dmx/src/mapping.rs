@@ -900,4 +900,147 @@ mod tests {
             .updates
             .is_empty());
     }
+
+    /// A generator in a slot, patched, driven from a desk.
+    ///
+    /// The owner, 2026-10-16: "ich kann Strobe Generator per DMX nicht
+    /// steuern, aber sowas wie Solid Color, Strobe und Shape sollten sich
+    /// schon steuern lassen". They should, and every piece of it was built —
+    /// `definition` falls through to a module's own personality, `bind` turns
+    /// a slot into a `GeneratorParameter`, and `parameters::apply` applies
+    /// one. What there was not, anywhere, was a test of the three of them in a
+    /// row, so "a console can drive a generator" was a claim nothing held
+    /// down.
+    #[test]
+    fn a_patched_generator_turns_its_channels_into_generator_parameters() {
+        use ovs_types::config::generators::STROBE_V2;
+        use ovs_types::id::GeneratorInstanceId;
+
+        let instance = GeneratorInstanceId::new();
+        let published = ovs_types::config::definition(STROBE_V2.type_id, STROBE_V2.version)
+            .expect("the strobe publishes a personality");
+
+        let patch = vec![FixtureInstance {
+            id: FixtureInstanceId::new(),
+            type_id: STROBE_V2.type_id.to_owned(),
+            version: STROBE_V2.version,
+            target: FixtureTarget::Generator {
+                generator_instance_id: instance,
+            },
+            universe: 1,
+            start_address: 91,
+            footprint: published.footprint,
+            enabled: true,
+        }];
+
+        // Six channels at 91: colour red, green, blue, alpha, then rate, then
+        // mode. Full red, half rate, and the mode channel up at the top.
+        let mut channels = vec![0_u8; 200];
+        channels[90] = 255;
+        channels[91] = 0;
+        channels[92] = 0;
+        channels[93] = 255;
+        channels[94] = 128;
+        channels[95] = 255;
+
+        let universes = universes_holding(&channels);
+        let collected = Mapper::new().collect(&patch, &universes, DmxProtocols::default());
+
+        assert!(
+            collected.problems.is_empty(),
+            "a patched generator was refused: {:?}",
+            collected.problems
+        );
+
+        let rate = collected
+            .updates
+            .iter()
+            .find(|update| {
+                matches!(
+                    &update.parameter,
+                    Parameter::GeneratorParameter { generator_instance_id, key, .. }
+                        if *generator_instance_id == instance && *key == "hz"
+                )
+            })
+            .expect("the rate channel reached the generator");
+        let rate = number(rate.value);
+        assert!(
+            (rate - 15.25).abs() < 0.5,
+            "half a channel of a 0.5-to-30 rate should be about 15, got {rate}"
+        );
+
+        // And the mode, which is the one the owner added this morning.
+        assert!(
+            collected.updates.iter().any(|update| matches!(
+                &update.parameter,
+                Parameter::GeneratorParameter { generator_instance_id, key, .. }
+                    if *generator_instance_id == instance && *key == "mode"
+            )),
+            "the mode channel never arrived"
+        );
+
+        // The colour arrives as its parts rather than as one value, because a
+        // desk has a fader per part.
+        let parts = collected
+            .updates
+            .iter()
+            .filter(|update| {
+                matches!(
+                    &update.parameter,
+                    Parameter::GeneratorParameter { generator_instance_id, key, .. }
+                        if *generator_instance_id == instance && *key == "colour"
+                )
+            })
+            .count();
+        assert_eq!(parts, 4, "a colour is four channels and four updates");
+    }
+
+    /// The same for an effect in a chain, which has never been tested either.
+    #[test]
+    fn a_patched_effect_turns_its_channels_into_effect_parameters() {
+        use ovs_types::id::EffectInstanceId;
+
+        let instance = EffectInstanceId::new();
+        let published = ovs_types::config::definition("ovs.invert", 2)
+            .expect("invert version two publishes a personality");
+
+        let patch = vec![FixtureInstance {
+            id: FixtureInstanceId::new(),
+            type_id: "ovs.invert".to_owned(),
+            version: 2,
+            target: FixtureTarget::Effect {
+                effect_instance_id: instance,
+            },
+            universe: 1,
+            start_address: 1,
+            footprint: published.footprint,
+            enabled: true,
+        }];
+
+        // Switch up, rate at a quarter.
+        let mut channels = vec![0_u8; 10];
+        channels[0] = 255;
+        channels[1] = 64;
+
+        let universes = universes_holding(&channels);
+        let collected = Mapper::new().collect(&patch, &universes, DmxProtocols::default());
+
+        assert!(collected.problems.is_empty(), "{:?}", collected.problems);
+        assert!(
+            collected.updates.iter().any(|update| matches!(
+                &update.parameter,
+                Parameter::EffectParameter { effect_instance_id, key, .. }
+                    if *effect_instance_id == instance && *key == "on"
+            )),
+            "the switch never arrived"
+        );
+        assert!(
+            collected.updates.iter().any(|update| matches!(
+                &update.parameter,
+                Parameter::EffectParameter { effect_instance_id, key, .. }
+                    if *effect_instance_id == instance && *key == "hz"
+            )),
+            "the rate never arrived"
+        );
+    }
 }
