@@ -268,6 +268,7 @@ function drawStorage(): void {
 
 function drawView(next: ShowView): void {
   const was = view?.showId ?? null;
+  const wasUpdatedAt = view?.showUpdatedAt ?? null;
   view = next;
   ui.show.textContent = next.showName ?? 'No show';
   ui.show.title = next.showName ?? 'No show is open on this server';
@@ -278,6 +279,21 @@ function drawView(next: ShowView): void {
   // fills an empty editor; a draft in hand is somebody's work.
   if (next.showId !== null && next.showId !== was) {
     void editor.followTheOpenShow();
+  } else if (
+    next.showId !== null &&
+    next.showUpdatedAt !== null &&
+    wasUpdatedAt !== null &&
+    next.showUpdatedAt !== wasUpdatedAt
+  ) {
+    // **The same show, changed.** The mirror is told the whole new document
+    // whenever the server stores one — putting a generator into a slot from
+    // the Live page goes through `replace_show` and arrives here — and the
+    // editor's draft was fetched once, when the show was opened, and never
+    // again. So the Settings pages went on editing a document from earlier in
+    // the evening: a generator added live could not be patched, because the
+    // patch page could not see it (owner, 2026-10-16, with a desk patched and
+    // a wall waiting). A client restart was the only way through.
+    void editor.catchUpWithTheServer();
   }
 
   const renderer = next.renderer;

@@ -254,6 +254,16 @@ export interface ShowView {
   sequence: number;
   showId: string | null;
   showName: string | null;
+  /**
+   * When the server last stored the open show.
+   *
+   * Here so that a panel editing the document can tell "the same show" from
+   * "the same show, changed". The owner, 2026-10-16: a generator put into a
+   * slot did not appear in the patch until the client was restarted, because
+   * the editor's draft is fetched when a show is opened and never again — and
+   * the mirror beside it had the new document all along.
+   */
+  showUpdatedAt: number | null;
   /** How wide and tall the composition is, for the preview's aspect. */
   composition: { width: number; height: number } | null;
   master: MasterView | null;
@@ -271,6 +281,7 @@ export function emptyView(): ShowView {
     sequence: 0,
     showId: null,
     showName: null,
+    showUpdatedAt: null,
     composition: null,
     master: null,
     masterDefaults: null,
@@ -368,6 +379,7 @@ export function toView(state: ShowState): ShowView {
     sequence: state.sequence,
     showId: show?.id ?? null,
     showName: show?.name ?? null,
+    showUpdatedAt: show?.updated_at ?? null,
     composition: show
       ? { width: show.composition.size.width, height: show.composition.size.height }
       : null,

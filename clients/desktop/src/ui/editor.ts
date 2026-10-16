@@ -495,6 +495,44 @@ export class EditorPanel {
   }
 
   /**
+   * Fetches the open show again, because the server stored a new version of it.
+   *
+   * **Two copies of one show.** The live mirror is told the whole document
+   * every time the server stores one — adding a generator to a slot from the
+   * Live page goes through `replace_show` and arrives that way — while this
+   * draft was fetched once, when the show was opened, and never again. So the
+   * Settings pages went on editing a document from earlier in the evening.
+   *
+   * The owner found it with a desk patched and a wall waiting (2026-10-16): a
+   * generator put into a slot could not be patched, because the patch page
+   * reads this draft and could not see it. Restarting the client was the only
+   * way through, and the same cause had already made a set of effects appear
+   * from nowhere an hour before.
+   *
+   * **A dirty draft is never replaced.** Unsaved work is the operator's, and a
+   * client that threw it away because the server said something would be a
+   * worse fault than the one this fixes. They are told instead, and reopen
+   * when they are ready.
+   */
+  async catchUpWithTheServer(): Promise<void> {
+    const live = this.#liveShowId();
+    if (live === null || this.#draft === null) {
+      return;
+    }
+    if (this.#draft.show.id !== live) {
+      // A different show is being edited on purpose. Nothing to catch up with.
+      return;
+    }
+    if (isDirty(this.#draft)) {
+      this.#note(
+        'this show changed on the server; your unsaved edits are kept — open it again to take the new version',
+      );
+      return;
+    }
+    await this.#openShow(live);
+  }
+
+  /**
    * Asks the operator for a picture, as a data URL.
    *
    * For the mapping canvas's backdrop and nothing else. It never reaches a
