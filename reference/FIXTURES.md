@@ -310,6 +310,15 @@ Footprint: **1 channels**. Patch to: **one effect instance in a chain**.
 |---|---|---|---|---|
 | 1 | Inverted | `on` | on at 128 and above | 0 |
 
+## Invert — `ovs.invert` v2
+
+Footprint: **2 channels**. Patch to: **one effect instance in a chain**.
+
+| Channel | Name | Control | Values | Home |
+|---|---|---|---|---|
+| 1 | Inverted | `on` | on at 128 and above | 0 |
+| 2 | Rate | `hz` | 0 at 0, 30 at 255 | 0 |
+
 ## Solid Colour — `ovs.solid_colour` v1
 
 Footprint: **4 channels**. Patch to: **one generator instance in a slot**.

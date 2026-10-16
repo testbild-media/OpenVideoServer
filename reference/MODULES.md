@@ -300,3 +300,12 @@ Turns every colour into its opposite.
 |---|---|---|---|
 | Inverted | `on` | on or off | off |
 
+### Invert — `ovs.invert` v2
+
+Turns every colour into its opposite, steadily or at a rate.
+
+| Parameter | Key | Takes | Default |
+|---|---|---|---|
+| Inverted | `on` | on or off | off |
+| Rate | `hz` | a number from 0 to 30 | 0 |
+

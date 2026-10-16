@@ -571,6 +571,60 @@ pub const INVERT_V1: EffectManifest = EffectManifest {
     }],
 };
 
+/// The same, able to flash on its own.
+///
+/// The owner, 2026-10-16: "Ich will einen Inverted Color haben, der selber in
+/// einer HZ Zahl wechselt, die man einstellt."
+///
+/// **Why this is not the strobe generator's invert mode.** That one is a
+/// *source*: it owns a layer, and its inversion is in how that layer lands —
+/// a difference against white, which turns round whatever is underneath the
+/// whole layer. This is an *effect*: it sits in one layer's chain and turns
+/// round that layer's own picture, leaving everything else alone. An operator
+/// wanting one picture to pulse wants this one; an operator wanting the wall
+/// to pulse wants the generator.
+///
+/// **A new version rather than a changed one.** `on` keeps its meaning and its
+/// channel, so a console programmed against v1 drives v2's switch from the same
+/// fader, and a show saved with v1 keeps a strobe rate of nothing whatever this
+/// build does.
+///
+/// **`on` is still the switch.** Off is off, whatever the rate says: a flashing
+/// effect somebody has switched off must go dark rather than keep flashing, and
+/// that is also what keeps the published defaults neutral. At zero hertz it is
+/// exactly v1 — on means inverted and stays inverted — so the rate is something
+/// an operator adds rather than something they have to set to get a negative.
+///
+/// The rate's range is the strobe generator's, for the one reason that matters:
+/// the two of them in a show must not disagree about what "ten" means. The
+/// ceiling is half of sixty because a flash needs a lit frame and a dark one.
+pub const INVERT_V2: EffectManifest = EffectManifest {
+    type_id: "ovs.invert",
+    version: 2,
+    name: "Invert",
+    description: "Turns every colour into its opposite, steadily or at a rate.",
+    parameters: &[
+        ParameterDefinition {
+            key: "on",
+            name: "Inverted",
+            kind: ParameterKind::Toggle { default: false },
+            dmx: Some(DmxChannel::Coarse),
+        },
+        ParameterDefinition {
+            key: "hz",
+            name: "Rate",
+            kind: ParameterKind::Number {
+                // Zero rather than the strobe's floor: zero is "do not flash",
+                // which has to be reachable and has to be the default.
+                min: 0.0,
+                max: crate::config::generators::MAX_STROBE_HZ,
+                default: 0.0,
+            },
+            dmx: Some(DmxChannel::Coarse),
+        },
+    ],
+};
+
 /// Four edges off the picture.
 ///
 /// What somebody reaches for when a camera feed has a letterbox in it, when a
@@ -644,7 +698,7 @@ pub const CROP_V1: EffectManifest = EffectManifest {
 };
 
 /// Every effect this build publishes.
-pub const PUBLISHED: [EffectManifest; 14] = [
+pub const PUBLISHED: [EffectManifest; 15] = [
     // Both versions, and the catalogue offers the newer: a show saved against
     // version one opens with the four controls it was saved with.
     COLOUR_CORRECT_V1,
@@ -661,6 +715,7 @@ pub const PUBLISHED: [EffectManifest; 14] = [
     TV_GLITCH_V2,
     MASK_V1,
     INVERT_V1,
+    INVERT_V2,
 ];
 
 /// How far out of vertical hold the picture can be thrown, as a fraction of

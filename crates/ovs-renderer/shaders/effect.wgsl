@@ -197,6 +197,17 @@ fn invert(source: vec4<f32>) -> vec4<f32> {
     if effect.values.x <= 0.5 {
         return source;
     }
+    // The rate, in hertz. Zero is version one and every version two nobody has
+    // set a rate on: inverted, and staying inverted.
+    //
+    // Half the cycle inverted and half of it not, which is what a strobe is.
+    // The clock is the free-running one every pass in a frame shares, so two
+    // layers each carrying this flash together rather than beating against
+    // each other — which is the whole reason that clock is shared.
+    let hz = effect.values.y;
+    if hz > 0.0 && fract(effect.seconds * hz) >= 0.5 {
+        return source;
+    }
     return vec4<f32>(vec3<f32>(1.0) - source.rgb, source.a);
 }
 

@@ -6,9 +6,9 @@
 //! what it was set to.
 //!
 //! Pure, like [`crate::scene`]. No Vulkan and no GPU, so the rules an operator
-//! notices when they are wrong — that a disabled effect does nothing, that an
+//! notices when they are wrong â€” that a disabled effect does nothing, that an
 //! untouched one is neutral, that two of them run in the order they were listed
-//! — are testable on a machine with no graphics hardware.
+//! â€” are testable on a machine with no graphics hardware.
 //!
 //! # Every number comes from the manifest
 //!
@@ -24,13 +24,13 @@
 //! separate: [`EffectValues`] holds a borrow of each and asks them in order, so
 //! building a chain costs no allocation however many parameters are being
 //! driven. Merging them into one map per effect per frame is the obvious
-//! implementation and is exactly what the realtime rules forbid (house rule §5).
+//! implementation and is exactly what the realtime rules forbid (house rule Â§5).
 //!
 //! # One effect is not one pass
 //!
 //! A separable blur is a pass across and a pass down, and a block average is the
 //! same shape of thing. So an effect is asked how many passes it is rather than
-//! being assumed to be one, and the compositor runs a flat list — which is why
+//! being assumed to be one, and the compositor runs a flat list â€” which is why
 //! the blur needed no special case anywhere downstream of here.
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -62,7 +62,7 @@ pub enum PassKind {
     BlurDown,
     /// Four edges cleared, in composition pixels.
     Crop,
-    /// The white point: temperature in kelvin, then the green–magenta axis.
+    /// The white point: temperature in kelvin, then the greenâ€“magenta axis.
     WhiteBalance,
     /// One half of the picture folded onto the other, on either axis.
     Mirror,
@@ -123,7 +123,7 @@ pub struct EffectPass {
     /// **The only thing in a pass that is not a number.** Everything else here
     /// is pushed to the shader as constants; this is a texture the compositor
     /// has to bind. A pass naming no picture, and one naming a picture that is
-    /// not on the GPU, both get the white default bound instead — and white is
+    /// not on the GPU, both get the white default bound instead â€” and white is
     /// a mask that does nothing, so neither changes the layer. Still `Copy`: an
     /// identifier is sixteen bytes and a chain is rebuilt into a reused buffer
     /// every frame.
@@ -142,7 +142,7 @@ pub fn passes_into(chain: &[EffectInstance], into: &mut Vec<EffectPass>) {
 /// Appends the passes a chain runs, in chain order, live values on top.
 ///
 /// A disabled effect contributes nothing, so a chain whose effects are all
-/// disabled appends nothing at all — which is what lets the compositor take a
+/// disabled appends nothing at all â€” which is what lets the compositor take a
 /// layer with such a chain down exactly the path it takes with no chain.
 ///
 /// `into` is appended to rather than replaced, because a frame's chains live
@@ -220,7 +220,7 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
         // workaround for that: the owner put temperature and tint after
         // saturation and gamma, so they belong in a pass that runs after the
         // one which does those. Appended even at their defaults, for the same
-        // reason every other effect is — the renderer proves an effect neutral
+        // reason every other effect is â€” the renderer proves an effect neutral
         // by rendering it.
         ("ovs.colour_correct", 2) => {
             into.push(EffectPass {
@@ -257,7 +257,25 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
         // proves every published effect neutral at its defaults by drawing it.
         ("ovs.invert", 1) => into.push(EffectPass {
             kind: PassKind::Invert,
+            // Zero in the rate slot, which the shader reads as "do not flash".
+            // Version one has no rate and must keep behaving as it was saved.
             values: [f32::from(u8::from(values.flag("on"))), 0.0, 0.0, 0.0],
+            colour: [0.0; 4],
+            mask: None,
+        }),
+        // The same pass with a rate. The flashing is decided in the shader
+        // rather than here: the pass is built once per frame and the clock it
+        // would be compared against is the one already on the card, so working
+        // it out on this side would mean reading a second clock that is a
+        // fraction of a frame away from the first.
+        ("ovs.invert", 2) => into.push(EffectPass {
+            kind: PassKind::Invert,
+            values: [
+                f32::from(u8::from(values.flag("on"))),
+                number("hz"),
+                0.0,
+                0.0,
+            ],
             colour: [0.0; 4],
             mask: None,
         }),
@@ -313,7 +331,7 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
         // **Appended with no picture as well**, like every other effect here,
         // because that is what lets the renderer prove it neutral by rendering
         // it. A pass naming no picture binds the white default texture, and
-        // white is a mask that does nothing — which is also what a mask that is
+        // white is a mask that does nothing â€” which is also what a mask that is
         // still decoding and a mask whose picture was deleted from the library
         // get, so all three leave the layer exactly as it was.
         ("ovs.mask", 1) => into.push(EffectPass {
@@ -405,8 +423,8 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
             mask: None,
         }),
         // A manifest this build publishes but the renderer cannot draw. Nothing
-        // is in this state today — the four published effects are the four
-        // above — and the day one is, it is a layer drawn without it and a line
+        // is in this state today â€” the four published effects are the four
+        // above â€” and the day one is, it is a layer drawn without it and a line
         // in the log rather than a guess.
         _ => warn_once(manifest.type_id, manifest.version),
     }
@@ -765,5 +783,57 @@ mod tests {
                 assert_ne!(kind.code(), other.code(), "{kind:?} and {other:?}");
             }
         }
+    }
+
+    /// The rate reaches the pass, and version one keeps a rate of nothing.
+    ///
+    /// The owner asked for an Invert that flashes on its own
+    /// ("der selber in einer HZ Zahl wechselt"), which is version two. Version
+    /// one has no such parameter and must go on meaning exactly what it meant
+    /// when somebody saved a show with it.
+    #[test]
+    fn an_inverts_rate_reaches_the_pass_and_version_one_has_none() {
+        let mut two = EffectInstance::new("ovs.invert", 2);
+        two.parameters
+            .insert("on".to_owned(), ParameterValue::Bool(true));
+        two.parameters
+            .insert("hz".to_owned(), ParameterValue::Float(8.0));
+
+        let mut passes = Vec::new();
+        passes_into(std::slice::from_ref(&two), &mut passes);
+        assert_eq!(passes.len(), 1);
+        assert_eq!(passes[0].kind, PassKind::Invert);
+        assert_eq!(passes[0].values[0], 1.0, "switched on");
+        assert_eq!(passes[0].values[1], 8.0, "eight hertz");
+
+        let mut one = EffectInstance::new("ovs.invert", 1);
+        one.parameters
+            .insert("on".to_owned(), ParameterValue::Bool(true));
+        let mut older = Vec::new();
+        passes_into(std::slice::from_ref(&one), &mut older);
+        assert_eq!(older[0].values[0], 1.0);
+        assert_eq!(
+            older[0].values[1], 0.0,
+            "version one must carry no rate at all, which the shader reads as steady"
+        );
+    }
+
+    /// Switched off is off, whatever the rate says.
+    ///
+    /// A flashing effect somebody has switched off has to go dark rather than
+    /// carry on flashing, and it is what keeps the published defaults neutral.
+    #[test]
+    fn an_invert_switched_off_does_not_flash() {
+        let mut off = EffectInstance::new("ovs.invert", 2);
+        off.parameters
+            .insert("hz".to_owned(), ParameterValue::Float(12.0));
+
+        let mut passes = Vec::new();
+        passes_into(std::slice::from_ref(&off), &mut passes);
+        assert_eq!(passes.len(), 1, "the pass runs either way");
+        assert_eq!(
+            passes[0].values[0], 0.0,
+            "off at the published default, so the shader returns the picture untouched"
+        );
     }
 }

@@ -375,6 +375,19 @@ mod tests {
         }
     }
 
+    /// Whether two picture names are two versions of one effect.
+    ///
+    /// By the name rather than by the manifest, because the names are what the
+    /// comparison above holds: `ovs.invert.v1.png` and `ovs.invert.v2.png`
+    /// share everything up to the `.v`.
+    fn of_the_same_effect(one: &str, other: &str) -> bool {
+        let stem = |name: &str| {
+            name.rfind(".v")
+                .map_or_else(|| name.to_owned(), |at| name[..at].to_owned())
+        };
+        stem(one) == stem(other)
+    }
+
     #[test]
     fn each_picture_is_the_effect_rather_than_the_reference() {
         // **The half that needs a card**, so it stands aside on a machine
@@ -418,10 +431,22 @@ mod tests {
             seen.push((named, drawn.pixels().to_vec()));
         }
 
-        // And no two of them are the same picture, which is what would happen
-        // if a setting above stopped reaching its effect.
+        // And no two *different effects* are the same picture, which is what
+        // would happen if a setting above stopped reaching its effect.
+        //
+        // **Two versions of one effect may match, and sometimes must.** A tile
+        // says what an effect does to a picture, and a version can differ in
+        // something a still frame cannot carry: `ovs.invert` v2 is v1 plus a
+        // rate, and at a steady setting it does exactly what v1 does. The
+        // generators' tiles have always allowed this — strobe v1 and v2 are
+        // byte-identical for the same reason — and pretending otherwise would
+        // mean inventing a setting whose only purpose is to make two pictures
+        // differ.
         for (at, (named, pixels)) in seen.iter().enumerate() {
             for (other_name, other) in seen.iter().skip(at + 1) {
+                if of_the_same_effect(named, other_name) {
+                    continue;
+                }
                 assert_ne!(
                     pixels, other,
                     "{named} and {other_name} are the same picture"
