@@ -27,6 +27,13 @@
 //! pixels, and a clock. That is what makes it runnable on the reference server,
 //! where the question has to be answered and where none of the rest exists.
 //!
+//! **And on the Windows machine this is written on**, which is the other half
+//! of why it is built this way. It was behind `cfg(unix)` until 2026-10-16 —
+//! copied from the tools that need FFmpeg, which this does not — so the one
+//! question it exists to answer could only be asked on a machine that is
+//! sometimes unreachable. Nothing in here is a system call: a Vulkan device is
+//! a Vulkan device.
+//!
 //! # What is being measured, exactly
 //!
 //! The pictures are built once and handed over again every frame. That is not a
@@ -40,25 +47,41 @@
 //! is the draw. Together they are two of the three figures the renderer now
 //! reports as `FrameTimings`, and a frame at sixty has 16 667 microseconds for
 //! all of it plus presenting.
+//!
+//! # What it has answered: the upload is a memory copy
+//!
+//! Measured 2026-10-16 on an RTX 3060 Ti — the reference server's card — at
+//! 1080p, every layer new every frame:
+//!
+//! | layers | picture        | upload  | compose | together | of a frame |
+//! |--------|----------------|---------|---------|----------|------------|
+//! | 3      | RGBA, 7.9 MB   | 2500 us | 1096 us | 3597 us  | 21 %       |
+//! | 3      | NV12, 3.0 MB   | 1022 us |  714 us | 1736 us  | 10 %       |
+//! | 7      | NV12, 3.0 MB   | 2222 us | 1288 us | 3510 us  | 21 %       |
+//! | 7      | RGBA, 7.9 MB   | 5572 us | 2072 us | 7644 us  | 45 %       |
+//!
+//! And across sizes at three RGBA layers: 252 us a layer at 960x540, 835 at
+//! 1080p, 3136 at 2160p — 94 to 122 microseconds a megabyte whatever the shape.
+//!
+//! **So the figure is the bytes and nothing else**, at about ten gigabytes a
+//! second, which is a host memory copy rather than a queue waiting on the card.
+//! Two things follow. Uploading what the decoder produced is worth exactly what
+//! it removes — NV12 is three eighths of RGBA and costs three eighths as much,
+//! so **seven hardware-decoded layers now cost what three used to** — and
+//! moving the submit to the transfer queue (PLAN item 11) would move the part
+//! that is not in the figure. What is left to win is the copy itself: decoding
+//! into mapped memory, or spreading it across threads.
 
-#[cfg(not(unix))]
-fn main() {
-    eprintln!("ovs-upload-cost needs a Vulkan device, and is only built on unix");
-    std::process::exit(2);
-}
-
-#[cfg(unix)]
 fn main() -> std::process::ExitCode {
-    unix::run()
+    measure::run()
 }
 
-#[cfg(unix)]
-mod unix {
+mod measure {
     use std::process::ExitCode;
     use std::time::{Duration, Instant};
 
     use ovs_renderer::backend::{Compositor, FrameRequest};
-    use ovs_renderer::media::DecodedImage;
+    use ovs_renderer::media::{ChromaFormat, ColourMatrix, DecodedImage, SampleDepth};
     use ovs_renderer::scene::{Quad, Scene, SourceRect, TextureKey, TextureRef};
     use ovs_renderer::vulkan::{VulkanError, VulkanOffscreenBackend};
     use ovs_types::config::{BlendMode, DisplayMode, EffectInstance, Route};
@@ -66,7 +89,21 @@ mod unix {
     use ovs_types::id::LayerId;
 
     const USAGE: &str = "usage: ovs-upload-cost [--layers N] [--frames N] [--size WxH] \
-[--readback] [--upload-once] [--effects TYPE[,TYPE...]]";
+[--nv12] [--readback] [--upload-once] [--effects TYPE[,TYPE...]]";
+
+    /// What a card's decoder hands back: 4:2:0, eight bits, Cb first.
+    ///
+    /// Narrow range and BT.709, which is what HD video is and what the
+    /// renderer's own conversion assumes when a decoder does not say. Neither
+    /// decides anything here — the shader reads them, the upload does not —
+    /// but a picture has to carry them to exist.
+    const NV12: ChromaFormat = ChromaFormat {
+        subsample_x: 2,
+        subsample_y: 2,
+        full_range: false,
+        matrix: ColourMatrix::Bt709,
+        depth: SampleDepth::Eight,
+    };
 
     pub fn run() -> ExitCode {
         let mut layers = 1usize;
@@ -74,6 +111,7 @@ mod unix {
         let mut size = SizePx::new(1920, 1080);
         let mut readback = false;
         let mut upload_once = false;
+        let mut nv12 = false;
         let mut chain: Vec<EffectInstance> = Vec::new();
 
         let mut args = std::env::args().skip(1);
@@ -108,6 +146,7 @@ mod unix {
                 }
                 "--readback" => readback = true,
                 "--upload-once" => upload_once = true,
+                "--nv12" => nv12 = true,
                 "--help" | "-h" => {
                     println!("{USAGE}");
                     return ExitCode::SUCCESS;
@@ -154,6 +193,22 @@ mod unix {
                 "uploading every layer every frame, as a playing clip does"
             }
         );
+        // **Which picture, and how many bytes of it**, because that is what the
+        // upload turned out to cost: the figure tracks the bytes at about a
+        // tenth of a microsecond each, whatever the shape of them. A card's
+        // decoder hands back NV12, which is three eighths of the RGBA a
+        // software one produces — so measuring only RGBA measures a path the
+        // wall no longer takes for a hardware-decoded clip.
+        let frame_bytes = size.width as usize * size.height as usize * if nv12 { 3 } else { 8 } / 2;
+        println!(
+            "{}: {:.1} MB a layer a frame",
+            if nv12 {
+                "NV12, as a card's decoder hands it back"
+            } else {
+                "RGBA, as a software decoder and every generator produce it"
+            },
+            frame_bytes as f64 / 1_048_576.0
+        );
         if chain.is_empty() {
             println!("no effects, so every layer goes straight into the composition");
         } else {
@@ -199,16 +254,24 @@ mod unix {
         // holds, so re-using a picture costs what a fresh one costs — and
         // building a fresh one inside the loop would put an eight-megabyte
         // allocation into the figure this is trying to read.
-        let bytes = size.width as usize * size.height as usize * 4;
         let mut pictures: Vec<(LayerId, DecodedImage)> = Vec::with_capacity(layers);
         for index in 0..layers {
-            let mut pixels = vec![0u8; bytes];
             // Something other than black, and different per layer, so a driver
             // cannot decide the whole thing is one colour.
-            for (offset, byte) in pixels.iter_mut().enumerate() {
-                *byte = ((offset / 4 + index * 37) % 251) as u8;
-            }
-            let Some(image) = DecodedImage::new(pixels, size) else {
+            let fill = |length: usize, salt: usize| -> Vec<u8> {
+                (0..length)
+                    .map(|offset| ((offset / 4 + index * 37 + salt) % 251) as u8)
+                    .collect()
+            };
+            let luma = size.width as usize * size.height as usize;
+            let picture = if nv12 {
+                // Half as many chroma samples each way, two components to a
+                // sample: one byte of colour for every two of luma.
+                DecodedImage::interleaved(fill(luma, 0), fill(luma / 2, 91), size, NV12)
+            } else {
+                DecodedImage::new(fill(luma * 4, 0), size)
+            };
+            let Some(image) = picture else {
                 eprintln!(
                     "a picture of {}x{} is not a picture",
                     size.width, size.height
