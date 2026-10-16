@@ -1,0 +1,422 @@
+//! The picture on each effect's tile, drawn once and committed.
+//!
+//! ```text
+//! cargo run -p ovs-renderer --bin ovs-effect-pictures
+//! cargo run -p ovs-renderer --bin ovs-effect-pictures -- somewhere/else
+//! ```
+//!
+//! # Why an effect's tile is harder than a generator's
+//!
+//! A generator draws the same thing wherever it is, so its tile is simply what
+//! it draws. An effect draws **whatever is under it**, so a tile can only ever
+//! be "this effect, on something". Pick the wrong something and the tile is a
+//! picture of that clip rather than of the effect.
+//!
+//! So the something is the house's own reference: the service pattern, at the
+//! size a show runs at. It has what an effect has to be judged on — saturated
+//! colour, a black-level ramp, hard edges, and lettering — and it is drawn by
+//! committed code, so the picture is the same next time.
+//!
+//! # And at a setting, not at its default
+//!
+//! Every published effect is neutral at its published defaults: that is the
+//! promise the effect list makes, and the renderer proves it by drawing each
+//! one and comparing. A tile drawn at the defaults would therefore be the
+//! reference picture, fourteen times over.
+//!
+//! Each one is drawn at a setting that shows what it does instead. Those
+//! settings are **mine, and they are for the tile alone** — nothing a show ever
+//! sees — so they are written out below with the reason each was picked.
+//!
+//! # On the card, which is where effects live
+//!
+//! An effect is a fragment shader, so this needs a device. CI has none; the
+//! test below skips there, as every other GPU test in this crate does, and the
+//! pictures are committed so that a client always has them whatever built it.
+
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
+
+use ovs_renderer::backend::{Compositor, FrameRequest};
+use ovs_renderer::media::DecodedImage;
+use ovs_renderer::pattern::ServicePattern;
+use ovs_renderer::scene::{Quad, Scene, SourceRect, TextureRef};
+use ovs_renderer::vulkan::{VulkanError, VulkanOffscreenBackend};
+use ovs_types::config::slot::{ParameterMap, ParameterValue};
+use ovs_types::config::{BlendMode, DisplayMode, EffectInstance, Route};
+use ovs_types::geometry::{FrameRate, SizePx};
+use ovs_types::id::{LayerId, MediaItemId};
+
+/// The size the reference is drawn at, which is the size a show runs at.
+const WALL: SizePx = SizePx::new(1920, 1080);
+
+/// The picture on a tile: the same 320 by 180 a generator's is.
+const TILE: SizePx = SizePx::new(320, 180);
+
+/// What the reference pattern's caption calls itself.
+///
+/// Not `COMPOSITION`, which is what a real surface says: this picture is not a
+/// surface and a tile claiming to be one would be a small lie repeated
+/// fourteen times.
+const REFERENCE: &str = "EFFECT";
+
+/// How far into the pattern's own run the reference is taken.
+///
+/// Two seconds at sixty, which is `GeneratorSource::tick_worth_a_picture` for
+/// the same pattern — so an effect's tile and the test pattern's tile are the
+/// same moment of the same picture, and the difference between them is the
+/// effect and nothing else.
+const REFERENCE_SECONDS: f64 = 2.0;
+
+fn main() -> ExitCode {
+    let into = std::env::args()
+        .nth(1)
+        .map_or_else(pictures_directory, PathBuf::from);
+
+    if let Err(error) = std::fs::create_dir_all(&into) {
+        eprintln!("{}: {error}", into.display());
+        return ExitCode::from(1);
+    }
+
+    let mut canvas = match canvas() {
+        Ok(canvas) => canvas,
+        Err(reason) => {
+            eprintln!("{reason}");
+            return ExitCode::from(1);
+        }
+    };
+
+    for manifest in &ovs_types::config::EFFECTS {
+        let named = picture_name(manifest.type_id, manifest.version);
+        let Some(picture) = picture_of(&mut canvas, manifest.type_id, manifest.version) else {
+            eprintln!("{named}: published and cannot be drawn");
+            return ExitCode::from(1);
+        };
+        let Some(png) = encoded(&picture) else {
+            eprintln!("{named}: could not be encoded");
+            return ExitCode::from(1);
+        };
+
+        let path = into.join(&named);
+        if let Err(error) = std::fs::write(&path, &png) {
+            eprintln!("{}: {error}", path.display());
+            return ExitCode::from(1);
+        }
+        println!(
+            "{named:<28} {}x{}  {:>6} bytes",
+            TILE.width,
+            TILE.height,
+            png.len()
+        );
+    }
+
+    println!("into {}", into.display());
+    ExitCode::SUCCESS
+}
+
+/// What one effect's picture is called.
+fn picture_name(type_id: &str, version: u32) -> String {
+    format!("{type_id}.v{version}.png")
+}
+
+/// Where the client keeps them.
+fn pictures_directory() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../clients/desktop/assets/effects")
+}
+
+/// A device to draw on, with the reference and the mask already on it.
+fn canvas() -> Result<Canvas, String> {
+    let mode = DisplayMode::new(WALL, FrameRate::FPS_60);
+    let mut backend = match VulkanOffscreenBackend::new("effect-pictures", mode) {
+        Ok(backend) => backend,
+        Err(VulkanError::NoLoader(reason)) => {
+            return Err(format!("no Vulkan loader here: {reason}"))
+        }
+        Err(VulkanError::NoDevice(reason)) => {
+            return Err(format!("no usable device here: {reason}"))
+        }
+        Err(error) => return Err(error.to_string()),
+    };
+
+    let reference = MediaItemId::new();
+    let mask = MediaItemId::new();
+    backend
+        .set_media_texture(reference, &reference_picture())
+        .map_err(|error| format!("the reference picture: {error}"))?;
+    backend
+        .set_media_texture(
+            mask,
+            &mask_picture().ok_or("the mask picture cannot be drawn")?,
+        )
+        .map_err(|error| format!("the mask picture: {error}"))?;
+
+    Ok(Canvas {
+        backend,
+        reference,
+        mask,
+    })
+}
+
+/// The device, and what is on it.
+struct Canvas {
+    backend: VulkanOffscreenBackend,
+    /// The picture every effect is shown on.
+    reference: MediaItemId,
+    /// The picture the mask effect cuts with. Nothing else reads it.
+    mask: MediaItemId,
+}
+
+/// The service pattern, as every tile's backdrop.
+fn reference_picture() -> DecodedImage {
+    let mut pattern = ServicePattern::new(WALL, FrameRate::FPS_60, REFERENCE);
+    pattern.draw(REFERENCE_SECONDS).clone()
+}
+
+/// A white ellipse on nothing, for the one effect that needs a second picture.
+///
+/// Drawn by the shape generator rather than built here: a mask is a picture
+/// from the library, and the nearest thing this build has to one it can make
+/// is the generator whose whole job is a shape.
+fn mask_picture() -> Option<DecodedImage> {
+    use ovs_renderer::media::{FrameSource, GeneratorSource};
+
+    let parameters = ParameterMap::from([
+        ("width_px".to_owned(), ParameterValue::Float(1200.0)),
+        ("height_px".to_owned(), ParameterValue::Float(900.0)),
+    ]);
+    let mut source = GeneratorSource::new("ovs.shape", 1, &parameters, WALL)?;
+    Some(source.frame(0).ok()?.image.as_ref().clone())
+}
+
+/// One effect's tile-sized picture, at the setting that shows what it does.
+fn picture_of(canvas: &mut Canvas, type_id: &str, version: u32) -> Option<DecodedImage> {
+    let instance = EffectInstance {
+        parameters: settings(type_id, canvas.mask),
+        ..EffectInstance::new(type_id, version)
+    };
+
+    let mut passes = Vec::new();
+    ovs_renderer::effects::passes_into(std::slice::from_ref(&instance), &mut passes);
+
+    let layer = LayerId::new();
+    let mut scene = Scene::new();
+    scene.set_effects(layer, &passes);
+    scene.push(Quad {
+        left: -1.0,
+        bottom: -1.0,
+        right: 1.0,
+        top: 1.0,
+        colour: [1.0, 1.0, 1.0, 1.0],
+        rotation_deg: 0.0,
+        anchor: ovs_types::geometry::AnchorPoint::CENTRE,
+        layer_id: Some(layer),
+        source: SourceRect::WHOLE,
+        source_turn: ovs_renderer::SourceTurn::NONE,
+        texture: TextureRef::Media(canvas.reference),
+        route: Route::A,
+        blend: BlendMode::Normal,
+    });
+
+    canvas
+        .backend
+        .compose(FrameRequest { index: 0 }, &scene)
+        .ok()?;
+
+    // Scaled by the card on the way back rather than averaged here: this is
+    // the same path a preview takes, so what a tile shows is what a watcher
+    // would see of the same frame.
+    let mut pixels = Vec::new();
+    canvas.backend.read_scaled(TILE, &mut pixels).ok()?;
+    DecodedImage::new(pixels, TILE)
+}
+
+/// What each effect is set to for its own tile, and why.
+///
+/// **None of this reaches a show.** A manifest's defaults are neutral by
+/// promise; these are the settings that make the difference visible in a
+/// picture 320 pixels wide, picked by eye and kept here so that the next
+/// person can see what was picked rather than infer it from a PNG.
+fn settings(type_id: &str, mask: MediaItemId) -> ParameterMap {
+    let number = |key: &str, value: f64| (key.to_owned(), ParameterValue::Float(value));
+    let flag = |key: &str, value: bool| (key.to_owned(), ParameterValue::Bool(value));
+    let choice =
+        |key: &str, value: &str| (key.to_owned(), ParameterValue::Choice(value.to_owned()));
+
+    match type_id {
+        // Far enough from neutral to read at tile size, not so far that the
+        // bars stop being bars.
+        "ovs.colour_correct" => ParameterMap::from([
+            number("contrast", 1.5),
+            number("saturation", 2.2),
+            // Version two's own two controls. A version one manifest has no
+            // such parameters and simply ignores them.
+            number("temperature_k", 3000.0),
+        ]),
+        // The house orange, fully mixed, brightness kept: the tile has to show
+        // a tint rather than a wash.
+        "ovs.tint" => ParameterMap::from([
+            (
+                "colour".to_owned(),
+                ParameterValue::Color([1.0, 0.6, 0.0, 1.0]),
+            ),
+            number("amount", 1.0),
+            flag("preserve_luma", true),
+        ]),
+        // Six blocks across the tile: fewer and it is a flat field, more and it
+        // is the picture again.
+        "ovs.pixelate" => ParameterMap::from([number("block_px", 56.0)]),
+        // Enough to soften the lettering without losing the bars.
+        "ovs.blur" => ParameterMap::from([number("radius_px", 28.0), number("amount", 1.0)]),
+        "ovs.invert" => ParameterMap::from([flag("on", true)]),
+        // A wide frame off the sides and a narrow one off the top, so the tile
+        // shows both that it cuts and that the cut is transparent.
+        "ovs.crop" => ParameterMap::from([
+            number("left_px", 260.0),
+            number("right_px", 260.0),
+            number("top_px", 120.0),
+            number("bottom_px", 120.0),
+        ]),
+        // Hard on, so the tear and the noise are both in the frame.
+        "ovs.tv_glitch" => ParameterMap::from([number("amount", 0.85)]),
+        // The ellipse, multiplied in: the shape of the mask is the point.
+        "ovs.mask" => ParameterMap::from([
+            ("image".to_owned(), ParameterValue::Text(mask.to_string())),
+            choice("mode", "multiply"),
+            number("amount", 1.0),
+        ]),
+        // One axis only. Both at once is a kaleidoscope and reads as a
+        // different effect at this size.
+        "ovs.mirror" => ParameterMap::from([choice("horizontal", "left")]),
+        // Magenta, because it is the one hue the pattern has least of.
+        "ovs.colorize" => ParameterMap::from([
+            number("hue", 310.0),
+            number("saturation", 1.0),
+            number("amount", 1.0),
+        ]),
+        // Red up and blue down: a cast that cannot be mistaken for a grade.
+        "ovs.rgb_correct" => ParameterMap::from([number("gain_r", 1.8), number("gain_b", 0.45)]),
+        // Far enough apart to see three edges where there was one.
+        "ovs.rgb_split" => {
+            ParameterMap::from([number("offset_px", 28.0), number("angle_deg", 0.0)])
+        }
+        // An effect nobody has written a setting for yet draws at its defaults,
+        // which is honest: its tile is the reference picture, and that says
+        // "this one is neutral until you touch it".
+        _ => ParameterMap::new(),
+    }
+}
+
+/// A picture as the bytes of a PNG.
+fn encoded(picture: &DecodedImage) -> Option<Vec<u8>> {
+    let size = picture.size();
+    let buffer = image::RgbaImage::from_raw(size.width, size.height, picture.pixels().to_vec())?;
+    let mut bytes = Vec::new();
+    image::DynamicImage::ImageRgba8(buffer)
+        .write_to(
+            &mut std::io::Cursor::new(&mut bytes),
+            image::ImageFormat::Png,
+        )
+        .ok()?;
+    Some(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What to do when a picture is not what this build draws.
+    const RUN_IT: &str = "run `cargo run -p ovs-renderer --bin ovs-effect-pictures`";
+
+    #[test]
+    fn every_published_effect_has_a_committed_picture() {
+        // The half that runs everywhere, CI included: a client resolves a tile
+        // by name, so a published effect with no file is a tile that falls back
+        // to its own name for ever without anybody noticing.
+        for manifest in &ovs_types::config::EFFECTS {
+            let named = picture_name(manifest.type_id, manifest.version);
+            let path = pictures_directory().join(&named);
+            let opened = image::open(&path)
+                .unwrap_or_else(|error| panic!("{}: {error} — {RUN_IT}", path.display()));
+            assert_eq!(
+                (opened.width(), opened.height()),
+                (TILE.width, TILE.height),
+                "{named} is committed at another size — {RUN_IT}"
+            );
+        }
+    }
+
+    #[test]
+    fn nothing_is_committed_that_no_effect_asks_for() {
+        let wanted: std::collections::BTreeSet<String> = ovs_types::config::EFFECTS
+            .iter()
+            .map(|manifest| picture_name(manifest.type_id, manifest.version))
+            .collect();
+
+        let directory = pictures_directory();
+        let listed = std::fs::read_dir(&directory)
+            .unwrap_or_else(|error| panic!("{}: {error}", directory.display()));
+        for entry in listed {
+            let found = entry.expect("a directory entry").file_name();
+            let found = found.to_string_lossy().to_string();
+            assert!(
+                wanted.contains(&found),
+                "{found} is committed and nothing publishes it — delete it"
+            );
+        }
+    }
+
+    #[test]
+    fn each_picture_is_the_effect_rather_than_the_reference() {
+        // **The half that needs a card**, so it stands aside on a machine
+        // without one, as every GPU test in this crate does. What it holds
+        // down is the thing a committed picture cannot say for itself: that
+        // each tile is its own effect at the setting written above, and not
+        // the backdrop they are all drawn on.
+        // No `one_gpu_at_a_time` here: that lock lives in the library's own
+        // tests and is private to them, and it would not help anyway — a bin's
+        // tests are a separate process, so the two could only be serialised by
+        // something outside both. One more small offscreen device on a card
+        // with eight gigabytes is a cost this can carry.
+        let Ok(mut canvas) = canvas() else {
+            return;
+        };
+
+        let mut seen: Vec<(String, Vec<u8>)> = Vec::new();
+        for manifest in &ovs_types::config::EFFECTS {
+            let named = picture_name(manifest.type_id, manifest.version);
+            let drawn = picture_of(&mut canvas, manifest.type_id, manifest.version)
+                .unwrap_or_else(|| panic!("{named} cannot be drawn"));
+            let committed = image::open(pictures_directory().join(&named))
+                .unwrap_or_else(|error| panic!("{named}: {error} — {RUN_IT}"))
+                .to_rgba8()
+                .into_raw();
+
+            // Two levels, for the same reason the generators' pictures allow
+            // it: a card's scaler and a shader's arithmetic are not obliged to
+            // agree to the last bit between drivers.
+            let worst = committed
+                .iter()
+                .zip(drawn.pixels())
+                .map(|(committed, drawn)| committed.abs_diff(*drawn))
+                .max()
+                .unwrap_or(0);
+            assert!(
+                worst <= 2,
+                "{named} draws something else than the committed picture, out by {worst} — {RUN_IT}"
+            );
+
+            seen.push((named, drawn.pixels().to_vec()));
+        }
+
+        // And no two of them are the same picture, which is what would happen
+        // if a setting above stopped reaching its effect.
+        for (at, (named, pixels)) in seen.iter().enumerate() {
+            for (other_name, other) in seen.iter().skip(at + 1) {
+                assert_ne!(
+                    pixels, other,
+                    "{named} and {other_name} are the same picture"
+                );
+            }
+        }
+    }
+}

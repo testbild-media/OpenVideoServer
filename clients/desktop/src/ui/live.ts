@@ -2279,7 +2279,7 @@ export class LivePanel {
       return;
     }
     if (slot.source.kind === 'generator') {
-      paintGeneratorPicture(target, slot.source, this.#sourceName(slot), 'pad-generator');
+      paintModulePicture(target, 'generators', slot.source, this.#sourceName(slot), 'pad-generator');
       return;
     }
     if (slot.source.kind === 'ndi') {
@@ -2661,7 +2661,7 @@ export class LivePanel {
     node.draggable = true;
 
     const picture = make('div', 'browser-tile-picture');
-    paintGeneratorPicture(picture, tile, tile.name, 'tile-mark');
+    paintModulePicture(picture, 'generators', tile, tile.name, 'tile-mark');
     node.append(picture, make('span', 'browser-tile-name', tile.name));
     node.title = `${tile.name} — ${tile.description}${NEWLINE}Drag onto a pad to put it there.`;
 
@@ -2771,8 +2771,18 @@ export class LivePanel {
     const node = make('div', 'browser-tile effect-tile');
     node.draggable = true;
 
+    // **The same reference picture with the effect on it**, drawn on a card by
+    // `cargo run -p ovs-renderer --bin ovs-effect-pictures` and shipped with
+    // this client. An effect draws whatever is under it, so a tile can only be
+    // "this effect, on something" — and the something is the house's own
+    // service pattern, which has colour, a black level, hard edges and
+    // lettering in one picture.
+    //
+    // Each is drawn at a setting that shows what the effect does rather than
+    // at its published defaults, because every effect is neutral at those: a
+    // tile drawn there would be the same picture fourteen times.
     const picture = make('div', 'browser-tile-picture');
-    picture.append(make('span', 'tile-mark', tile.name));
+    paintModulePicture(picture, 'effects', tile, tile.name, 'tile-mark');
     node.append(picture, make('span', 'browser-tile-name', tile.name));
     node.title =
       `${tile.name} — ${tile.description}${NEWLINE}` +
@@ -5049,26 +5059,27 @@ function paintNdiMark(target: HTMLElement): void {
 }
 
 /**
- * Paints what a generator draws into a box, from a file shipped with this
- * client.
+ * Paints what a published module looks like into a box, from a file shipped
+ * with this client.
  *
  * **A committed picture rather than a request or a drawing.** What a gradient
  * looks like is the renderer's business, so a version drawn here in TypeScript
  * would eventually be a picture of something the wall does not show; and
  * asking the server for one would have a show machine drawing ten
  * compositions because somebody opened a list of names. So the renderer draws
- * them once — `cargo run -p ovs-renderer --bin ovs-generator-pictures` — and
- * they travel with the client. A Rust test fails if one stops matching what
- * its generator draws.
+ * them once — `ovs-generator-pictures` and `ovs-effect-pictures` — and they
+ * travel with the client. A Rust test fails if one stops matching what its
+ * module draws.
  *
  * By type *and version*, because a version is a different picture on purpose.
- * A server offering a generator this client has no file for falls back to the
+ * A server offering a module this client has no file for falls back to the
  * name on a plain field, which is the tile these had before the pictures
- * existed; the box remembers which source that was, so a repaint does not
+ * existed; the box remembers which module that was, so a repaint does not
  * fetch the missing file again.
  */
-function paintGeneratorPicture(
+function paintModulePicture(
   target: HTMLElement,
+  kind: 'generators' | 'effects',
   source: { typeId: string; version: number },
   name: string,
   markClass: string,
@@ -5076,7 +5087,7 @@ function paintGeneratorPicture(
   // `encodeURIComponent` because a type id is whatever the server says it is,
   // and this is about to be part of a path into the client's own bundle. A
   // published id is `ovs.noise`, which it leaves alone.
-  const src = `../assets/generators/${encodeURIComponent(source.typeId)}.v${source.version}.png`;
+  const src = `../assets/${kind}/${encodeURIComponent(source.typeId)}.v${source.version}.png`;
   if (target.dataset.noPictureFor === src) {
     return;
   }
