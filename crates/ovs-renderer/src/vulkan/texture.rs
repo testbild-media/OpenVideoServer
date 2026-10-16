@@ -356,6 +356,25 @@ pub struct Texture {
     staging: vk::Buffer,
     staging_memory: vk::DeviceMemory,
     staging_mapped: *mut u8,
+    /// How many bytes the mapping above really covers.
+    ///
+    /// **The guard the unsafe copy in [`stage_plane`](Self::stage_plane)
+    /// needs.** A texture the card draws into gets a one-byte staging buffer,
+    /// because nothing is ever pushed through it — but its planes are laid out
+    /// at the picture's full size, as every texture's are. So the plane check
+    /// alone passed, and eight megabytes went into one byte.
+    ///
+    /// Found on the show machine on 2026-10-16: switching a layer from a strobe
+    /// drawn on the card to a solid colour uploaded from the processor
+    /// segfaulted the renderer every time, in `memcpy`, and took the wall with
+    /// it eighteen times before the owner reported it.
+    staging_bytes: u64,
+    /// Whether this texture was made for the card to draw into.
+    ///
+    /// Such a texture cannot take an upload at all. Kept as its own fact rather
+    /// than inferred from the staging size, because "one byte" is an
+    /// implementation detail of that decision and this is the decision.
+    drawn_into: bool,
     width: u32,
     height: u32,
 }
@@ -511,6 +530,8 @@ impl Texture {
             staging,
             staging_memory,
             staging_mapped,
+            staging_bytes,
+            drawn_into,
             width,
             height,
         })
@@ -858,6 +879,16 @@ impl Texture {
         self.stage_plane(2, chroma.cr())
     }
 
+    /// Whether a picture can be pushed through this texture at all.
+    ///
+    /// False for one the card draws into: it has no staging buffer, by design.
+    /// A caller holding such a texture for a key that now wants an uploaded
+    /// picture has to build a new one rather than stage into this.
+    #[must_use]
+    pub const fn takes_uploads(&self) -> bool {
+        !self.drawn_into
+    }
+
     /// Whether `bytes` is exactly what plane `index` holds.
     fn fits(&self, index: usize, bytes: &[u8]) -> bool {
         self.planes
@@ -879,11 +910,29 @@ impl Texture {
                 result: vk::Result::ERROR_VALIDATION_FAILED_EXT,
             });
         }
+        // **What the unsafe block below actually needs**, and what nothing
+        // checked until 2026-10-16. The plane check above compares the bytes
+        // offered with the plane's own size, and for a texture the card draws
+        // into those agree while the mapping is one byte long: the planes are
+        // laid out at the picture's full size whatever the staging buffer is.
+        // So a layer switching from a generator drawn on the card to a picture
+        // uploaded from the processor copied eight megabytes into one byte and
+        // took the renderer down with it.
+        if plane.offset.saturating_add(plane.bytes) > self.staging_bytes {
+            return Err(VulkanError::Call {
+                operation: if self.drawn_into {
+                    "an upload into a texture the card draws into"
+                } else {
+                    "a texture upload runs past its staging buffer"
+                },
+                result: vk::Result::ERROR_VALIDATION_FAILED_EXT,
+            });
+        }
 
-        // SAFETY: the mapping covers `staging_bytes`, and this plane's offset
-        // and length were laid out inside it when the texture was made. The
-        // source and destination cannot overlap: one is host memory the caller
-        // owns and the other is a Vulkan mapping.
+        // SAFETY: the mapping covers `staging_bytes`, and the check above holds
+        // this plane's offset and length inside it. The source and destination
+        // cannot overlap: one is host memory the caller owns and the other is a
+        // Vulkan mapping.
         unsafe {
             std::ptr::copy_nonoverlapping(
                 bytes.as_ptr(),
@@ -1379,5 +1428,63 @@ mod tests {
     #[test]
     fn the_white_pixel_is_the_identity_for_a_multiply() {
         assert_eq!(white_pixel(), [255, 255, 255, 255]);
+    }
+
+    /// A texture the card draws into refuses an upload instead of taking it.
+    ///
+    /// **The crash this is for.** The owner, 2026-10-16: "beim schalten von
+    /// Slot 1 (Strobe) auf Slot 2 (Solid) schmiert der renderer komplett weg".
+    /// A strobe is drawn on the card, so its texture has a one-byte staging
+    /// buffer; a solid colour arrives as an uploaded picture, under the same
+    /// key, at the same size and layout. The size check passed -- the planes
+    /// are laid out at the picture's full size whatever the staging buffer is
+    /// -- and eight megabytes went into one byte, in `memcpy`, taking the wall
+    /// down eighteen times.
+    ///
+    /// Before the guard this test segfaulted the test runner rather than
+    /// failing, which is the other reason it is written against the smallest
+    /// texture that shows it: a crash in a test is a crash in every test.
+    #[test]
+    fn a_texture_the_card_draws_into_refuses_an_upload() {
+        let _gpu = crate::vulkan::one_gpu_at_a_time();
+        let Some(context) = context() else {
+            return;
+        };
+
+        let mut drawn = Texture::drawable(&context, 16, 16).expect("a drawable texture");
+        assert!(
+            !drawn.takes_uploads(),
+            "a texture the card draws into has no staging buffer to upload through"
+        );
+
+        // Exactly the right number of bytes for the picture, which is what made
+        // this dangerous: every check that existed said yes.
+        let pixels = vec![0_u8; 16 * 16 * 4];
+        let refused = drawn.stage(&pixels);
+        assert!(
+            refused.is_err(),
+            "staging into a card-drawn texture must be refused, not copied"
+        );
+
+        drawn.destroy(context.device());
+    }
+
+    /// And an ordinary texture still takes one, so the guard is not a wall.
+    #[test]
+    fn a_texture_the_processor_fills_still_takes_its_picture() {
+        let _gpu = crate::vulkan::one_gpu_at_a_time();
+        let Some(context) = context() else {
+            return;
+        };
+
+        let mut texture = Texture::new(&context, 16, 16).expect("a staged texture");
+        assert!(texture.takes_uploads());
+        texture
+            .stage(&[0x7f_u8; 16 * 16 * 4])
+            .expect("a picture of the right size is staged");
+        // And one of the wrong size is still refused, as it always was.
+        assert!(texture.stage(&[0_u8; 8]).is_err());
+
+        texture.destroy(context.device());
     }
 }

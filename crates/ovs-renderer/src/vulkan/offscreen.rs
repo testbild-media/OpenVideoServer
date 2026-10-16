@@ -4044,7 +4044,22 @@ impl OffscreenTarget {
         match self.textures.get_mut(&key) {
             // The same shape as last frame, which is what a playing clip is:
             // the texture is kept and only its bytes change.
-            Some(bound) if bound.texture.size() == wanted && bound.texture.layout() == layout => {
+            //
+            // **`takes_uploads` is the third condition and the one that was
+            // missing.** A generator drawn on the card leaves a texture of
+            // exactly this size and layout under exactly this key, and that
+            // texture has no staging buffer to push a picture through. A layer
+            // switching from a card-drawn strobe to a solid colour uploaded
+            // from the processor therefore matched here, staged into a mapping
+            // one byte long, and killed the renderer — eighteen times on the
+            // show machine on 2026-10-16 before it was reported. It falls
+            // through to the rebuild below instead, which is what a change of
+            // size or layout has always done.
+            Some(bound)
+                if bound.texture.size() == wanted
+                    && bound.texture.layout() == layout
+                    && bound.texture.takes_uploads() =>
+            {
                 bound.texture.stage_image(image)?;
                 bound.dirty = true;
                 return Ok(());
