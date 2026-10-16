@@ -1014,12 +1014,23 @@ impl RenderLoop {
             // master speed -- for the reason the test pattern's own clock is
             // free: a glitch is a look, not a cue.
             //
-            // The wall clock, folded into a day so that the float keeps its
-            // precision. At a day's worth of seconds an f32 still resolves
-            // about a hundredth of a second, which is finer than anything this
-            // drives; a float carrying seconds since 1970 would be quantised
-            // to several seconds and nothing would move at all.
-            self.compositor.set_effect_time(effect_seconds());
+            // **Counted in frames the wall has shown, not read off the system
+            // clock.** This used to be `effect_seconds()`, the wall clock
+            // folded into a day, and for a glitch that was invisible. An effect
+            // that flashes at a rate an operator sets is a different matter:
+            // sampling a wall clock once a frame puts the edges of the flash
+            // wherever the frame happens to land, so ten hertz on a 59.94 wall
+            // comes out as some flashes three frames long and some four. The
+            // test pattern was corrected for exactly this on 2026-10-16 and the
+            // owner was explicit about the rule — free-running means bound to
+            // the output's own rate and to nothing else.
+            //
+            // Still folded into a day, for the same reason as before: an `f32`
+            // has twenty-four bits of mantissa, and a day's worth of seconds
+            // still resolves about a hundredth of a second.
+            let shown = self.shown_on(&state);
+            self.compositor
+                .set_effect_time(folded_into_a_day(pattern_seconds(shown.frames, shown.rate)));
 
             let compose_began = Instant::now();
             match self.compositor.compose(FrameRequest { index }, &self.scene) {
@@ -2479,22 +2490,22 @@ fn pattern_seconds(frames: u64, rate: FrameRate) -> f64 {
     frames as f64 / hertz
 }
 
-/// The clock an effect pass reads, in seconds within a day.
+/// Narrows a running count of seconds to the `f32` an effect pass reads.
 ///
 /// Folded into a day on purpose. An `f32` has twenty-four bits of mantissa, so
-/// seconds since 1970 -- about 1.8 billion of them -- would quantise to
-/// hundreds of seconds and every moving effect would stand perfectly still. A
-/// day's worth still resolves about a hundredth of a second.
+/// a number that climbs without limit would quantise as it grew and every
+/// moving effect would gradually stand still -- a renderer left up for a week
+/// would resolve about a tenth of a second, and one left up for a month worse
+/// than that. A day's worth still resolves about a hundredth of a second,
+/// which is finer than a frame.
 ///
-/// The fold shows once a day as a jump in whatever is moving. In a glitch that
-/// is indistinguishable from the effect, and nothing else reads this.
-fn effect_seconds() -> f32 {
-    let since_epoch = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    const A_DAY: u64 = 24 * 60 * 60;
-    let seconds = since_epoch.as_secs() % A_DAY;
-    seconds as f32 + since_epoch.subsec_nanos() as f32 / 1_000_000_000.0
+/// The fold shows once a day, as one jump in whatever is moving. In a glitch
+/// it is indistinguishable from the effect; in a flash it is one cycle of the
+/// wrong length, once a day, which is the cheapest of the ways this could be
+/// wrong.
+fn folded_into_a_day(seconds: f64) -> f32 {
+    const A_DAY: f64 = 24.0 * 60.0 * 60.0;
+    (seconds.rem_euclid(A_DAY)) as f32
 }
 
 #[cfg(test)]
@@ -2512,6 +2523,58 @@ mod tests {
 
     fn mode() -> DisplayMode {
         DisplayMode::new(SizePx::new(1920, 1080), FrameRate::FPS_60)
+    }
+
+    /// The clock an effect reads comes off the frames, and keeps its precision.
+    ///
+    /// Both halves matter. Counting frames is what makes a flash land on frame
+    /// boundaries instead of wherever a wall clock was when the frame was
+    /// drawn; folding into a day is what stops an `f32` losing the fractions
+    /// once a renderer has been up for a week.
+    #[test]
+    fn the_effect_clock_is_counted_in_frames_and_folded_into_a_day() {
+        let rate = FrameRate::FPS_59_94;
+
+        // A second of a 59.94 wall is 59.94 frames, and the clock says so.
+        let a_second = pattern_seconds(60, rate);
+        assert!(
+            (a_second - 1.001).abs() < 1e-9,
+            "sixty frames of 59.94 is 1.001 seconds, got {a_second}"
+        );
+
+        // Ten hertz against that: every flash is the same number of frames
+        // long, which is the whole reason this is counted rather than read.
+        let flashes: Vec<u64> = (0..120)
+            .map(|frame| (pattern_seconds(frame, rate) * 10.0) as u64)
+            .collect();
+        let mut lengths = std::collections::BTreeSet::new();
+        let mut run = 1;
+        for pair in flashes.windows(2) {
+            if pair[0] == pair[1] {
+                run += 1;
+            } else {
+                lengths.insert(run);
+                run = 1;
+            }
+        }
+        assert!(
+            lengths.len() <= 2,
+            "a flash should be one of at most two lengths, got {lengths:?}"
+        );
+
+        // And the fold: a day comes round to nothing, and nothing is negative.
+        const A_DAY: f64 = 24.0 * 60.0 * 60.0;
+        assert_eq!(folded_into_a_day(0.0), 0.0);
+        assert_eq!(folded_into_a_day(A_DAY), 0.0, "a day comes round");
+        assert!((folded_into_a_day(A_DAY + 1.5) - 1.5).abs() < 1e-3);
+        assert!(
+            folded_into_a_day(-1.0) >= 0.0,
+            "never negative, whatever it is handed"
+        );
+        // A week up, and a hundredth of a second is still a different number
+        // from the one beside it -- which is what the fold buys.
+        let late = folded_into_a_day(7.0 * A_DAY + 1_000.0);
+        assert_ne!(late, folded_into_a_day(7.0 * A_DAY + 1_000.01));
     }
 
     /// A factory that makes headless compositions of whatever size is asked.
