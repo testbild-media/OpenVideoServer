@@ -115,31 +115,97 @@ for output in telemetry["outputs"]:
         "the output is not active",
     )
 
-show = fetched("/shows/" + telemetry["current_show"])
-body = show.get("show", show)
-rate = body["composition"]["render_rate"]
-composed = rate["numerator"] / rate["denominator"]
-for output in telemetry["outputs"]:
-    refresh = output["refresh"]
-    wanted = refresh["numerator"] / refresh["denominator"]
+body = {}
+if telemetry.get("current_show"):
+    show = fetched("/shows/" + telemetry["current_show"])
+    body = show.get("show", show)
+    rate = body["composition"]["render_rate"]
+    composed = rate["numerator"] / rate["denominator"]
+    for output in telemetry["outputs"]:
+        refresh = output["refresh"]
+        wanted = refresh["numerator"] / refresh["denominator"]
+        says(
+            abs(composed - wanted) < 0.001,
+            "composition %.4f vs %s %.4f" % (composed, output["connector"], wanted),
+            "a composition that does not match the output loses a frame now and then",
+        )
+
+# The panel in the hall is not the panel on the bench, and a driver builds no
+# mode a panel did not advertise. A show carrying a rate this wall does not
+# offer is a dark wall, and it looks exactly like a broken renderer.
+print("== what this panel actually offers ==")
+connectors = {
+    (c["gpu_pci_address"], c["connector"]): c
+    for c in fetched("/server/capabilities")["connectors"]
+}
+for connector in connectors.values():
+    if not connector.get("connected"):
+        continue
+    sizes = {}
+    for mode in connector.get("modes", []):
+        key = "%dx%d" % (mode["size"]["width"], mode["size"]["height"])
+        sizes.setdefault(key, []).append(mode["refresh_millihertz"] / 1000.0)
+    print(
+        "  %s on %s (%s)"
+        % (connector.get("model") or "unnamed panel", connector["connector"], connector["role"])
+    )
+    for size in sorted(sizes):
+        print("      %-12s %s" % (size, ", ".join("%.3f" % r for r in sorted(sizes[size]))))
+
+for output in body.get("outputs", []) or []:
+    identity = output.get("identity", {})
+    connector = connectors.get((identity.get("gpu_pci_address"), identity.get("connector")))
+    mode = output["mode"]
+    asked = mode["refresh"]["numerator"] / mode["refresh"]["denominator"]
+    wanted = "%dx%d @ %.3f" % (mode["size"]["width"], mode["size"]["height"], asked)
+    if connector is None or not connector.get("connected"):
+        says(
+            False,
+            "%s wants %s on %s, which has nothing plugged in"
+            % (output["name"], wanted, identity.get("connector")),
+            "plug the wall in, or point this output at the socket it is on",
+        )
+        continue
+    offered = any(
+        mode["size"]["width"] == offer["size"]["width"]
+        and mode["size"]["height"] == offer["size"]["height"]
+        and abs(offer["refresh_millihertz"] - asked * 1000.0) < 2.0
+        for offer in connector.get("modes", [])
+    )
     says(
-        abs(composed - wanted) < 0.001,
-        "composition %.4f vs %s %.4f" % (composed, output["connector"], wanted),
-        "a composition that does not match the output loses a frame now and then",
+        offered,
+        "%s wants %s, and %s offers it" % (output["name"], wanted, connector["connector"]),
+        "this panel does not build that mode -- pick one listed above, in the client's "
+        "output settings, and set the composition to the same rate",
     )
 
 print("== a real picture ==")
+says(status["previews_enabled"], "previews are on", "the client will show no pictures")
 shots = []
+refused = ""
 for index in range(2):
     if index:
         time.sleep(1.5)
-    shots.append(hashlib.sha256(fetched("/preview/composition", raw=True)).hexdigest())
-says(
-    shots[0] != shots[1],
-    "the composition preview is moving",
-    "a still preview means a black or frozen show -- check the layers and the master dimmer",
-)
-says(status["previews_enabled"], "previews are on", "the client will show no pictures")
+    try:
+        shots.append(hashlib.sha256(fetched("/preview/composition", raw=True)).hexdigest())
+    except Exception as trouble:  # noqa: BLE001 - a refusal is a finding, not a crash
+        refused = str(trouble)
+        break
+if refused:
+    # Never a traceback here. This runs on a get-in, under time pressure, and a
+    # check that dies on the one thing it is meant to report is worse than none.
+    says(
+        False,
+        "the composition preview did not come: %s" % refused,
+        "with previews on, this means the renderer has not sent one -- "
+        "check that it is running and that a show is loaded",
+    )
+elif len(shots) == 2:
+    says(
+        shots[0] != shots[1],
+        "the composition preview is moving",
+        "a still preview means a black or frozen show -- check the layers and the master dimmer",
+    )
 
 print("== room to run ==")
 says(telemetry["decode_errors"] == 0, "decode errors: %d" % telemetry["decode_errors"])
