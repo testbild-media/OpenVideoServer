@@ -30,6 +30,7 @@ that the transport is enabled.
 
 import hashlib
 import json
+import subprocess
 import sys
 import time
 import urllib.request
@@ -124,9 +125,13 @@ if telemetry.get("current_show"):
     for output in telemetry["outputs"]:
         refresh = output["refresh"]
         wanted = refresh["numerator"] / refresh["denominator"]
+        # A network output has no connector -- that field belongs to a panel on
+        # a socket, and an NDI stream is on neither. Name it by what it is
+        # called instead of assuming every output is a piece of glass.
+        where = output.get("connector") or output["name"]
         says(
             abs(composed - wanted) < 0.001,
-            "composition %.4f vs %s %.4f" % (composed, output["connector"], wanted),
+            "composition %.4f vs %s %.4f" % (composed, where, wanted),
             "a composition that does not match the output loses a frame now and then",
         )
 
@@ -154,8 +159,24 @@ for connector in connectors.values():
 
 for output in body.get("outputs", []) or []:
     identity = output.get("identity", {})
-    connector = connectors.get((identity.get("gpu_pci_address"), identity.get("connector")))
     mode = output["mode"]
+    # An output that names no socket is on the network, not on glass. It has no
+    # panel to advertise modes, so there is nothing here to check and saying
+    # "nothing plugged in" about an NDI stream would be a false alarm on the
+    # page whose whole job is to be believed.
+    if not identity.get("connector"):
+        print(
+            "  %-8s %s is on the network, not a socket (%dx%d @ %.3f)"
+            % (
+                "--",
+                output["name"],
+                mode["size"]["width"],
+                mode["size"]["height"],
+                mode["refresh"]["numerator"] / mode["refresh"]["denominator"],
+            )
+        )
+        continue
+    connector = connectors.get((identity.get("gpu_pci_address"), identity.get("connector")))
     asked = mode["refresh"]["numerator"] / mode["refresh"]["denominator"]
     wanted = "%dx%d @ %.3f" % (mode["size"]["width"], mode["size"]["height"], asked)
     if connector is None or not connector.get("connected"):
@@ -209,6 +230,40 @@ elif len(shots) == 2:
         "the composition preview is moving",
         "a still preview means a black or frozen show -- check the layers and the master dimmer",
     )
+
+# NDI on Linux discovers through Avahi: libndi is linked against
+# libavahi-client, which is only a way of talking to a daemon over D-Bus. On
+# 2026-10-16 the daemon was not installed on the show machine, and NDI was dead
+# in both directions while every other number on this page was green -- the
+# renderer could not even see the output it was publishing itself.
+print("== NDI discovery ==")
+avahi = subprocess.run(
+    ["systemctl", "is-active", "avahi-daemon"], capture_output=True, text=True, check=False
+)
+says(
+    avahi.stdout.strip() == "active",
+    "avahi-daemon is %s" % (avahi.stdout.strip() or "not installed"),
+    "without it NDI finds nothing and nothing finds us: sudo apt install avahi-daemon",
+)
+
+# What the renderer last saw. Its finder runs with show_local_sources on, so
+# our own published output should be in this list -- and if we are publishing
+# one and it is not, mDNS is the thing to look at, not the network.
+seen = subprocess.run(
+    [
+        "sudo", "-n", "journalctl", "-u", "ovs-renderer", "-b", "--no-pager",
+    ],
+    capture_output=True,
+    text=True,
+    check=False,
+)
+lines = [line for line in seen.stdout.splitlines() if "NDI sources on this network" in line]
+if not seen.stdout:
+    print("           (cannot read the renderer's log here; run with sudo to see the sources)")
+elif lines:
+    print("           last seen: %s" % lines[-1].split("names=", 1)[-1])
+else:
+    print("           the renderer has not logged a source list this boot")
 
 print("== room to run ==")
 says(telemetry["decode_errors"] == 0, "decode errors: %d" % telemetry["decode_errors"])
