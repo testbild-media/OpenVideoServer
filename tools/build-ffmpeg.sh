@@ -560,9 +560,22 @@ else
 fi
 readonly prefix
 
+# **Retried, and `--retry-all-errors` rather than plain `--retry`.** A release
+# build failed on 2026-10-16 with `curl: (6) Could not resolve host:
+# ffmpeg.org` — a runner whose DNS blinked — and plain `--retry` would not have
+# helped, because it covers transient HTTP codes and timeouts and treats a
+# resolution failure as final. This is the flag that covers the failure that
+# actually happened.
+#
+# Retrying is free of risk here: both downloads are pinned by sha256 below, so
+# a truncated or substituted file is refused whether it arrived first time or
+# fifth.
+readonly FETCH="--retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 20"
+
 tarball="$work/ffmpeg-$FFMPEG_VERSION.tar.xz"
 echo "fetching FFmpeg $FFMPEG_VERSION"
-curl -fsSL -o "$tarball" "https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz"
+# shellcheck disable=SC2086 # deliberately word-split: these are several flags
+curl -fsSL $FETCH -o "$tarball" "https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz"
 
 echo "$FFMPEG_SHA256  $tarball" | sha256sum -c - >/dev/null || {
   echo "the tarball does not match the hash this script pins" >&2
@@ -578,7 +591,8 @@ source_dir="$work/ffmpeg-$FFMPEG_VERSION"
 if [ "$profile" = server ]; then
   headers="$work/nv-codec-headers-$NVCODEC_VERSION.tar.gz"
   echo "fetching nv-codec-headers $NVCODEC_VERSION"
-  curl -fsSL -o "$headers" \
+  # shellcheck disable=SC2086 # deliberately word-split: these are several flags
+  curl -fsSL $FETCH -o "$headers" \
     "https://github.com/FFmpeg/nv-codec-headers/archive/refs/tags/$NVCODEC_VERSION.tar.gz"
 
   echo "$NVCODEC_SHA256  $headers" | sha256sum -c - > /dev/null || {
