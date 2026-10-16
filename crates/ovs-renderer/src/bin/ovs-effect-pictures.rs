@@ -191,7 +191,7 @@ fn mask_picture() -> Option<DecodedImage> {
 /// One effect's tile-sized picture, at the setting that shows what it does.
 fn picture_of(canvas: &mut Canvas, type_id: &str, version: u32) -> Option<DecodedImage> {
     let instance = EffectInstance {
-        parameters: settings(type_id, canvas.mask),
+        parameters: settings(type_id, version, canvas.mask),
         ..EffectInstance::new(type_id, version)
     };
 
@@ -236,22 +236,30 @@ fn picture_of(canvas: &mut Canvas, type_id: &str, version: u32) -> Option<Decode
 /// promise; these are the settings that make the difference visible in a
 /// picture 320 pixels wide, picked by eye and kept here so that the next
 /// person can see what was picked rather than infer it from a PNG.
-fn settings(type_id: &str, mask: MediaItemId) -> ParameterMap {
+fn settings(type_id: &str, version: u32, mask: MediaItemId) -> ParameterMap {
     let number = |key: &str, value: f64| (key.to_owned(), ParameterValue::Float(value));
     let flag = |key: &str, value: bool| (key.to_owned(), ParameterValue::Bool(value));
     let choice =
         |key: &str, value: &str| (key.to_owned(), ParameterValue::Choice(value.to_owned()));
 
     match type_id {
-        // Far enough from neutral to read at tile size, not so far that the
-        // bars stop being bars.
-        "ovs.colour_correct" => ParameterMap::from([
-            number("contrast", 1.5),
-            number("saturation", 2.2),
-            // Version two's own two controls. A version one manifest has no
-            // such parameters and simply ignores them.
-            number("temperature_k", 3000.0),
+        // **The colour taken out and the contrast pushed**, rather than a
+        // grade in the same direction the test card already goes: a more
+        // saturated test card looks like a test card, and the tile has to say
+        // "this one changes the grade".
+        //
+        // And version two is shown by what makes it version two — its white
+        // point, hard over to the warm end. The two versions differ by that
+        // control and by nothing else, so the two tiles should differ by it
+        // too; at 2600 K against none, they do.
+        "ovs.colour_correct" if version >= 2 => ParameterMap::from([
+            number("contrast", 1.6),
+            number("saturation", 0.3),
+            number("temperature_k", 2600.0),
         ]),
+        "ovs.colour_correct" => {
+            ParameterMap::from([number("contrast", 1.6), number("saturation", 0.3)])
+        }
         // The house orange, fully mixed, brightness kept: the tile has to show
         // a tint rather than a wash.
         "ovs.tint" => ParameterMap::from([
@@ -295,9 +303,11 @@ fn settings(type_id: &str, mask: MediaItemId) -> ParameterMap {
         ]),
         // Red up and blue down: a cast that cannot be mistaken for a grade.
         "ovs.rgb_correct" => ParameterMap::from([number("gain_r", 1.8), number("gain_b", 0.45)]),
-        // Far enough apart to see three edges where there was one.
+        // Far enough apart to see three edges where there was one. At a
+        // sixth of the size, twenty-eight pixels of separation came back as
+        // four and read as a soft edge rather than as a split.
         "ovs.rgb_split" => {
-            ParameterMap::from([number("offset_px", 28.0), number("angle_deg", 0.0)])
+            ParameterMap::from([number("offset_px", 72.0), number("angle_deg", 0.0)])
         }
         // An effect nobody has written a setting for yet draws at its defaults,
         // which is honest: its tile is the reference picture, and that says
