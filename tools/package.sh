@@ -486,8 +486,23 @@ fi
 # 2026-09-27; the old reference machine had polkitd only because something else
 # had dragged it in, which is how this went unnoticed.
 #
+# `avahi-daemon` is the third, and it is the same trap one level further out.
+# `libndi` is linked against `libavahi-client3`, so that *is* derived and was
+# present — but the client library is only a way of talking to a daemon over
+# D-Bus, and the daemon is not a library. On the show machine on 2026-10-16 the
+# package was never installed at all, and NDI discovery was dead in both
+# directions: the renderer could not see its own published output, and nothing
+# on the network could see it either. Everything else about the machine looked
+# perfect, which is why it took an `ldd` of `libndi.so` to find. Three seconds
+# after `avahi-daemon` started, the running renderer — unrestarted — listed two
+# sources.
+#
+# A hard dependency rather than a recommendation: unlike a Vulkan driver, which
+# one is right is not a fact about the machine. It is the same package
+# everywhere, and without it an NDI output is a stream nobody can find.
+#
 # The rest is what the binaries link against, read out of them.
-depends="adduser, systemd, libvulkan1, polkitd"
+depends="adduser, systemd, libvulkan1, polkitd, avahi-daemon"
 
 # Debian's FFmpeg must not appear. If it does, something linked against the
 # machine's copy and the package would carry a GPL dependency it was built
