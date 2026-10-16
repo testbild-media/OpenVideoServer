@@ -29,10 +29,9 @@
 //! # What is in them
 //!
 //! Each generator's own output from its published defaults, with nothing added
-//! and nothing composed on top. They are placeholders — enough to see what a
-//! thing is without reading its label — and two of them are honestly almost
-//! nothing: a solid colour and a strobe both draw a flat white field, because
-//! that is what they draw.
+//! and nothing composed on top — except two, which are marks instead, because
+//! their own output is a flat white field and two identical white tiles tell
+//! an operator nothing. See [`mark_of`].
 //!
 //! **Drawn at the size a show runs at and averaged down**, rather than drawn
 //! small. Half of these generators are sized in pixels — a shape is 256 across,
@@ -68,6 +67,7 @@
 //! test says so, and says to run this. It is the only thing between a
 //! committed picture and a tile that lies about what a pad will do.
 
+use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -155,11 +155,152 @@ fn pictures_directory() -> PathBuf {
 ///
 /// `None` for a type this build does not publish, which is also the answer for
 /// a version it has retired.
+///
+/// Two of them are a mark instead of their own output: see [`mark_of`].
 fn picture_of(type_id: &str, version: u32) -> Option<DecodedImage> {
+    if let Some(mark) = mark_of(type_id) {
+        return shrunk(&mark);
+    }
     let mut source =
         GeneratorSource::new(type_id, version, &ParameterMap::new(), WALL)?.with_seed(SEED);
     let frame = source.frame(source.tick_worth_a_picture()).ok()?;
     shrunk(&frame.image)
+}
+
+/// The two tiles that carry a mark rather than the generator's own picture.
+///
+/// **The owner's decision, 2026-10-16**: "Solid color bitte keine weiße Fläche
+/// nehmen sondern rote Fläche mit einem Füll Symbol. Bei Strobe eine weiße
+/// Fläche mit einem Blitz Symbol."
+///
+/// Every other picture here is what the generator draws, and these two were as
+/// well — which is exactly the problem. A solid colour at its published default
+/// is a white field and a strobe's lit frame is a white field, so the two tiles
+/// were the same picture and neither said anything. A mark is a drawing rather
+/// than a rendering and the tile is the one place that is right: nothing on the
+/// wall changes, and a pad holding one still shows this, because what an
+/// operator needs from a pad is to know which of the two it is.
+///
+/// Drawn at the wall's size and shrunk like everything else, so the edges are
+/// averaged down rather than drawn with a smoothing rule of their own.
+fn mark_of(type_id: &str) -> Option<DecodedImage> {
+    // A red that reads as red at ninety pixels without being the signal red
+    // the interface uses for a fault, and a white field for the strobe because
+    // that is the colour it flashes.
+    let (field, ink): ([u8; 4], [u8; 4]) = match type_id {
+        "ovs.solid_colour" => ([224, 48, 48, 255], [255, 255, 255, 255]),
+        "ovs.strobe" => ([255, 255, 255, 255], [24, 24, 28, 255]),
+        _ => return None,
+    };
+
+    let mut pixels = vec![0u8; (WALL.width as usize) * (WALL.height as usize) * 4];
+    for pixel in pixels.as_chunks_mut::<4>().0 {
+        *pixel = field;
+    }
+
+    let centre = [WALL.width as f32 / 2.0, WALL.height as f32 / 2.0];
+    if type_id == "ovs.strobe" {
+        let bolt = f32::from(WALL.height as u16) * 0.62;
+        fill(&mut pixels, &placed(BOLT, centre, bolt), ink);
+    } else {
+        let bucket = f32::from(WALL.height as u16) * 0.54;
+        for shape in [BUCKET_BODY, BUCKET_RIM, BUCKET_HANDLE, DROP] {
+            fill(&mut pixels, &placed(shape, centre, bucket), ink);
+        }
+    }
+
+    DecodedImage::new(pixels, WALL)
+}
+
+/// A lightning bolt, in a box one unit across centred on nothing.
+///
+/// The shape everything that flashes is drawn as, from a fire exit to a weather
+/// map: two strokes offset about a kink. Written out rather than computed so
+/// that what it looks like is readable here.
+const BOLT: &[[f32; 2]] = &[
+    [0.12, -0.52],
+    [-0.40, 0.04],
+    [-0.08, 0.04],
+    [-0.24, 0.52],
+    [0.36, -0.08],
+    [0.02, -0.08],
+];
+
+/// The bucket's body: a trapezoid, narrower at the bottom, tipped to the right.
+const BUCKET_BODY: &[[f32; 2]] = &[[-0.40, -0.26], [0.30, -0.42], [0.44, 0.22], [-0.14, 0.38]];
+
+/// Its mouth, which is what makes the body read as a bucket and not a tub.
+const BUCKET_RIM: &[[f32; 2]] = &[[-0.44, -0.30], [0.32, -0.48], [0.36, -0.33], [-0.40, -0.15]];
+
+/// The handle, as a band over the mouth.
+const BUCKET_HANDLE: &[[f32; 2]] = &[
+    [-0.34, -0.34],
+    [-0.20, -0.56],
+    [0.16, -0.64],
+    [0.30, -0.50],
+    [0.22, -0.47],
+    [0.12, -0.56],
+    [-0.14, -0.50],
+    [-0.24, -0.33],
+];
+
+/// The drop coming out of it, which is the half that says *fill*.
+///
+/// A teardrop: a point above and a round bottom, as a ring of points so that
+/// one polygon routine draws everything here.
+const DROP: &[[f32; 2]] = &[
+    [0.56, 0.08],
+    [0.42, 0.34],
+    [0.44, 0.44],
+    [0.50, 0.50],
+    [0.62, 0.50],
+    [0.68, 0.44],
+    [0.70, 0.34],
+];
+
+/// Puts a shape of unit size where it belongs on the canvas.
+fn placed(shape: &[[f32; 2]], centre: [f32; 2], size: f32) -> Vec<[f32; 2]> {
+    shape
+        .iter()
+        .map(|point| [centre[0] + point[0] * size, centre[1] + point[1] * size])
+        .collect()
+}
+
+/// Fills a polygon, hard-edged, by crossings on each row's centre line.
+///
+/// No smoothing: this draws at 1920 by 1080 and the picture is averaged
+/// six-to-one afterwards, which is thirty-six samples a pixel and a better
+/// edge than a rule here would give.
+fn fill(pixels: &mut [u8], points: &[[f32; 2]], colour: [u8; 4]) {
+    let top = points.iter().fold(f32::MAX, |low, p| low.min(p[1]));
+    let bottom = points.iter().fold(f32::MIN, |high, p| high.max(p[1]));
+    let first = top.max(0.0) as u32;
+    let last = (bottom.ceil().max(0.0) as u32).min(WALL.height);
+
+    let mut crossings: Vec<f32> = Vec::with_capacity(8);
+    for row in first..last {
+        let line = row as f32 + 0.5;
+        crossings.clear();
+        for (at, from) in points.iter().enumerate() {
+            let to = points[(at + 1) % points.len()];
+            if (from[1] <= line) != (to[1] <= line) {
+                let along = (line - from[1]) / (to[1] - from[1]);
+                crossings.push(from[0] + along * (to[0] - from[0]));
+            }
+        }
+        crossings.sort_by(|one, other| one.partial_cmp(other).unwrap_or(Ordering::Equal));
+
+        for span in crossings.as_chunks::<2>().0 {
+            let from = (span[0].max(0.0) as u32).min(WALL.width);
+            let to = (span[1].ceil().max(0.0) as u32).min(WALL.width);
+            for column in from..to {
+                let at = ((row * WALL.width + column) * 4) as usize;
+                if let Some(pixel) = pixels.get_mut(at..at + 4) {
+                    pixel.copy_from_slice(&colour);
+                }
+            }
+        }
+    }
 }
 
 /// Averages each six-by-six block of a picture into one pixel.
@@ -309,13 +450,12 @@ mod tests {
     }
 
     #[test]
-    fn every_picture_but_the_two_flat_ones_shows_more_than_one_colour() {
-        // A placeholder that is one flat field says nothing. Two of them are
-        // exactly that and cannot be otherwise: a solid colour is a solid
-        // colour, and a strobe's lit frame is one too. Named here so that a
-        // third one arriving has to be argued for.
+    fn no_picture_is_one_flat_field() {
+        // A placeholder that is one flat colour says nothing, and two of these
+        // were exactly that until the marks were drawn: a solid colour at its
+        // default is a white field, and so is a strobe's lit frame, so the two
+        // tiles were the same picture. Every one of them carries something now.
         for manifest in &ovs_types::config::generators::PUBLISHED {
-            let flat = matches!(manifest.type_id, "ovs.solid_colour" | "ovs.strobe");
             let picture = picture_of(manifest.type_id, manifest.version)
                 .unwrap_or_else(|| panic!("{} cannot be drawn", manifest.type_id));
 
@@ -326,10 +466,9 @@ mod tests {
                 .iter()
                 .copied()
                 .collect();
-            assert_eq!(
+            assert!(
                 colours.len() > 1,
-                !flat,
-                "{} and {} colours in its picture",
+                "{} is one flat colour, which says nothing on a tile ({} colours)",
                 manifest.type_id,
                 colours.len()
             );
@@ -359,5 +498,38 @@ mod tests {
 
         assert_eq!(one.size(), SizePx::new(1, 1));
         assert_eq!(one.pixels(), &[255, 255, 255, 64]);
+    }
+
+    #[test]
+    fn the_two_marked_tiles_are_told_apart_at_a_glance() {
+        // The whole reason they are marks (owner, 2026-10-16). Whatever else
+        // happens to them, these two must not go back to being the same white
+        // field: the fields differ, and each carries ink over it.
+        let solid = picture_of("ovs.solid_colour", 1).expect("drawn");
+        let strobe = picture_of("ovs.strobe", 1).expect("drawn");
+
+        assert_eq!(solid.pixel(2, 2), [224, 48, 48, 255], "a red field");
+        assert_eq!(strobe.pixel(2, 2), [255, 255, 255, 255], "and a white one");
+
+        // And a mark on each, which the middle column runs through. Measured as
+        // distance from the field rather than as darkness, because one mark is
+        // white on red and the other is near-black on white.
+        for (named, picture) in [("solid colour", &solid), ("strobe", &strobe)] {
+            let field = picture.pixel(2, 2);
+            let furthest = (0..TILE.height)
+                .map(|row| picture.pixel(TILE.width / 2, row))
+                .map(|pixel| {
+                    (0..3)
+                        .map(|channel| field[channel].abs_diff(pixel[channel]))
+                        .max()
+                        .unwrap_or(0)
+                })
+                .max()
+                .unwrap_or(0);
+            assert!(
+                furthest > 60,
+                "{named} carries no mark down its middle: {furthest} away from its field"
+            );
+        }
     }
 }
