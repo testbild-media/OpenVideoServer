@@ -381,10 +381,8 @@ export function describeTarget(show: Show, target: FixtureTarget): string {
  * A generator is a slot's source rather than a chain entry, so there is one per
  * slot at most and its place is the slot's.
  */
-export function generatorPlaces(
-  show: Show,
-): { layer: Layer; slotIndex: number; instanceId: string; typeId: string }[] {
-  const places: { layer: Layer; slotIndex: number; instanceId: string; typeId: string }[] = [];
+export function generatorPlaces(show: Show): GeneratorPlace[] {
+  const places: GeneratorPlace[] = [];
   for (const layer of show.layers) {
     for (const slot of layer.slots ?? []) {
       if (slot.source.kind === 'generator') {
@@ -396,11 +394,45 @@ export function generatorPlaces(
           // nothing a patch could point at.
           instanceId: slot.source.instance_id ?? '',
           typeId: slot.source.type_id,
+          version: slot.source.version,
         });
       }
     }
   }
   return places;
+}
+
+/** One generator instance in the document, and where it sits. */
+export interface GeneratorPlace {
+  layer: Layer;
+  slotIndex: number;
+  instanceId: string;
+  typeId: string;
+  /**
+   * The manifest version the slot names.
+   *
+   * Carried because a personality is matched by type *and* version, exactly as
+   * an effect's is — a strobe saved at v1 keeps v1's five channels even now
+   * that v2 publishes six.
+   */
+  version: number;
+}
+
+/**
+ * The personalities that can drive one generator instance.
+ *
+ * The twin of [`effectPersonalities`]. A generator is a slot's source rather
+ * than a chain entry, and the catalogue treats both as modules, so the lookup
+ * is the same and only where it is found differs.
+ */
+export function generatorPersonalities(
+  catalogue: FixtureCatalogue,
+  typeId: string,
+  version: number,
+): Personality[] {
+  return modulePersonalities(catalogue).filter(
+    (personality) => personality.type_id === typeId && personality.version === version,
+  );
 }
 
 /** What a patch row calls a fixture: the personality's name, or its type. */

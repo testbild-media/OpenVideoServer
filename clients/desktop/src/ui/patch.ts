@@ -59,7 +59,10 @@ import {
   effectPlaces,
   findPersonality,
   fixtureForEffect,
+  fixtureForGenerator,
   fixtureForLayer,
+  generatorPersonalities,
+  generatorPlaces,
   fixturePath,
   fixturesIn,
   findFixture,
@@ -427,6 +430,41 @@ export class PatchPanel {
         ...(personalities.length === 0
           ? {
               unavailable: `${place.instance.type_id} v${place.instance.version} publishes no DMX channels on this server`,
+            }
+          : {}),
+      });
+    }
+
+    // **And the generators**, which this page never offered at all.
+    //
+    // The owner, 2026-10-16: "jetzt gerade sehe ich nur layer 2 slot 1 im dmx
+    // patch obwohl ich ja auf layer 3 den slots auch ganz viel habe... sobald
+    // die drauf sind sind die ja teil der show..." — which is exactly right,
+    // and nine of the generators publish a personality saying "patch to: one
+    // generator instance in a slot".
+    //
+    // Everything else for them already existed: the catalogue carries their
+    // personalities, `fixtureForGenerator` finds a patched one, and
+    // `describeTarget` names it. Only the offer was missing, so a patch
+    // pointing at a generator could be read and never made.
+    for (const place of generatorPlaces(show)) {
+      // Minted by the server on the next save. Until then there is no identity
+      // for a patch entry to name, so there is nothing honest to offer.
+      if (place.instanceId === '') {
+        continue;
+      }
+      if (fixtureForGenerator(show, place.instanceId) !== null) {
+        continue;
+      }
+      const personalities = generatorPersonalities(catalogue, place.typeId, place.version);
+      found.push({
+        key: `generator:${place.instanceId}`,
+        label: `Generator · ${place.typeId} on ${place.layer.name}, slot ${place.slotIndex}`,
+        target: { kind: 'generator', generator_instance_id: place.instanceId },
+        personalities,
+        ...(personalities.length === 0
+          ? {
+              unavailable: `${place.typeId} v${place.version} publishes no DMX channels on this server`,
             }
           : {}),
       });

@@ -33,6 +33,8 @@ import {
   effectPersonalities,
   effectPlaces,
   emptyFixtures,
+  generatorPersonalities,
+  generatorPlaces,
   moveFixture,
   patchAdvisories,
   patchFixture,
@@ -907,5 +909,62 @@ describe('what a console can reach on an effect', () => {
     // document, an effect is in one only once somebody puts it there. An empty
     // list of places is a show without effects, not a broken catalogue.
     expect(effectPlaces(show({ layers: [layerAt('Wall', 0)] }))).toEqual([]);
+  });
+});
+
+describe('what a console can reach on a generator in a slot', () => {
+  // The gap the owner found, 2026-10-16: "jetzt gerade sehe ich nur layer 2
+  // slot 1 im dmx patch obwohl ich ja auf layer 3 den slots auch ganz viel
+  // habe". Nine generators publish a personality and the patch page offered
+  // none of them. Everything else for them already worked, which is why
+  // nothing failed -- there was simply never an entry to click.
+
+  const WOBBLE: Personality = { ...DESK_EFFECT, target: 'generator' };
+
+  function slotWith(index: number, source: Record<string, unknown>) {
+    return { index, effects: [], source } as unknown as Show['layers'][number]['slots'][number];
+  }
+
+  it('offers a generator the personality its own manifest published', () => {
+    const catalogue: FixtureCatalogue = { loaded: true, fixtures: [DESK_MASTER, WOBBLE] };
+    expect(generatorPersonalities(catalogue, 'third.party.wobble', 4)).toEqual([WOBBLE]);
+    expect(generatorPersonalities(catalogue, 'third.party.wobble', 5)).toEqual([]);
+  });
+
+  it('finds every generator in every slot, with its version', () => {
+    const layer = layerAt('Wall', 0);
+    layer.slots = [
+      slotWith(1, { kind: 'generator', type_id: 'ovs.noise', version: 1, instance_id: 'A' }),
+      slotWith(2, { kind: 'generator', type_id: 'ovs.strobe', version: 2, instance_id: 'B' }),
+      slotWith(3, { kind: 'media', media_item_id: 'C' }),
+    ];
+
+    const places = generatorPlaces(show({ layers: [layer] }));
+    expect(places.map((place) => [place.typeId, place.version, place.slotIndex])).toEqual([
+      ['ovs.noise', 1, 1],
+      ['ovs.strobe', 2, 2],
+    ]);
+    // A clip is not a module and has no personality of its own.
+    expect(places).toHaveLength(2);
+  });
+
+  it('has nothing to point at until the server has minted an identity', () => {
+    // A show written before generators had one. The server mints it on the
+    // next save; until then a patch entry would name something that is not in
+    // the document.
+    const layer = layerAt('Wall', 0);
+    layer.slots = [slotWith(1, { kind: 'generator', type_id: 'ovs.noise', version: 1 })];
+    expect(generatorPlaces(show({ layers: [layer] }))[0]?.instanceId).toBe('');
+  });
+
+  it('keeps an older version on the channels it was saved with', () => {
+    // Strobe v1 is five channels and v2 is six. A show saved with v1 must not
+    // quietly acquire the Mode channel, or every address above it moves.
+    const five: Personality = { ...WOBBLE, type_id: 'ovs.strobe', version: 1, footprint: 5 };
+    const six: Personality = { ...WOBBLE, type_id: 'ovs.strobe', version: 2, footprint: 6 };
+    const catalogue: FixtureCatalogue = { loaded: true, fixtures: [five, six] };
+
+    expect(generatorPersonalities(catalogue, 'ovs.strobe', 1)).toEqual([five]);
+    expect(generatorPersonalities(catalogue, 'ovs.strobe', 2)).toEqual([six]);
   });
 });
