@@ -855,6 +855,39 @@ impl RenderLoop {
         self.outputs.iter().any(|output| output.faulted.is_none())
     }
 
+    /// What the surface the composition goes to has presented, and how fast.
+    ///
+    /// **Frames a wall really put up, not passes of this loop** (owner,
+    /// 2026-10-16: the test pattern is bound to the output's frame rate and to
+    /// nothing else). A pass presents to every output that is *due*, so on a
+    /// machine driving two of them — the System screen and the wall, as PC05
+    /// does — there are about two passes for every frame either of them shows.
+    /// Counting passes made the pattern's sweep run at double speed, which is
+    /// what the owner saw.
+    ///
+    /// The first output carrying the show, because that is the surface an
+    /// engineer is looking at. With no show output at all there is no wall to
+    /// be bound to, and the composition's own published rate with this loop's
+    /// pass count is the honest stand-in: nothing is being presented anyway.
+    fn shown_on(&self, state: &ShowState) -> crate::playback::Shown {
+        self.outputs
+            .iter()
+            .find(|output| output.faulted.is_none() && output.kind != Kind::Console)
+            .map_or(
+                crate::playback::Shown {
+                    frames: self.frame_index,
+                    rate: state
+                        .show
+                        .as_deref()
+                        .map_or(FrameRate::FPS_60, |show| show.composition.render_rate),
+                },
+                |output| crate::playback::Shown {
+                    frames: output.clock.presented_frames(),
+                    rate: output.backend.mode().refresh,
+                },
+            )
+    }
+
     /// Returns the earliest moment any output is next due.
     ///
     /// The loop sleeps until this rather than spinning.
@@ -892,9 +925,10 @@ impl RenderLoop {
         // frame that shows it is composed, for the same reason the stills do.
         let playback_began = Instant::now();
         let catalogue = self.state.media();
-        report.playback = self
-            .playback
-            .update(&state, &catalogue, self.compositor.as_mut(), now);
+        let shown = self.shown_on(&state);
+        report.playback =
+            self.playback
+                .update(&state, &catalogue, self.compositor.as_mut(), now, shown);
         self.timings.playback_us = micros_since(playback_began);
 
         // What an operator pressed, before anything is measured against it.
@@ -1151,9 +1185,12 @@ impl RenderLoop {
             );
         }
 
-        // The composition's own frames, at the composition's own rate: the
-        // pattern is bound to that and to nothing else (owner, 2026-10-16).
-        let seconds = pattern_seconds(self.frame_index, rate);
+        // The frames the wall has actually shown, at the rate it shows them —
+        // not this loop's passes, of which there are about two a frame on a
+        // machine with two outputs. The caption still says the composition's
+        // rate, because that is what the caption is for.
+        let shown = self.shown_on(state);
+        let seconds = pattern_seconds(shown.frames, shown.rate);
         let Some(pattern) = self.test_pattern.as_mut() else {
             return;
         };
@@ -1317,13 +1354,11 @@ impl RenderLoop {
     /// pattern answers "is this cable reaching this wall, in this mode" and
     /// nothing else.
     fn draw_output_patterns(&mut self, _now: Instant) {
-        // **Counted in frames, each wall at its own rate** (owner, 2026-10-16:
-        // "an nichts gebunden außer die Bildrate des Ausgangs"). A pass is a
-        // frame for every output it presents to, so the index of the pass is
-        // the frame number here; dividing by the wall's own rate is what keeps
-        // the picture the same speed on a 50 Hz panel as on a 60 Hz one.
-        let frames = self.frame_index;
-
+        // **Each wall counts its own frames, at its own rate** (owner,
+        // 2026-10-16: "an nichts gebunden außer die Bildrate des Ausgangs").
+        // Not this loop's passes: a pass presents to whichever outputs are
+        // due, so two outputs make about two passes a frame — which is the
+        // factor of two the owner saw in the sweep.
         for (index, output) in self.outputs.iter_mut().enumerate() {
             if output.faulted.is_some() {
                 continue;
@@ -1376,7 +1411,7 @@ impl RenderLoop {
                 continue;
             };
 
-            let seconds = pattern_seconds(frames, mode.refresh);
+            let seconds = pattern_seconds(output.clock.presented_frames(), mode.refresh);
             match output
                 .backend
                 .upload_texture(TextureKey::TestPattern, pattern.draw(seconds))
@@ -2969,6 +3004,51 @@ mod tests {
         state.set_test_pattern(TestPatternMode::Off, None);
         render.tick(at(epoch, 2));
         assert_eq!(render.composed_quads(), show_quads, "the show is back");
+    }
+
+    #[test]
+    fn the_pattern_is_timed_by_the_wall_rather_than_by_this_loop() {
+        // **The reported fault**, 2026-10-16: "der weiße gradient der durch
+        // geht ist doppelt so schnell wie er sein sollte". The pattern had
+        // just been bound to a count of frames, which was right, and the count
+        // it was given was this loop's passes, which was not.
+        //
+        // A pass presents to whichever outputs are *due*, so a machine driving
+        // two of them — the System screen and the wall, as the one in the hall
+        // does — makes close to two passes for every frame either of them
+        // shows. The pattern ran at double speed for exactly that reason.
+        let wall = DisplayMode::new(SizePx::new(1920, 1080), FrameRate::FPS_59_94);
+        let screen = DisplayMode::new(SizePx::new(1280, 720), FrameRate::FPS_50);
+        let (epoch, state, mut render) = loop_with(vec![
+            Box::new(HeadlessBackend::new("Wall", wall)),
+            Box::new(HeadlessBackend::new("Screen", screen)),
+        ]);
+
+        // A second of a sixty-hertz loop, which is long enough for the two
+        // rates to come apart.
+        for pass in 0..60 {
+            render.tick(at(epoch, pass));
+        }
+
+        let shown = render.shown_on(&state.load());
+
+        assert_eq!(
+            shown.frames,
+            render.outputs[0].clock.presented_frames(),
+            "the wall's own frames"
+        );
+        assert_eq!(shown.rate, wall.refresh, "at the wall's own rate");
+        assert_ne!(
+            shown.frames,
+            render.outputs[1].clock.presented_frames(),
+            "and not the other panel's, which is running at fifty"
+        );
+
+        // **What this cannot show** is the doubling itself: the pass loop that
+        // wakes at each output's deadline lives in the binary, and here the
+        // passes are handed in one a frame. What it does show is where the
+        // number comes from — a wall's own clock — which is the half that was
+        // wrong.
     }
 
     #[test]

@@ -739,9 +739,14 @@ impl GeneratorSource {
     ///
     /// Also `None` for a still, which has no kept buffer: it is drawn through
     /// [`FrameSource::frame`] once when the slot changes.
-    pub fn redraw_at(&mut self, tick: u32, rate: FrameRate) -> Option<&DecodedImage> {
+    pub fn redraw_at(
+        &mut self,
+        tick: u32,
+        rate: FrameRate,
+        shown_at: FrameRate,
+    ) -> Option<&DecodedImage> {
         if matches!(self.kind, Kind::ServicePattern { .. }) {
-            return self.redraw_pattern(tick, rate);
+            return self.redraw_pattern(tick, rate, shown_at);
         }
 
         let Self {
@@ -770,7 +775,12 @@ impl GeneratorSource {
     /// There is no "already drawn" comparison here as there is for a clock:
     /// this picture is different on every pass, which is the whole of what it
     /// is for.
-    fn redraw_pattern(&mut self, tick: u32, rate: FrameRate) -> Option<&DecodedImage> {
+    fn redraw_pattern(
+        &mut self,
+        tick: u32,
+        rate: FrameRate,
+        shown_at: FrameRate,
+    ) -> Option<&DecodedImage> {
         let stale = match (&self.kind, &self.pattern) {
             (Kind::ServicePattern { caption }, Some(pattern)) => {
                 !pattern.matches(self.size, rate, caption)
@@ -783,7 +793,7 @@ impl GeneratorSource {
             }
         }
 
-        let seconds = seconds_of(tick, rate);
+        let seconds = seconds_of(tick, shown_at);
         self.pattern.as_mut().map(|pattern| pattern.draw(seconds))
     }
 
@@ -905,10 +915,23 @@ impl GeneratorSource {
     ///
     /// Measured on PC05 on 2026-10-15: drawing this on the processor was
     /// 45% of the render thread, and the whole of it was moving bytes about.
+    ///
+    /// # Two rates, and they are different things
+    ///
+    /// `rate` is the composition's, which the caption states and which decides
+    /// whether the prepared tile has to be rebuilt. `shown_at` is the rate the
+    /// frames in `tick` are actually being presented at, and it is what turns
+    /// a count of them into the seconds this pattern's speeds are written in.
+    ///
+    /// They are usually a thousandth apart — a composition published at 60 on
+    /// a wall running 59.94 — and conflating them is how the sweep came to run
+    /// at twice its speed: the count was of the renderer's passes, which on a
+    /// machine with two outputs is about double either wall's rate.
     pub fn pattern_on_card(
         &mut self,
         tick: u32,
         rate: FrameRate,
+        shown_at: FrameRate,
     ) -> Option<(Option<DecodedImage>, crate::pattern::PatternMoment)> {
         let Kind::ServicePattern { caption } = &self.kind else {
             return None;
@@ -926,7 +949,7 @@ impl GeneratorSource {
         }
 
         let pattern = self.pattern.as_ref()?;
-        let seconds = seconds_of(tick, rate);
+        let seconds = seconds_of(tick, shown_at);
         Some((
             stale.then(|| pattern.source_picture()),
             pattern.moment(seconds),
@@ -2286,7 +2309,7 @@ mod tests {
         // already drawn, and this asks about moments out of order.
         source.forget_drawn();
         let image = source
-            .redraw_at(tick, FrameRate::FPS_60)
+            .redraw_at(tick, FrameRate::FPS_60, FrameRate::FPS_60)
             .expect("a picture");
         pixel(image, 0, 0)
     }
@@ -2395,12 +2418,12 @@ mod tests {
         let mut source = noise();
 
         let first = source
-            .redraw_at(0, FrameRate::FPS_60)
+            .redraw_at(0, FrameRate::FPS_60, FrameRate::FPS_60)
             .expect("a picture")
             .pixels()
             .to_vec();
         let next = source
-            .redraw_at(17, FrameRate::FPS_60)
+            .redraw_at(17, FrameRate::FPS_60, FrameRate::FPS_60)
             .expect("a picture")
             .pixels()
             .to_vec();
@@ -2418,7 +2441,7 @@ mod tests {
 
         let at = |source: &mut GeneratorSource| {
             source
-                .redraw_at(1_000, FrameRate::FPS_60)
+                .redraw_at(1_000, FrameRate::FPS_60, FrameRate::FPS_60)
                 .expect("a picture")
                 .pixels()
                 .to_vec()
@@ -2468,7 +2491,7 @@ mod tests {
         (0..frames)
             .map(|frame| {
                 source
-                    .pattern_on_card(start + frame, rate)
+                    .pattern_on_card(start + frame, rate, rate)
                     .expect("the service pattern draws on the card")
                     .1
             })
@@ -2515,7 +2538,7 @@ mod tests {
             )
             .expect("published");
             source
-                .pattern_on_card(frame, rate)
+                .pattern_on_card(frame, rate, rate)
                 .expect("the service pattern draws on the card")
                 .1
         };
@@ -2559,12 +2582,12 @@ mod tests {
         let mut source = service_pattern();
 
         let first = source
-            .redraw_at(0, FrameRate::FPS_60)
+            .redraw_at(0, FrameRate::FPS_60, FrameRate::FPS_60)
             .expect("a picture")
             .pixels()
             .to_vec();
         let later = source
-            .redraw_at(2_000, FrameRate::FPS_60)
+            .redraw_at(2_000, FrameRate::FPS_60, FrameRate::FPS_60)
             .expect("a picture")
             .pixels()
             .to_vec();
@@ -2586,12 +2609,12 @@ mod tests {
         let mut source = service_pattern();
 
         let sixty = source
-            .redraw_at(0, FrameRate::FPS_60)
+            .redraw_at(0, FrameRate::FPS_60, FrameRate::FPS_60)
             .expect("a picture")
             .pixels()
             .to_vec();
         let fifty = source
-            .redraw_at(0, FrameRate::FPS_50)
+            .redraw_at(0, FrameRate::FPS_50, FrameRate::FPS_50)
             .expect("a picture")
             .pixels()
             .to_vec();
@@ -2993,15 +3016,21 @@ mod tests {
                 .expect("published");
 
         assert!(
-            source.redraw_at(45_296, FrameRate::FPS_60).is_some(),
+            source
+                .redraw_at(45_296, FrameRate::FPS_60, FrameRate::FPS_60)
+                .is_some(),
             "the first one is drawn"
         );
         assert!(
-            source.redraw_at(45_296, FrameRate::FPS_60).is_none(),
+            source
+                .redraw_at(45_296, FrameRate::FPS_60, FrameRate::FPS_60)
+                .is_none(),
             "and the same second is not drawn again"
         );
         assert!(
-            source.redraw_at(45_297, FrameRate::FPS_60).is_some(),
+            source
+                .redraw_at(45_297, FrameRate::FPS_60, FrameRate::FPS_60)
+                .is_some(),
             "the next one is"
         );
     }
@@ -3013,7 +3042,9 @@ mod tests {
         // kept for nothing.
         let mut solid = GeneratorSource::new("ovs.solid_colour", 1, &ParameterMap::new(), size())
             .expect("published");
-        assert!(solid.redraw_at(0, FrameRate::FPS_60).is_none());
+        assert!(solid
+            .redraw_at(0, FrameRate::FPS_60, FrameRate::FPS_60)
+            .is_none());
     }
 
     #[test]
@@ -3031,7 +3062,7 @@ mod tests {
 
         let allocated = source.frame(123).expect("draws").image.pixels().to_vec();
         let in_place = source
-            .redraw_at(123, FrameRate::FPS_60)
+            .redraw_at(123, FrameRate::FPS_60, FrameRate::FPS_60)
             .expect("draws")
             .pixels()
             .to_vec();

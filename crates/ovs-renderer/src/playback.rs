@@ -134,18 +134,34 @@ struct Generating<'a> {
     rate: ovs_types::geometry::FrameRate,
     trigger: u64,
     now: Instant,
-    /// Which pass of this renderer the frame being drawn is.
+    /// What the surface this composition is shown on has presented, and how
+    /// fast it presents.
     ///
-    /// The service pattern's clock, and nothing else reads it: it is bound to
-    /// the frames the surface draws and to nothing else at all (owner,
-    /// 2026-10-16). Carried rather than read from `self`, because the
-    /// scheduler is borrowed for the pass.
-    passes: u64,
+    /// **The service pattern's whole clock, and nothing else reads it** (owner,
+    /// 2026-10-16: "an nichts gebunden außer die Bildrate des Ausgangs. nicht
+    /// an der systemzeit oder sonst was"). Frames the wall really put up, not
+    /// passes of the render loop: a machine driving two outputs makes about
+    /// two passes a frame, which is how the sweep came to run at double speed.
+    shown: Shown,
     /// What a control source has done to the generators, by instance.
     ///
     /// Handed in rather than read from a field because the show state is
     /// borrowed for the whole pass and this is one of its maps.
     overrides: &'a ovs_types::live::GeneratorOverrides,
+}
+
+/// What a surface has shown, and how fast it shows it.
+///
+/// The two halves travel together because neither means anything alone: a
+/// count of frames is a time only once it is divided by the rate they were
+/// presented at, and dividing by a rate they were *not* presented at is the
+/// fault this type exists to make hard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Shown {
+    /// How many frames the surface has presented.
+    pub frames: u64,
+    /// How fast it presents them.
+    pub rate: ovs_types::geometry::FrameRate,
 }
 
 /// One layer's generator, kept between passes.
@@ -336,14 +352,6 @@ pub struct Playback {
     /// colour cycle where an operator expected their clip would be a lie on a
     /// wall.
     synthetic: bool,
-    /// How many passes this scheduler has made.
-    ///
-    /// **The service pattern's whole clock** (owner, 2026-10-16: "an nichts
-    /// gebunden außer die Bildrate des Ausgangs"). One per pass, and a pass is
-    /// one frame of the composition, so counting them is counting the frames
-    /// the surface draws — with nothing in it that a system clock, a tempo or
-    /// a speed scale can reach.
-    passes: u64,
 }
 
 impl Playback {
@@ -378,7 +386,6 @@ impl Playback {
             last_late_sum: 0,
             cleared: ovs_types::telemetry::PlaybackTelemetry::default(),
             synthetic,
-            passes: 0,
         }
     }
 
@@ -395,18 +402,18 @@ impl Playback {
     }
 
     /// Advances every layer and puts the frame it needs on the GPU.
+    ///
+    /// `shown` is what the surface this composition goes to has presented. The
+    /// service pattern is drawn from it and nothing else reads it; see
+    /// [`Shown`].
     pub fn update(
         &mut self,
         state: &ShowState,
         catalogue: &MediaCatalogue,
         compositor: &mut dyn Compositor,
         now: Instant,
+        shown: Shown,
     ) -> PlaybackReport {
-        // One pass, one frame of the composition. Counted before anything is
-        // decided, so that every layer in this pass is handed the same number,
-        // and read into a local because the scheduler is borrowed below.
-        self.passes = self.passes.saturating_add(1);
-        let passes = self.passes;
         self.clock.follow(&state.master, now);
         let beats = self.clock.beats_at(now);
         // The other clock a pass can be read off. A free-running clip is
@@ -510,7 +517,7 @@ impl Playback {
                             rate: show.composition.render_rate,
                             trigger: live.trigger,
                             now,
-                            passes,
+                            shown,
                             overrides: &state.generators,
                         },
                         compositor,
@@ -953,7 +960,7 @@ impl Playback {
             rate,
             trigger,
             now,
-            passes,
+            shown,
             overrides: wanted_overrides,
         } = wanted;
 
@@ -1080,7 +1087,7 @@ impl Playback {
         let moment = Moment {
             wall: SystemTime::now(),
             since_anchor: now.saturating_duration_since(generated.anchor),
-            frames: passes,
+            frames: shown.frames,
         };
         let tick = generated.source.tick_at(moment).unwrap_or(0);
 
@@ -1098,7 +1105,7 @@ impl Playback {
         // goes through its own door: the picture is uploaded on the pass that
         // rebuilt it and on no other, and then the card drifts, sweeps and
         // captions it every pass for nothing.
-        if let Some((fresh, moment)) = generated.source.pattern_on_card(tick, rate) {
+        if let Some((fresh, moment)) = generated.source.pattern_on_card(tick, rate, shown.rate) {
             let source = TextureKey::PatternSource(layer_id);
             let ready = match fresh {
                 Some(picture) => match compositor.upload_texture(source, &picture) {
@@ -1158,7 +1165,7 @@ impl Playback {
             }
         }
 
-        let uploaded = match generated.source.redraw_at(tick, rate) {
+        let uploaded = match generated.source.redraw_at(tick, rate, shown.rate) {
             Some(image) => compositor.upload_texture(TextureKey::Layer(layer_id), image),
             // The second has not moved, so what is on the GPU is still right.
             None => return built,
@@ -1809,6 +1816,17 @@ fn playback_direction(slot: &Slot) -> PlaybackDirection {
 
 #[cfg(test)]
 mod tests {
+
+    /// A surface for a pass that does not care what has been shown on it.
+    ///
+    /// Only the service pattern reads this, and only to work out how far
+    /// into its own run it is.
+    fn a_wall() -> Shown {
+        Shown {
+            frames: 0,
+            rate: ovs_types::geometry::FrameRate::FPS_60,
+        }
+    }
     use std::path::PathBuf;
     use std::time::Duration;
 
@@ -1990,6 +2008,7 @@ mod tests {
             &catalogue(item, MediaKind::Image),
             &mut compositor,
             Instant::now(),
+            a_wall(),
         );
 
         assert_eq!(report.playing, 0);
@@ -2016,7 +2035,13 @@ mod tests {
         let mut report = PlaybackReport::default();
         let deadline = Instant::now() + std::time::Duration::from_secs(10);
         while report.failed == 0 && Instant::now() < deadline {
-            report = playback.update(&state, &catalogue, &mut compositor, Instant::now());
+            report = playback.update(
+                &state,
+                &catalogue,
+                &mut compositor,
+                Instant::now(),
+                a_wall(),
+            );
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
 
@@ -2051,7 +2076,7 @@ mod tests {
     ) -> [u8; 4] {
         let deadline = Instant::now() + Duration::from_secs(5);
         while Instant::now() < deadline {
-            let report = playback.update(state, catalogue, compositor, now);
+            let report = playback.update(state, catalogue, compositor, now, a_wall());
             if report.uploaded > 0 {
                 if let Some((_, pixel)) = compositor.texture(layer_id) {
                     return pixel;
@@ -2219,7 +2244,13 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(5);
         while Instant::now() < deadline && uploaded == 0 {
             uploaded = playback
-                .update(&state, &catalogue, &mut compositor, Instant::now())
+                .update(
+                    &state,
+                    &catalogue,
+                    &mut compositor,
+                    Instant::now(),
+                    a_wall(),
+                )
                 .uploaded;
             std::thread::sleep(Duration::from_millis(2));
         }
@@ -2248,14 +2279,26 @@ mod tests {
 
         let deadline = Instant::now() + Duration::from_secs(5);
         while Instant::now() < deadline && compositor.texture(layer_id).is_none() {
-            playback.update(&state, &catalogue, &mut compositor, Instant::now());
+            playback.update(
+                &state,
+                &catalogue,
+                &mut compositor,
+                Instant::now(),
+                a_wall(),
+            );
             std::thread::sleep(Duration::from_millis(2));
         }
         assert!(compositor.texture(layer_id).is_some(), "it was playing");
 
         // Slot 0 is Black: the layer is off stage.
         state.layers[0].active_slot = 0;
-        playback.update(&state, &catalogue, &mut compositor, Instant::now());
+        playback.update(
+            &state,
+            &catalogue,
+            &mut compositor,
+            Instant::now(),
+            a_wall(),
+        );
 
         assert!(compositor.texture(layer_id).is_none(), "and now it is not");
         assert!(playback.showing().values().all(|showing| !*showing));
@@ -2285,7 +2328,7 @@ mod tests {
         let trigger = state.layers[0].trigger;
 
         let start = Instant::now();
-        playback.update(&state, &catalogue, &mut compositor, start);
+        playback.update(&state, &catalogue, &mut compositor, start, a_wall());
         let before = playback
             .layers
             .get(&layer_id)
@@ -2301,7 +2344,7 @@ mod tests {
         show.layers[0].slots[0].speed = 0.5;
         let moment = start + Duration::from_millis(1_000);
         let was = playhead_of(&playback, layer_id, moment);
-        playback.update(&state, &catalogue, &mut compositor, moment);
+        playback.update(&state, &catalogue, &mut compositor, moment, a_wall());
 
         let playing = playback.layers.get(&layer_id).expect("playing");
         assert_eq!(
@@ -2326,7 +2369,7 @@ mod tests {
         let show = state.show.as_deref_mut().expect("a show");
         show.layers[0].slots[0].sync = ovs_types::config::SlotSync::FreeRun;
         show.layers[0].slots[0].speed = 1.0;
-        playback.update(&state, &catalogue, &mut compositor, moment);
+        playback.update(&state, &catalogue, &mut compositor, moment, a_wall());
         assert!(
             matches!(
                 playback
@@ -2373,7 +2416,13 @@ mod tests {
         let mut compositor = HeadlessCompositor::sized(SizePx::new(64, 64));
         let mut playback = Playback::new(Instant::now(), true);
 
-        playback.update(&state, &catalogue, &mut compositor, Instant::now());
+        playback.update(
+            &state,
+            &catalogue,
+            &mut compositor,
+            Instant::now(),
+            a_wall(),
+        );
         // **Whatever it managed in that pass, it does not claim more than it
         // has.** This used to insist on `false`, which is a statement about how
         // fast the decoder is rather than about what the scheduler reports —
@@ -2393,7 +2442,13 @@ mod tests {
         // And it arrives, without anything having had to be primed for it.
         let deadline = Instant::now() + Duration::from_secs(5);
         while Instant::now() < deadline && playback.telemetry().playing == 0 {
-            playback.update(&state, &catalogue, &mut compositor, Instant::now());
+            playback.update(
+                &state,
+                &catalogue,
+                &mut compositor,
+                Instant::now(),
+                a_wall(),
+            );
             std::thread::sleep(Duration::from_millis(2));
         }
         assert_eq!(playback.telemetry().playing, 1, "the clip is on stage");
@@ -2483,7 +2538,7 @@ mod tests {
         // arrangement where the drawing had to be stopped and was not.
         state.layers[0].enabled = true;
 
-        let first = playback.update(&state, &catalogue, &mut compositor, start);
+        let first = playback.update(&state, &catalogue, &mut compositor, start, a_wall());
         assert_eq!(first.uploaded, 1, "drawn while it is on stage");
 
         // Switched off in the document, which is one of the two ways a layer
@@ -2494,6 +2549,7 @@ mod tests {
             &catalogue,
             &mut compositor,
             start + Duration::from_millis(500),
+            a_wall(),
         );
         assert_eq!(hidden.uploaded, 0, "not drawn while nobody can see it");
 
@@ -2508,6 +2564,7 @@ mod tests {
             // 1.0 s is the same parity as 0.0 s, and a test that asked for the
             // picture it had already drawn would prove nothing either way.
             start + Duration::from_millis(1_500),
+            a_wall(),
         );
         assert_eq!(back.uploaded, 1, "drawn again the pass it returns");
     }
@@ -2521,7 +2578,13 @@ mod tests {
         let mut playback = Playback::new(Instant::now(), false);
         let catalogue = MediaCatalogue::new();
 
-        let first = playback.update(&state, &catalogue, &mut compositor, Instant::now());
+        let first = playback.update(
+            &state,
+            &catalogue,
+            &mut compositor,
+            Instant::now(),
+            a_wall(),
+        );
         assert_eq!(first.uploaded, 1, "drawn");
         assert_eq!(first.playing, 1);
         assert_eq!(
@@ -2529,7 +2592,13 @@ mod tests {
             Some([255, 0, 0, 255])
         );
 
-        let second = playback.update(&state, &catalogue, &mut compositor, Instant::now());
+        let second = playback.update(
+            &state,
+            &catalogue,
+            &mut compositor,
+            Instant::now(),
+            a_wall(),
+        );
         assert_eq!(second.uploaded, 0, "and not drawn again");
         assert_eq!(second.playing, 1, "but still on stage");
         assert!(playback.showing().get(&layer_id) == Some(&true));
@@ -2543,13 +2612,25 @@ mod tests {
         let mut compositor = HeadlessCompositor::sized(SizePx::new(32, 32));
         let mut playback = Playback::new(Instant::now(), false);
         let catalogue = MediaCatalogue::new();
-        playback.update(&state, &catalogue, &mut compositor, Instant::now());
+        playback.update(
+            &state,
+            &catalogue,
+            &mut compositor,
+            Instant::now(),
+            a_wall(),
+        );
 
         // The same layer and the same slot, edited — which is what an operator
         // changing a colour actually does.
         state.show.as_mut().expect("a show").layers[0].slots[0].source =
             solid([0.0, 0.0, 1.0, 1.0]);
-        let report = playback.update(&state, &catalogue, &mut compositor, Instant::now());
+        let report = playback.update(
+            &state,
+            &catalogue,
+            &mut compositor,
+            Instant::now(),
+            a_wall(),
+        );
 
         assert_eq!(report.uploaded, 1);
         assert_eq!(
@@ -2576,6 +2657,7 @@ mod tests {
             &MediaCatalogue::new(),
             &mut compositor,
             Instant::now(),
+            a_wall(),
         );
 
         assert_eq!(report.failed, 1);
@@ -2591,12 +2673,24 @@ mod tests {
         let mut playback = Playback::new(Instant::now(), false);
         let catalogue = MediaCatalogue::new();
 
-        playback.update(&state, &catalogue, &mut compositor, Instant::now());
+        playback.update(
+            &state,
+            &catalogue,
+            &mut compositor,
+            Instant::now(),
+            a_wall(),
+        );
         assert!(compositor.texture(layer_id).is_some());
 
         // Slot 0 is Black: the layer is off stage.
         state.layers[0].active_slot = 0;
-        playback.update(&state, &catalogue, &mut compositor, Instant::now());
+        playback.update(
+            &state,
+            &catalogue,
+            &mut compositor,
+            Instant::now(),
+            a_wall(),
+        );
 
         assert!(compositor.texture(layer_id).is_none());
         assert_eq!(playback.telemetry().playing, 0);
@@ -2615,6 +2709,7 @@ mod tests {
             &MediaCatalogue::new(),
             &mut compositor,
             Instant::now(),
+            a_wall(),
         );
 
         assert_eq!(
@@ -2648,11 +2743,11 @@ mod tests {
         let mut playback = Playback::new(start, false);
         let catalogue = MediaCatalogue::new();
 
-        let first = playback.update(&state, &catalogue, &mut compositor, start);
+        let first = playback.update(&state, &catalogue, &mut compositor, start, a_wall());
         assert_eq!(first.uploaded, 1, "drawn");
         assert_eq!(first.playing, 1);
 
-        let same_second = playback.update(&state, &catalogue, &mut compositor, start);
+        let same_second = playback.update(&state, &catalogue, &mut compositor, start, a_wall());
         assert_eq!(same_second.uploaded, 0, "and not drawn again for nothing");
         assert_eq!(same_second.playing, 1, "but still on stage");
 
@@ -2661,6 +2756,7 @@ mod tests {
             &catalogue,
             &mut compositor,
             start + Duration::from_secs(1),
+            a_wall(),
         );
         assert_eq!(next_second.uploaded, 1, "and the next second is drawn");
     }
@@ -2677,14 +2773,26 @@ mod tests {
             let mut playback = Playback::new(start, false);
             let catalogue = MediaCatalogue::new();
 
-            playback.update(&state, &catalogue, &mut compositor, start);
+            playback.update(&state, &catalogue, &mut compositor, start, a_wall());
             let five_seconds_in = start + Duration::from_secs(5);
-            playback.update(&state, &catalogue, &mut compositor, five_seconds_in);
+            playback.update(
+                &state,
+                &catalogue,
+                &mut compositor,
+                five_seconds_in,
+                a_wall(),
+            );
 
             // The pad, and nothing else about the slot changed.
             state.layers[0].trigger += 1;
             playback
-                .update(&state, &catalogue, &mut compositor, five_seconds_in)
+                .update(
+                    &state,
+                    &catalogue,
+                    &mut compositor,
+                    five_seconds_in,
+                    a_wall(),
+                )
                 .uploaded
         };
 
@@ -2708,12 +2816,12 @@ mod tests {
         let mut playback = Playback::new(start, false);
         let catalogue = MediaCatalogue::new();
 
-        let first = playback.update(&state, &catalogue, &mut compositor, start);
+        let first = playback.update(&state, &catalogue, &mut compositor, start, a_wall());
         assert_eq!(first.uploaded, 1);
         assert_eq!(first.playing, 1);
         assert!(compositor.texture(layer_id).is_some());
 
-        let again = playback.update(&state, &catalogue, &mut compositor, start);
+        let again = playback.update(&state, &catalogue, &mut compositor, start, a_wall());
         assert_eq!(again.playing, 1, "still on stage");
         assert!(playback.showing().get(&layer_id) == Some(&true));
     }
@@ -2775,7 +2883,13 @@ mod tests {
         let mut playback = Playback::new(Instant::now(), true);
         let red = Some([255, 0, 0, 255]);
 
-        let first = playback.update(&state, &catalogue, &mut compositor, Instant::now());
+        let first = playback.update(
+            &state,
+            &catalogue,
+            &mut compositor,
+            Instant::now(),
+            a_wall(),
+        );
         assert_eq!(first.uploaded, 1, "the generator drew itself");
         assert_eq!(compositor.texture(layer_id).map(|(_, pixel)| pixel), red);
 
@@ -2786,7 +2900,13 @@ mod tests {
         while Instant::now() < deadline
             && compositor.texture(layer_id).map(|(_, pixel)| pixel) == red
         {
-            playback.update(&state, &catalogue, &mut compositor, Instant::now());
+            playback.update(
+                &state,
+                &catalogue,
+                &mut compositor,
+                Instant::now(),
+                a_wall(),
+            );
             std::thread::sleep(Duration::from_millis(2));
         }
         assert_ne!(
@@ -2797,7 +2917,13 @@ mod tests {
 
         // And back to the generator that has already drawn once.
         state.layers[0].active_slot = 1;
-        let back = playback.update(&state, &catalogue, &mut compositor, Instant::now());
+        let back = playback.update(
+            &state,
+            &catalogue,
+            &mut compositor,
+            Instant::now(),
+            a_wall(),
+        );
 
         assert_eq!(
             back.uploaded, 1,
@@ -2889,7 +3015,7 @@ mod tests {
         let mut settled = None;
 
         while Instant::now() < deadline {
-            playback.update(state, catalogue, compositor, now);
+            playback.update(state, catalogue, compositor, now, a_wall());
             playback.playheads(&mut playheads);
 
             let wanted = playheads
@@ -3087,6 +3213,7 @@ mod tests {
             &catalogue,
             &mut compositor,
             start + Duration::from_secs(10),
+            a_wall(),
         );
         assert_eq!(
             playback.showing().get(&layer_id),
@@ -3253,7 +3380,7 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(10);
         let mut reported = Vec::new();
         while Instant::now() < deadline {
-            playback.update(state, catalogue, compositor, at);
+            playback.update(state, catalogue, compositor, at, a_wall());
             playback.playheads(&mut reported);
             if let Some(head) = reported.first() {
                 return Some(*head);
@@ -3295,6 +3422,7 @@ mod tests {
             &catalogue,
             &mut compositor,
             start + Duration::from_secs(1),
+            a_wall(),
         );
         let head = reported(&playback)
             .first()
@@ -3346,7 +3474,13 @@ mod tests {
         let mut playback = Playback::new(Instant::now(), false);
         let catalogue = MediaCatalogue::new();
 
-        let report = playback.update(&state, &catalogue, &mut compositor, Instant::now());
+        let report = playback.update(
+            &state,
+            &catalogue,
+            &mut compositor,
+            Instant::now(),
+            a_wall(),
+        );
 
         assert_eq!(report.playing, 1, "it is very much on stage");
         assert!(
@@ -3374,7 +3508,7 @@ mod tests {
             .expect("it was playing");
 
         state.layers[0].active_slot = 0;
-        playback.update(&state, &catalogue, &mut compositor, start);
+        playback.update(&state, &catalogue, &mut compositor, start, a_wall());
 
         assert!(
             reported(&playback).is_empty(),
@@ -3406,6 +3540,7 @@ mod tests {
             &catalogue,
             &mut compositor,
             start + Duration::from_secs(10),
+            a_wall(),
         );
 
         assert!(reported(&playback).is_empty());
@@ -3435,6 +3570,7 @@ mod tests {
             &catalogue,
             &mut compositor,
             start + Duration::from_secs(1),
+            a_wall(),
         );
         state.layers[0].transport = Transport::Paused;
         playback.update(
@@ -3442,6 +3578,7 @@ mod tests {
             &catalogue,
             &mut compositor,
             start + Duration::from_millis(1_100),
+            a_wall(),
         );
         let paused = reported(&playback).first().copied().expect("a playhead");
 
@@ -3451,6 +3588,7 @@ mod tests {
             &catalogue,
             &mut compositor,
             start + Duration::from_secs(3),
+            a_wall(),
         );
         let still = reported(&playback).first().copied().expect("a playhead");
         assert_eq!(
@@ -3467,6 +3605,7 @@ mod tests {
             &catalogue,
             &mut compositor,
             start + Duration::from_millis(3_100),
+            a_wall(),
         );
         let resumed = reported(&playback).first().copied().expect("a playhead");
         assert!(
@@ -3500,6 +3639,7 @@ mod tests {
             &catalogue,
             &mut compositor,
             start + Duration::from_secs(2),
+            a_wall(),
         );
         let running = reported(&playback).first().copied().expect("a playhead");
         assert!(running.position_ms > 500, "it had got somewhere first");
@@ -3511,6 +3651,7 @@ mod tests {
                 &catalogue,
                 &mut compositor,
                 start + Duration::from_millis(after),
+                a_wall(),
             );
             let stopped = reported(&playback).first().copied().expect("a playhead");
             assert_eq!(stopped.frame, 0, "stopped at {after} ms");
@@ -3601,6 +3742,7 @@ mod tests {
             &catalogue,
             &mut compositor,
             start + Duration::from_millis(100),
+            a_wall(),
         );
         assert_eq!(playback.telemetry().playing, 0, "the player is retired");
         assert!(reported(&playback).is_empty(), "and so is its playhead");
@@ -3814,7 +3956,13 @@ mod tests {
 
         let deadline = Instant::now() + Duration::from_secs(5);
         while Instant::now() < deadline && compositor.texture(layer_id).is_none() {
-            playback.update(&state, &catalogue, &mut compositor, Instant::now());
+            playback.update(
+                &state,
+                &catalogue,
+                &mut compositor,
+                Instant::now(),
+                a_wall(),
+            );
             std::thread::sleep(Duration::from_millis(2));
         }
 
@@ -3914,7 +4062,7 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(10);
         while !arrived && Instant::now() < deadline {
             let began = Instant::now();
-            playback.update(&state, &catalogue, &mut compositor, began);
+            playback.update(&state, &catalogue, &mut compositor, began, a_wall());
             worst = worst.max(began.elapsed());
 
             arrived = playback
