@@ -1387,6 +1387,109 @@ fn build_console(
     }
 }
 
+/// How long a published stream may go unseen by our own finder before it is
+/// worth saying something.
+///
+/// A sender learns its announced name a moment after it is made, discovery
+/// looks once a second, and mDNS is allowed to take its time. Twenty seconds is
+/// far longer than any of that and far shorter than a get-in.
+const ANNOUNCEMENT_GRACE: Duration = Duration::from_secs(20);
+
+/// Whether what this renderer publishes is coming back to it.
+#[derive(Default)]
+struct OwnAnnouncement {
+    /// When the current spell of not seeing ourselves began.
+    missing_since: Option<Instant>,
+    /// Whether this spell has already been reported.
+    said: bool,
+}
+
+/// Says when this renderer publishes a stream it cannot find itself.
+///
+/// # Why this is worth a line of its own
+///
+/// Found on the show machine on 2026-10-16: NDI Studio Monitor could not see
+/// the server's output, nothing on the network could, and neither could the
+/// server. `avahi-daemon` was not installed — `libndi` does mDNS through it —
+/// and **every other number on that machine was correct**. The wall ran at
+/// 59.94, nothing dropped, previews moved, the sender logged that it was
+/// publishing. The only trace was `sources=0 names=none`, logged once at
+/// startup and never again, because discovery only speaks when the set changes
+/// — and an empty network looks exactly like a broken mDNS stack in that line.
+///
+/// This is the observation that tells the two apart, and it costs nothing to
+/// make: our finder runs with `show_local_sources` on, so a stream this process
+/// publishes must come back to this process. If it does not, the fault is
+/// between us and the machine's mDNS, not out on the network — which is a
+/// different thing to go and look at, and the whole value of saying it.
+///
+/// Said once per spell, and said again when it comes back, because an operator
+/// who has just fixed something needs to be told they fixed it.
+fn watch_own_announcement(state: &Arc<SharedShowState>, watch: &mut OwnAnnouncement, now: Instant) {
+    let published = state.published_ndi();
+    let found = state.ndi_sources();
+    match judge_own_announcement(&published, &found, watch, now) {
+        Verdict::Quiet => {}
+        Verdict::CameBack => tracing::info!(
+            names = %published.join(", "),
+            "this renderer can see its own stream on the network again"
+        ),
+        Verdict::Unreachable => tracing::warn!(
+            published = %published.join(", "),
+            found = found.len(),
+            "this renderer is publishing a stream and cannot see its own announcement; \
+             discovery on this machine is not working, so nothing else will find it either. \
+             On Linux NDI announces through Avahi: check that avahi-daemon is installed and \
+             running"
+        ),
+    }
+}
+
+/// What [`watch_own_announcement`] decided, so the rule can be tested without
+/// reading a log back.
+#[derive(Debug, PartialEq, Eq)]
+enum Verdict {
+    /// Nothing worth saying: not publishing, or publishing and visible, or
+    /// missing but not for long enough yet.
+    Quiet,
+    /// Visible again after having been reported missing.
+    CameBack,
+    /// Published, unseen by our own finder, and past the grace period.
+    Unreachable,
+}
+
+/// The decision, separated from the saying of it.
+fn judge_own_announcement(
+    published: &[String],
+    found: &[String],
+    watch: &mut OwnAnnouncement,
+    now: Instant,
+) -> Verdict {
+    if published.is_empty() {
+        // Nothing to look for. Not evidence of anything either way, so a
+        // renderer with no network outputs never reports on mDNS at all.
+        *watch = OwnAnnouncement::default();
+        return Verdict::Quiet;
+    }
+
+    if published.iter().any(|mine| found.contains(mine)) {
+        let recovered = watch.said;
+        *watch = OwnAnnouncement::default();
+        return if recovered {
+            Verdict::CameBack
+        } else {
+            Verdict::Quiet
+        };
+    }
+
+    let since = *watch.missing_since.get_or_insert(now);
+    if !watch.said && now.saturating_duration_since(since) >= ANNOUNCEMENT_GRACE {
+        watch.said = true;
+        return Verdict::Unreachable;
+    }
+    Verdict::Quiet
+}
+
 /// Builds the streams the show asks for, and stops the ones it no longer does.
 ///
 /// Nothing happens at all while the answer is unchanged, which is almost always:
@@ -1524,6 +1627,8 @@ fn render(
     // What the network outputs were last built from.
     let mut streaming: Vec<Streamed> = Vec::new();
     let mut said_no_streams = false;
+    // And whether what we publish is coming back to us.
+    let mut own_announcement = OwnAnnouncement::default();
     // And which connector the System screen is on, at which mode.
     let mut console_output: ConsoleOutput = None;
     let mut last_fault = epoch;
@@ -1568,6 +1673,7 @@ fn render(
                 &mut said_no_streams,
                 now,
             );
+            watch_own_announcement(state, &mut own_announcement, now);
         }
 
         render.tick(now);
@@ -1676,6 +1782,127 @@ fn render(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What a machine with working mDNS looks like: our own name comes back.
+    #[test]
+    fn a_stream_that_comes_back_is_never_mentioned() {
+        let mine = vec!["PC05 (Wall)".to_owned()];
+        let mut watch = OwnAnnouncement::default();
+        let start = Instant::now();
+
+        for second in 0..120 {
+            let now = start + Duration::from_secs(second);
+            assert_eq!(
+                judge_own_announcement(&mine, &mine, &mut watch, now),
+                Verdict::Quiet,
+                "nothing to report at second {second}"
+            );
+        }
+    }
+
+    /// And a machine with no mDNS daemon: published, never seen, said once.
+    ///
+    /// Said *once* matters as much as said at all. This runs every second, and
+    /// a warning repeating every second through an evening is a warning
+    /// somebody turns the log off to escape.
+    #[test]
+    fn a_stream_that_never_comes_back_is_reported_once_after_the_grace() {
+        let mine = vec!["PC05 (Wall)".to_owned()];
+        let others = vec!["SOMEBODY-ELSE (Camera)".to_owned()];
+        let mut watch = OwnAnnouncement::default();
+        let start = Instant::now();
+
+        let mut said = 0;
+        for second in 0..600 {
+            let now = start + Duration::from_secs(second);
+            match judge_own_announcement(&mine, &others, &mut watch, now) {
+                Verdict::Unreachable => {
+                    said += 1;
+                    assert!(
+                        Duration::from_secs(second) >= ANNOUNCEMENT_GRACE,
+                        "said at {second}s, before the grace period is up"
+                    );
+                }
+                Verdict::Quiet => {}
+                Verdict::CameBack => panic!("it never came back"),
+            }
+        }
+        assert_eq!(said, 1, "said once over ten minutes, not once a second");
+    }
+
+    /// Somebody installs the daemon mid-show. They are told it worked.
+    #[test]
+    fn a_stream_that_comes_back_after_being_reported_says_so() {
+        let mine = vec!["PC05 (Wall)".to_owned()];
+        let mut watch = OwnAnnouncement::default();
+        let start = Instant::now();
+
+        assert_eq!(
+            judge_own_announcement(&mine, &[], &mut watch, start),
+            Verdict::Quiet,
+            "not straight away"
+        );
+        assert_eq!(
+            judge_own_announcement(&mine, &[], &mut watch, start + ANNOUNCEMENT_GRACE),
+            Verdict::Unreachable
+        );
+        assert_eq!(
+            judge_own_announcement(&mine, &mine, &mut watch, start + ANNOUNCEMENT_GRACE),
+            Verdict::CameBack
+        );
+        assert_eq!(
+            judge_own_announcement(&mine, &mine, &mut watch, start + ANNOUNCEMENT_GRACE),
+            Verdict::Quiet,
+            "and then it stops talking about it"
+        );
+    }
+
+    /// A renderer with no network outputs says nothing about mDNS, ever.
+    ///
+    /// Most machines are this one, and an empty network is not a fault.
+    #[test]
+    fn a_renderer_publishing_nothing_reports_nothing() {
+        let mut watch = OwnAnnouncement::default();
+        let start = Instant::now();
+        for second in 0..600 {
+            assert_eq!(
+                judge_own_announcement(&[], &[], &mut watch, start + Duration::from_secs(second)),
+                Verdict::Quiet
+            );
+        }
+    }
+
+    /// Having been unreachable once must not make the next spell silent.
+    #[test]
+    fn a_second_spell_is_reported_as_well() {
+        let mine = vec!["PC05 (Wall)".to_owned()];
+        let mut watch = OwnAnnouncement::default();
+        let start = Instant::now();
+
+        assert_eq!(
+            judge_own_announcement(&mine, &[], &mut watch, start),
+            Verdict::Quiet
+        );
+        assert_eq!(
+            judge_own_announcement(&mine, &[], &mut watch, start + ANNOUNCEMENT_GRACE),
+            Verdict::Unreachable
+        );
+        assert_eq!(
+            judge_own_announcement(&mine, &mine, &mut watch, start + ANNOUNCEMENT_GRACE),
+            Verdict::CameBack
+        );
+
+        let later = start + ANNOUNCEMENT_GRACE + Duration::from_secs(60);
+        assert_eq!(
+            judge_own_announcement(&mine, &[], &mut watch, later),
+            Verdict::Quiet,
+            "the clock starts again rather than carrying on from the first spell"
+        );
+        assert_eq!(
+            judge_own_announcement(&mine, &[], &mut watch, later + ANNOUNCEMENT_GRACE),
+            Verdict::Unreachable
+        );
+    }
 
     /// A show with one output on `connector`, at 1920x1080p60.
     fn show_on(connector: Option<&str>, gpu: &str, enabled: bool) -> ovs_types::config::Show {

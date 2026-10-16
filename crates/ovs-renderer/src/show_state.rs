@@ -471,6 +471,17 @@ impl SharedShowState {
         self.ndi_published.store(Arc::new(names));
     }
 
+    /// What this renderer is publishing, by announced name.
+    ///
+    /// The other half of [`Self::ndi_offered`]: that one subtracts these to
+    /// avoid a loopback, and this one hands them over so somebody can check
+    /// they come back. A machine whose own announcement never reaches its own
+    /// finder has no working mDNS, and nothing else about it looks wrong.
+    #[must_use]
+    pub fn published_ndi(&self) -> Arc<Vec<String>> {
+        self.ndi_published.load_full()
+    }
+
     /// The NDI sources worth offering an operator.
     ///
     /// Everything discovery found except this renderer's own outputs (owner,
