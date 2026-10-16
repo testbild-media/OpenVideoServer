@@ -540,7 +540,7 @@ impl Scene {
                 continue;
             }
 
-            let quad = quad_for(
+            let mut quad = quad_for(
                 layer,
                 live,
                 live.opacity,
@@ -549,6 +549,11 @@ impl Scene {
                 show.composition.size,
                 media,
             );
+            // A source may ask for its own way of landing on what is under it.
+            // One does: see [`asks_for_blend`].
+            if let Some(blend) = slot.and_then(|slot| asks_for_blend(slot, state)) {
+                quad.blend = blend;
+            }
             if quad.is_invisible() {
                 continue;
             }
@@ -597,6 +602,52 @@ impl Scene {
                 });
             }
         }
+    }
+}
+
+/// How a source asks to land on what is under it, where it asks at all.
+///
+/// `None` for every source but one, which is the point: a layer composites the
+/// way its operator set it, and nothing in a slot overrules that by accident.
+///
+/// **The strobe's second mode is the exception** (owner, 2026-10-16: "einen
+/// modus für invert color strobe, wo der weiße blitz dann inverted color
+/// ist"). A flash that inverts what is under it is not a picture the generator
+/// can draw — a generator draws its own layer and has never seen the
+/// composition — so the inversion is in how the layer lands: a difference
+/// against white is the picture with every channel turned round, and the clear
+/// half of the cycle, which is transparent, leaves it alone.
+///
+/// The live value first, so a desk can change the mode mid-show; the slot's
+/// own value behind it; the manifest's default behind that.
+fn asks_for_blend(slot: &ovs_types::config::Slot, state: &ShowState) -> Option<BlendMode> {
+    let ovs_types::config::slot::SourceRef::Generator {
+        instance_id,
+        type_id,
+        version,
+        parameters,
+    } = &slot.source
+    else {
+        return None;
+    };
+    if type_id != "ovs.strobe" {
+        return None;
+    }
+
+    let manifest = ovs_types::config::generators::manifest(type_id, *version)?;
+    let live = state
+        .generators
+        .get(instance_id)
+        .and_then(|values| values.get("mode"));
+    let value = live
+        .cloned()
+        .or_else(|| manifest.value(parameters, "mode"))?;
+
+    match value {
+        ovs_types::config::slot::ParameterValue::Choice(mode) if mode == "invert" => {
+            Some(BlendMode::Difference)
+        }
+        _ => None,
     }
 }
 
@@ -1620,6 +1671,53 @@ mod tests {
         scene.compose(&state, &BTreeMap::new());
         assert_eq!(scene.quads()[0].route, Route::B);
         assert_eq!(scene.quads()[0].blend, BlendMode::Add);
+    }
+
+    #[test]
+    fn a_strobe_set_to_invert_lands_as_a_difference() {
+        // The owner, 2026-10-16: "einen modus für invert color strobe, wo der
+        // weiße blitz dann inverted color ist." A generator draws its own
+        // layer and has never seen what is under it, so the inversion is in
+        // how the layer lands — a difference against white — and that is the
+        // one case where a slot overrules the blend mode its layer was given.
+        let strobe = |mode: Option<&str>| {
+            let mut show = show_with(1);
+            show.layers[0].blend_mode = BlendMode::Add;
+            let parameters = mode.map_or_else(ovs_types::config::slot::ParameterMap::new, |mode| {
+                ovs_types::config::slot::ParameterMap::from([(
+                    "mode".to_owned(),
+                    ovs_types::config::slot::ParameterValue::Choice(mode.to_owned()),
+                )])
+            });
+            show.layers[0].slots[0].source = ovs_types::config::slot::SourceRef::Generator {
+                instance_id: ovs_types::id::GeneratorInstanceId::new(),
+                type_id: "ovs.strobe".to_owned(),
+                version: 2,
+                parameters,
+            };
+            let state = state_showing_everything(show);
+            let mut showing = BTreeMap::new();
+            showing.insert(state.layers[0].layer_id, true);
+            let mut scene = Scene::new();
+            scene.compose(&state, &showing);
+            scene.quads()[0].blend
+        };
+
+        assert_eq!(
+            strobe(Some("invert")),
+            BlendMode::Difference,
+            "an inverting strobe asks for a difference"
+        );
+        assert_eq!(
+            strobe(Some("colour")),
+            BlendMode::Add,
+            "and the ordinary one leaves the layer's own blend alone"
+        );
+        assert_eq!(
+            strobe(None),
+            BlendMode::Add,
+            "as does one set to nothing, which is the published default"
+        );
     }
 
     #[test]

@@ -302,6 +302,14 @@ Footprint: **2 channels**. Patch to: **one effect instance in a chain**.
 |---|---|---|---|---|
 | 1–2 | Amount | `amount` | 0 at 0, 1 at 65535 | 65535 |
 
+## Invert — `ovs.invert` v1
+
+Footprint: **1 channels**. Patch to: **one effect instance in a chain**.
+
+| Channel | Name | Control | Values | Home |
+|---|---|---|---|---|
+| 1 | Inverted | `on` | on at 128 and above | 0 |
+
 ## Solid Colour — `ovs.solid_colour` v1
 
 Footprint: **4 channels**. Patch to: **one generator instance in a slot**.
@@ -324,6 +332,26 @@ Footprint: **5 channels**. Patch to: **one generator instance in a slot**.
 | 3 | Colour Blue | `colour` | 0 at 0, 1 at 255 | 255 |
 | 4 | Colour Alpha | `colour` | 0 at 0, 1 at 255 | 255 |
 | 5 | Rate | `hz` | 0.5 at 0, 30 at 255 | 82 |
+
+## Strobe — `ovs.strobe` v2
+
+Footprint: **6 channels**. Patch to: **one generator instance in a slot**.
+
+| Channel | Name | Control | Values | Home |
+|---|---|---|---|---|
+| 1 | Colour Red | `colour` | 0 at 0, 1 at 255 | 255 |
+| 2 | Colour Green | `colour` | 0 at 0, 1 at 255 | 255 |
+| 3 | Colour Blue | `colour` | 0 at 0, 1 at 255 | 255 |
+| 4 | Colour Alpha | `colour` | 0 at 0, 1 at 255 | 255 |
+| 5 | Rate | `hz` | 0.5 at 0, 30 at 255 | 82 |
+| 6 | Mode | `mode` | 2 steps, listed below | 64 |
+
+### Mode (channel 6)
+
+| DMX | Step |
+|---|---|
+| 0–127 | `colour` |
+| 128–255 | `invert` |
 
 ## Gradient — `ovs.gradient` v1
 

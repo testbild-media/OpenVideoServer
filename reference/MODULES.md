@@ -42,6 +42,16 @@ Flashes one colour at a rate.
 | Colour | `colour` | a colour, linear RGBA | 1.00, 1.00, 1.00, 1.00 |
 | Rate | `hz` | a number from 0.5 to 30 | 10 |
 
+### Strobe — `ovs.strobe` v2
+
+Flashes one colour at a rate, over the picture or against it.
+
+| Parameter | Key | Takes | Default |
+|---|---|---|---|
+| Colour | `colour` | a colour, linear RGBA | 1.00, 1.00, 1.00, 1.00 |
+| Rate | `hz` | a number from 0.5 to 30 | 10 |
+| Mode | `mode` | one of `colour` (Colour), `invert` (Invert) | `colour` |
+
 ### Gradient — `ovs.gradient` v1
 
 A linear gradient between two colours, at an angle.
@@ -281,4 +291,12 @@ A picture from the library, multiplied in or cut out.
 | Mode | `mode` | one of `multiply` (Multiply), `cut_out` (Cut out) | `multiply` |
 | Invert | `invert` | on or off | off |
 | Amount | `amount` | a number from 0 to 1 | 1 |
+
+### Invert — `ovs.invert` v1
+
+Turns every colour into its opposite.
+
+| Parameter | Key | Takes | Default |
+|---|---|---|---|
+| Inverted | `on` | on or off | off |
 

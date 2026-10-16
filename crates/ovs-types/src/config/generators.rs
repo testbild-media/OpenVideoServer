@@ -262,6 +262,77 @@ pub const STROBE_V1: GeneratorManifest = GeneratorManifest {
     ],
 };
 
+/// A flash that can take the picture under it instead of covering it.
+///
+/// The owner, 2026-10-16: "erweitere den strobe um ein kanal. normal strobe
+/// mit weiß und einen modus für invert color strobe, wo der weiße blitz dann
+/// inverted color ist."
+///
+/// **One more channel, and version one is untouched.** A manifest is published
+/// once; a show saved with the strobe it had keeps flashing exactly as it did,
+/// and a source list offers this.
+///
+/// # What the second mode is
+///
+/// `colour` is the flash as it has always been: the colour, over what is
+/// under it. `invert` composites the lit frame as a *difference* instead, so
+/// white — the published colour — gives the picture underneath with every
+/// channel turned round, and the clear half of the cycle leaves it alone.
+///
+/// The colour still means something in that mode rather than being ignored:
+/// a difference against white is a full inversion, and against anything else
+/// it is an inversion of part of the spectrum. That is a knob worth having
+/// and it costs nothing to keep.
+///
+/// **It needs a card that can blend that way.** Difference is one of the two
+/// advanced blend operations, and a device without the extension draws them
+/// as Normal — on such a machine an inverting strobe flashes its colour
+/// instead. The renderer says so once when it finds out.
+pub const STROBE_V2: GeneratorManifest = GeneratorManifest {
+    type_id: "ovs.strobe",
+    version: 2,
+    name: "Strobe",
+    description: "Flashes one colour at a rate, over the picture or against it.",
+    parameters: &[
+        ParameterDefinition {
+            key: "colour",
+            name: "Colour",
+            kind: ParameterKind::Colour {
+                default: [1.0, 1.0, 1.0, 1.0],
+            },
+            dmx: Some(DmxChannel::Coarse),
+        },
+        ParameterDefinition {
+            key: "hz",
+            name: "Rate",
+            kind: ParameterKind::Number {
+                min: MIN_STROBE_HZ,
+                max: MAX_STROBE_HZ,
+                default: 10.0,
+            },
+            dmx: Some(DmxChannel::Coarse),
+        },
+        ParameterDefinition {
+            key: "mode",
+            name: "Mode",
+            kind: ParameterKind::Choice {
+                choices: &[
+                    Choice {
+                        id: "colour",
+                        name: "Colour",
+                    },
+                    Choice {
+                        id: "invert",
+                        name: "Invert",
+                    },
+                ],
+                default: "colour",
+            },
+            dmx: Some(DmxChannel::Coarse),
+        },
+    ],
+};
+
 /// A linear gradient between two colours.
 ///
 /// The background this business actually asks for. A flat wash reads
@@ -842,12 +913,15 @@ pub const TEXT_V1: GeneratorManifest = GeneratorManifest {
 };
 
 /// Every generator this build publishes.
-pub const PUBLISHED: [GeneratorManifest; 10] = [
+pub const PUBLISHED: [GeneratorManifest; 11] = [
     SOLID_COLOUR_V1,
     // Version 2 and no version 1, which is the one place in this file where a
     // manifest was removed rather than retired: see its own documentation.
     TEST_PATTERN_V2,
+    // Both, and the catalogue offers the newer: a show saved against version
+    // one keeps the flash it was saved with.
     STROBE_V1,
+    STROBE_V2,
     GRADIENT_V1,
     GRID_V1,
     SHAPE_V1,
