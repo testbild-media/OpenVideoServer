@@ -131,16 +131,25 @@ const TRACKING: f32 = 0.06;
 
 /// What a generator that changes over time needs to know about now.
 ///
-/// Two clocks rather than one, because the two generators are anchored to
-/// different things and neither can be derived from the other: the time of day
-/// is on the wall clock, and how long a speaker has been talking is measured
-/// from the moment somebody fired the slot.
+/// Three clocks rather than one, because the generators are anchored to
+/// different things and none of them can be derived from the others: the time
+/// of day is on the wall clock, how long a speaker has been talking is
+/// measured from the moment somebody fired the slot, and the service pattern
+/// counts the frames the surface has drawn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Moment {
     /// Wall-clock time, for a clock.
     pub wall: SystemTime,
     /// How long this generator has been on stage, for a countdown.
     pub since_anchor: Duration,
+    /// How many passes the renderer has made, for the service pattern.
+    ///
+    /// **A count of frames, not a time** (owner, 2026-10-16: "testpattern
+    /// läuft frei, also an nichts gebunden außer die Bildrate des Ausgangs.
+    /// nicht an der systemzeit oder sonst was"). One per pass, so the pattern
+    /// advances exactly once for every frame the surface draws, and no clock
+    /// anybody can set — or that NTP can step — reaches it.
+    pub frames: u64,
 }
 
 /// A picture kept so the next second can be written into it.
@@ -405,14 +414,24 @@ fn clamp_rate(hz: f32) -> f64 {
     f64::from(hz).clamp(MIN_STROBE_HZ, MAX_STROBE_HZ)
 }
 
-/// How finely the service pattern's time is divided, in ticks a second.
+/// How far into its own run the service pattern is, in seconds.
 ///
-/// A millisecond, which is finer than any rate this drives presents at — so
-/// every pass gets an index of its own whatever the wall is running at, and
-/// the drift does not judder against a number this picked. The cost of the
-/// fine division is nothing: this pattern is redrawn every pass regardless,
-/// which is what it is for.
-const PATTERN_TICKS_PER_SECOND: u32 = 1_000;
+/// **Its tick is a count of frames** (owner, 2026-10-16: "an nichts gebunden
+/// außer die Bildrate des Ausgangs"), so the surface's rate is what turns one
+/// into the other. The pattern's speeds are written in pixels a second, which
+/// is why this exists at all: the picture then runs at the same speed on a
+/// 50 Hz wall as on a 60 Hz one, and what the faster wall gets is more of it.
+///
+/// `f64` so that a wall that has been up for a month still has a different
+/// number for every frame: single precision stops counting whole frames at
+/// sixteen million, which is three days at sixty a second.
+fn seconds_of(tick: u32, rate: FrameRate) -> f64 {
+    let hertz = rate.as_f64();
+    if hertz <= 0.0 {
+        return 0.0;
+    }
+    f64::from(tick) / hertz
+}
 
 /// How many frames a countdown holds.
 ///
@@ -591,16 +610,20 @@ impl GeneratorSource {
     /// lit and clear, and its second one is a picture of nothing at all.
     ///
     /// **A free-running source has no halfway**, its length being as far as the
-    /// counter goes: noise and the service pattern get two seconds in. For the
-    /// pattern that is exactly two seconds, its tick being a millisecond; for
-    /// noise it is one field out of billions, no more typical than any other
-    /// and no less.
+    /// counter goes, so each gets a moment that suits what its tick counts.
+    /// The service pattern's is frames, so a hundred and twenty is two seconds
+    /// of a sixty-hertz surface; noise's is milliseconds, and two thousand of
+    /// them is one field out of billions, no more typical than any other and
+    /// no less.
     #[must_use]
     pub fn tick_worth_a_picture(&self) -> u32 {
-        match self.kind.length().frame_count {
-            u32::MAX => PATTERN_TICKS_PER_SECOND * 2,
-            frames if frames <= 2 => 0,
-            frames => frames / 2,
+        match self.kind {
+            Kind::ServicePattern { .. } => 120,
+            _ => match self.kind.length().frame_count {
+                u32::MAX => 2_000,
+                frames if frames <= 2 => 0,
+                frames => frames / 2,
+            },
         }
     }
 
@@ -656,43 +679,40 @@ impl GeneratorSource {
                 Some((ms % u128::from(u32::MAX)) as u32)
             }
             Kind::ServicePattern { .. } => {
-                // **Free-running: nothing a show does reaches it.** The owner,
-                // 2026-10-12, "Das Testbild läuft immer Freerun, es hat seine
-                // eigene Zeit", and what that means, 2026-10-16 after I had it
-                // the wrong way round: "dass es unabhängig von BPM oder
-                // irgendeiner Speedscale läuft. das testbild ist so schnell
-                // wie es ist … und sollte niemals auf speedscale und bpm
-                // reagieren."
+                // **The frames the surface has drawn, and nothing else.** The
+                // owner, 2026-10-16: "testpattern läuft frei, also an nichts
+                // gebunden außer die Bildrate des Ausgangs. nicht an der
+                // systemzeit oder sonst was. es muss sich unabhängig von der
+                // systemzeit bauen. es muss frei sein." And on 2026-10-12, the
+                // half of it that was always true: "Das Testbild läuft immer
+                // Freerun, es hat seine eigene Zeit" — free of the tempo and
+                // of every speed scale, which is structural here rather than
+                // enforced, since nothing of the kind is in this function's
+                // arguments.
                 //
-                // That is structural here rather than enforced: this function
-                // is handed a wall time and the layer's age and nothing else,
-                // so there is no tempo or scale to react to — the master's
-                // speed and the slot's belong to the playhead, which a
-                // generator does not have.
+                // One tick a pass. [`pattern_on_card`] turns it into seconds
+                // with the surface's own rate, so the picture moves at the
+                // same speed on a 50 Hz wall as on a 60 — what changes is that
+                // sixty frames a second are sixty different pictures.
                 //
-                // The wall clock rather than the layer's age, which is what
-                // everything else here is timed by: this one must not restart
-                // when a slot is switched back to it, when a caption is edited
-                // or when the composition is resized, and two layers showing
-                // it have to be in step. It is what somebody checks a wall
-                // with — "um nicht in die WebGUI oder an den Server gehen zu
-                // müssen" — rather than something a show is built out of.
+                // **It was the wall clock until 2026-10-16**, and that was
+                // wrong twice over: an NTP step moved the picture, and the
+                // number was milliseconds since 1970, which a single-precision
+                // float rounds to the nearest 128 — eight frames in a row were
+                // handed the same moment and the owner saw the judder.
                 //
-                // A clock somebody steps, by hand or by NTP, steps this
-                // picture with it. That is the cost of a time of its own and
-                // it is a jump in a test pattern, which is the cheapest place
-                // in this system for one to land.
+                // The layer's age is still not it: this must not restart when
+                // a slot is switched back to it, when a caption is edited or
+                // when the composition is resized, and two layers showing it
+                // have to be in step. A count of the renderer's own passes is
+                // all three.
                 //
                 // Wrapped rather than held at the end: a test pattern that
                 // stopped moving would be exactly the lie it exists to expose
                 // — a frozen output and a live one showing a still look the
-                // same from across a room.
-                let ms = moment
-                    .wall
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis();
-                Some((ms % u128::from(u32::MAX)) as u32)
+                // same from across a room. At sixty a second the wrap is two
+                // years away.
+                Some((moment.frames % u64::from(u32::MAX)) as u32)
             }
             Kind::Strobe { hz, .. } => {
                 // The parity of the half-cycle, and nothing more: a strobe has
@@ -763,7 +783,7 @@ impl GeneratorSource {
             }
         }
 
-        let seconds = f64::from(tick) / f64::from(PATTERN_TICKS_PER_SECOND);
+        let seconds = seconds_of(tick, rate);
         self.pattern.as_mut().map(|pattern| pattern.draw(seconds))
     }
 
@@ -906,7 +926,7 @@ impl GeneratorSource {
         }
 
         let pattern = self.pattern.as_ref()?;
-        let seconds = f64::from(tick) / f64::from(PATTERN_TICKS_PER_SECOND);
+        let seconds = seconds_of(tick, rate);
         Some((
             stale.then(|| pattern.source_picture()),
             pattern.moment(seconds),
@@ -952,7 +972,8 @@ impl FrameSource for GeneratorSource {
         // invented, and the caption says so on the picture.
         if let Kind::ServicePattern { caption } = &self.kind {
             let mut pattern = ServicePattern::new(self.size, FrameRate::FPS_60, caption);
-            let seconds = f64::from(index) / f64::from(PATTERN_TICKS_PER_SECOND);
+            // The index is a frame of that surface, as it is in the live path.
+            let seconds = seconds_of(index, FrameRate::FPS_60);
             return Ok(Frame::new(index, pattern.draw(seconds).clone()));
         }
 
@@ -2258,6 +2279,7 @@ mod tests {
             .tick_at(Moment {
                 wall: UNIX_EPOCH,
                 since_anchor: Duration::from_secs_f64(seconds),
+                frames: 0,
             })
             .expect("a strobe knows which half of its cycle it is in");
         // Forgotten first: `redraw_at` answers `None` for a tick it has
@@ -2328,6 +2350,7 @@ mod tests {
                 .tick_at(Moment {
                     wall: UNIX_EPOCH,
                     since_anchor: Duration::from_secs_f64(f64::from(frame) / 60.0),
+                    frames: 0,
                 })
                 .expect("a tick")
                 .is_multiple_of(2);
@@ -2355,6 +2378,7 @@ mod tests {
             .tick_at(Moment {
                 wall: UNIX_EPOCH,
                 since_anchor: Duration::from_secs(1),
+                frames: 0,
             })
             .is_some());
     }
@@ -2412,6 +2436,7 @@ mod tests {
                 .tick_at(Moment {
                     wall: UNIX_EPOCH + Duration::from_secs(wall_seconds),
                     since_anchor: Duration::from_secs(layer_seconds),
+                    frames: 0,
                 })
                 .expect("a tick")
         };
@@ -2430,36 +2455,34 @@ mod tests {
         .expect("published")
     }
 
+    /// One second of a wall, as the moments the pattern would be drawn at.
+    ///
+    /// From a frame count a machine that has been up for weeks would really
+    /// be at: three million is a fortnight at sixty a second, and a test that
+    /// starts at frame zero passes whatever the arithmetic does.
+    fn one_second_of(rate: FrameRate, size: SizePx) -> Vec<crate::pattern::PatternMoment> {
+        let mut source = GeneratorSource::new("ovs.test_pattern", 2, &ParameterMap::new(), size)
+            .expect("published");
+        let start = 3_000_000_u32;
+        let frames = rate.as_f64().round() as u32;
+        (0..frames)
+            .map(|frame| {
+                source
+                    .pattern_on_card(start + frame, rate)
+                    .expect("the service pattern draws on the card")
+                    .1
+            })
+            .collect()
+    }
+
     #[test]
     fn at_sixty_hertz_it_makes_sixty_different_pictures_a_second() {
         // The owner, 2026-10-16: "wenn die composition 60 Hz ist muss das
         // testpattern auch 60 unterschiedliche bilder generieren und
-        // anzeigen." Not sixty passes over the same moment: sixty moments.
-        //
-        // One second of a 1080p wall, at the millisecond each frame of it
-        // really lands on, from a tick read off a real clock — a round number
-        // hides the fault this is here for.
-        let mut source = GeneratorSource::new(
-            "ovs.test_pattern",
-            2,
-            &ParameterMap::new(),
-            SizePx::new(1920, 1080),
-        )
-        .expect("published");
+        // anzeigen." Not sixty passes over one moment: sixty moments.
+        let moments = one_second_of(FrameRate::FPS_60, SizePx::new(1920, 1080));
 
-        let start = 1_110_358_636_u32;
-        let moments: Vec<crate::pattern::PatternMoment> = (0..60)
-            .map(|frame| {
-                source
-                    .pattern_on_card(
-                        start + frame * PATTERN_TICKS_PER_SECOND / 60,
-                        FrameRate::FPS_60,
-                    )
-                    .expect("the service pattern draws on the card")
-                    .1
-            })
-            .collect();
-
+        assert_eq!(moments.len(), 60);
         for (at, moment) in moments.iter().enumerate() {
             for (other_at, other) in moments.iter().enumerate().skip(at + 1) {
                 assert_ne!(
@@ -2468,48 +2491,45 @@ mod tests {
                 );
             }
         }
+
+        // The bars themselves, not only the sweep: a hundred pixels a second
+        // is 1.6 of them between frames at this size.
+        assert_ne!(
+            moments[0].shift_x, moments[1].shift_x,
+            "the bars stood still"
+        );
     }
 
     #[test]
-    fn the_pattern_moves_on_every_frame_however_long_the_clock_has_run() {
-        // The owner, 2026-10-16: "testpattern generator sieht im vergleich zum
-        // noise und dem video nicht flüssig aus im preview." This one is timed
-        // by the time of day in milliseconds, so the number reaching it is over
-        // a billion — and a `f32` holds that to the nearest 128, so eight
-        // frames in a row were handed the same moment and the drift moved
-        // about eight times a second against the sixty everything beside it
-        // moves at.
-        //
-        // The tick is one read off the clock the night it was found rather
-        // than a round number, because how much is lost depends on where in
-        // the forty-nine-day wrap it falls: a test at tick 2000 passes either
-        // way and says nothing.
-        let mut source = GeneratorSource::new(
-            "ovs.test_pattern",
-            2,
-            &ParameterMap::new(),
-            SizePx::new(1920, 1080),
-        )
-        .expect("published");
-
-        let frame = PATTERN_TICKS_PER_SECOND / 60;
-        let tick = 1_110_358_636_u32;
-        let mut at = |tick: u32| {
+    fn a_fifty_hertz_wall_shows_the_same_picture_at_the_same_second() {
+        // The tick is frames and the speeds are in pixels a *second*, so the
+        // surface's rate is what turns one into the other: a slower wall gets
+        // the same movement in fewer, larger steps rather than a slower
+        // picture. One second in is one second in on both.
+        let at = |rate: FrameRate, frame: u32| {
+            let mut source = GeneratorSource::new(
+                "ovs.test_pattern",
+                2,
+                &ParameterMap::new(),
+                SizePx::new(1920, 1080),
+            )
+            .expect("published");
             source
-                .pattern_on_card(tick, FrameRate::FPS_60)
+                .pattern_on_card(frame, rate)
                 .expect("the service pattern draws on the card")
                 .1
         };
 
-        let first = at(tick);
-        let second = at(tick + frame);
-        let third = at(tick + frame * 2);
-
-        assert_ne!(first, second, "a frame later and the same moment");
-        assert_ne!(second, third, "and the frame after that");
-        // The bars themselves, not only the sweep: a hundred pixels a second
-        // is 1.6 of them between frames at this size, so every frame moves.
-        assert_ne!(first.shift_x, second.shift_x, "the bars stood still");
+        assert_eq!(
+            at(FrameRate::FPS_60, 60),
+            at(FrameRate::FPS_50, 50),
+            "one second in, and two different pictures"
+        );
+        assert_ne!(
+            at(FrameRate::FPS_60, 60),
+            at(FrameRate::FPS_60, 50),
+            "and fifty frames is not a second at sixty hertz"
+        );
     }
 
     #[test]
@@ -2583,30 +2603,35 @@ mod tests {
     }
 
     #[test]
-    fn the_service_pattern_runs_free_rather_than_from_when_the_layer_started() {
-        // The owner's rule for this one generator: "Das Testbild läuft immer
-        // Freerun, es hat seine eigene Zeit" — which means, in his words of
-        // 2026-10-16, "unabhängig von BPM oder irgendeiner Speedscale … so
-        // schnell wie es ist". The layer's own age must not reach it either,
-        // or it restarts every time the generator is rebuilt and two layers
-        // showing it fall out of step.
+    fn the_service_pattern_is_bound_to_the_frames_and_to_nothing_else() {
+        // The owner's rule for this one generator, 2026-10-16: "testpattern
+        // läuft frei, also an nichts gebunden außer die Bildrate des Ausgangs.
+        // nicht an der systemzeit oder sonst was. es muss sich unabhängig von
+        // der systemzeit bauen. es muss frei sein."
+        //
+        // So: the same frame is the same picture whatever the clock says and
+        // whatever the layer has been doing, and the next frame is a different
+        // one. The layer's age has to stay out of it for the same reason it
+        // always did — or it restarts every time the generator is rebuilt, and
+        // two layers showing it fall out of step.
         let source = service_pattern();
-        let at = |wall_seconds: u64, layer_seconds: u64| {
+        let at = |frames: u64, wall_seconds: u64, layer_seconds: u64| {
             source
                 .tick_at(Moment {
                     wall: UNIX_EPOCH + Duration::from_secs(wall_seconds),
                     since_anchor: Duration::from_secs(layer_seconds),
+                    frames,
                 })
                 .expect("a tick")
         };
 
         assert_eq!(
-            at(100, 0),
-            at(100, 9_999),
-            "the same moment, two layers of different ages, one picture"
+            at(900, 0, 0),
+            at(900, 86_400, 9_999),
+            "a day of wall clock and a layer of a different age, one picture"
         );
-        assert_eq!(at(100, 0), 100_000, "a millisecond a tick");
-        assert_ne!(at(100, 0), at(102, 0), "and it moves with the clock");
+        assert_eq!(at(900, 0, 0), 900, "the frame itself is the tick");
+        assert_ne!(at(900, 0, 0), at(901, 0, 0), "and the next frame moves it");
     }
 
     #[test]
@@ -2650,13 +2675,20 @@ mod tests {
     #[test]
     fn a_free_running_generator_is_worth_a_picture_two_seconds_in() {
         // Noise and the service pattern are as long as the counter goes, so
-        // half of that is a number about `u32` rather than about the picture —
-        // and at two million seconds a float has lost the fraction the sweep is
-        // positioned by.
+        // half of that is a number about `u32` rather than about the picture.
+        // Two seconds in for both — but their ticks count different things, so
+        // the number is not the same: the pattern counts the surface's frames
+        // and noise counts milliseconds.
         for source in [noise(), service_pattern()] {
             assert_eq!(source.length().frame_count, u32::MAX);
-            assert_eq!(source.tick_worth_a_picture(), 2_000);
         }
+
+        assert_eq!(
+            service_pattern().tick_worth_a_picture(),
+            120,
+            "two seconds of a sixty-hertz surface"
+        );
+        assert_eq!(noise().tick_worth_a_picture(), 2_000, "two seconds of them");
     }
 
     #[test]
@@ -2734,6 +2766,7 @@ mod tests {
                 .tick_at(Moment {
                     wall: UNIX_EPOCH + Duration::from_secs(45_296),
                     since_anchor: Duration::ZERO,
+                    frames: 0,
                 })
                 .expect("a clock knows which frame it is on")
         };
@@ -2758,6 +2791,7 @@ mod tests {
                 // 04:59:50 UTC, which is 23:59:50 the evening before.
                 wall: UNIX_EPOCH + Duration::from_secs(17_990),
                 since_anchor: Duration::ZERO,
+                frames: 0,
             })
             .expect("a frame");
         assert_eq!(clock_text(tick, true, true).as_bytes(), b"23:59:50");
@@ -2776,6 +2810,7 @@ mod tests {
             .tick_at(Moment {
                 wall: UNIX_EPOCH - Duration::from_secs(86_400),
                 since_anchor: Duration::ZERO,
+                frames: 0,
             })
             .expect("a frame");
         assert_eq!(tick, 0);
@@ -2939,6 +2974,7 @@ mod tests {
                 .tick_at(Moment {
                     wall: UNIX_EPOCH,
                     since_anchor: Duration::from_secs(seconds),
+                    frames: 0,
                 })
                 .expect("a frame")
         };

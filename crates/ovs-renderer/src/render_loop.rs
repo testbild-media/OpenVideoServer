@@ -290,8 +290,6 @@ pub struct RenderLoop {
     /// Tracked so the surfaces are told when it changes rather than every
     /// frame.
     readback: bool,
-    /// When the clocks started, for anything drawn against wall time.
-    epoch: Instant,
     /// Where the System screen's pictures come from, while one is being shown.
     ///
     /// Held here rather than in the binary, so the pull happens where the
@@ -424,7 +422,6 @@ impl RenderLoop {
             #[cfg(unix)]
             chunks: Vec::new(),
             readback: true,
-            epoch,
             #[cfg(unix)]
             console: None,
             #[cfg(unix)]
@@ -1126,7 +1123,7 @@ impl RenderLoop {
     /// than uploaded once. Both for the same reason: a pattern that was scaled
     /// to fit would hide the mis-set mode it exists to reveal, and a pattern
     /// that did not move would not tell a live output from a frozen one.
-    fn draw_composition_pattern(&mut self, state: &ShowState, now: Instant) {
+    fn draw_composition_pattern(&mut self, state: &ShowState, _now: Instant) {
         let size = self.compositor.size();
         // What the composition is actually being rendered at, which is what the
         // caption has to say — never a number somebody assumed.
@@ -1154,7 +1151,9 @@ impl RenderLoop {
             );
         }
 
-        let seconds = now.saturating_duration_since(self.epoch).as_secs_f64();
+        // The composition's own frames, at the composition's own rate: the
+        // pattern is bound to that and to nothing else (owner, 2026-10-16).
+        let seconds = pattern_seconds(self.frame_index, rate);
         let Some(pattern) = self.test_pattern.as_mut() else {
             return;
         };
@@ -1317,8 +1316,13 @@ impl RenderLoop {
     /// through the composition, so the mapping is bypassed entirely — this
     /// pattern answers "is this cable reaching this wall, in this mode" and
     /// nothing else.
-    fn draw_output_patterns(&mut self, now: Instant) {
-        let seconds = now.saturating_duration_since(self.epoch).as_secs_f64();
+    fn draw_output_patterns(&mut self, _now: Instant) {
+        // **Counted in frames, each wall at its own rate** (owner, 2026-10-16:
+        // "an nichts gebunden außer die Bildrate des Ausgangs"). A pass is a
+        // frame for every output it presents to, so the index of the pass is
+        // the frame number here; dividing by the wall's own rate is what keeps
+        // the picture the same speed on a 50 Hz panel as on a 60 Hz one.
+        let frames = self.frame_index;
 
         for (index, output) in self.outputs.iter_mut().enumerate() {
             if output.faulted.is_some() {
@@ -1372,6 +1376,7 @@ impl RenderLoop {
                 continue;
             };
 
+            let seconds = pattern_seconds(frames, mode.refresh);
             match output
                 .backend
                 .upload_texture(TextureKey::TestPattern, pattern.draw(seconds))
@@ -2415,6 +2420,28 @@ fn fill_wanted(
             .get(media_item_id)
             .is_none_or(|location| location.kind == ovs_types::media::MediaKind::Image)
     });
+}
+
+/// How far into its own run a service pattern is, from a count of frames.
+///
+/// **The pattern is bound to the surface's frame rate and to nothing else**
+/// (owner, 2026-10-16: "testpattern läuft frei, also an nichts gebunden außer
+/// die Bildrate des Ausgangs. nicht an der systemzeit oder sonst was"). Its
+/// speeds are written in pixels a second, so the rate is what turns a frame
+/// count into the seconds they are measured against: the picture then runs at
+/// the same speed on a 50 Hz wall as on a 60 Hz one, and the faster wall gets
+/// more of it rather than a faster version of it.
+///
+/// `f64` throughout. Single precision stops counting whole frames at sixteen
+/// million, which is three days at sixty a second — and a wall that has been up
+/// for a week would start showing the same picture for several frames running,
+/// which is the fault this replaced.
+fn pattern_seconds(frames: u64, rate: FrameRate) -> f64 {
+    let hertz = rate.as_f64();
+    if hertz <= 0.0 {
+        return 0.0;
+    }
+    frames as f64 / hertz
 }
 
 /// The clock an effect pass reads, in seconds within a day.

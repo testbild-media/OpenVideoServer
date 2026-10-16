@@ -134,6 +134,13 @@ struct Generating<'a> {
     rate: ovs_types::geometry::FrameRate,
     trigger: u64,
     now: Instant,
+    /// Which pass of this renderer the frame being drawn is.
+    ///
+    /// The service pattern's clock, and nothing else reads it: it is bound to
+    /// the frames the surface draws and to nothing else at all (owner,
+    /// 2026-10-16). Carried rather than read from `self`, because the
+    /// scheduler is borrowed for the pass.
+    passes: u64,
     /// What a control source has done to the generators, by instance.
     ///
     /// Handed in rather than read from a field because the show state is
@@ -329,6 +336,14 @@ pub struct Playback {
     /// colour cycle where an operator expected their clip would be a lie on a
     /// wall.
     synthetic: bool,
+    /// How many passes this scheduler has made.
+    ///
+    /// **The service pattern's whole clock** (owner, 2026-10-16: "an nichts
+    /// gebunden außer die Bildrate des Ausgangs"). One per pass, and a pass is
+    /// one frame of the composition, so counting them is counting the frames
+    /// the surface draws — with nothing in it that a system clock, a tempo or
+    /// a speed scale can reach.
+    passes: u64,
 }
 
 impl Playback {
@@ -363,6 +378,7 @@ impl Playback {
             last_late_sum: 0,
             cleared: ovs_types::telemetry::PlaybackTelemetry::default(),
             synthetic,
+            passes: 0,
         }
     }
 
@@ -386,6 +402,11 @@ impl Playback {
         compositor: &mut dyn Compositor,
         now: Instant,
     ) -> PlaybackReport {
+        // One pass, one frame of the composition. Counted before anything is
+        // decided, so that every layer in this pass is handed the same number,
+        // and read into a local because the scheduler is borrowed below.
+        self.passes = self.passes.saturating_add(1);
+        let passes = self.passes;
         self.clock.follow(&state.master, now);
         let beats = self.clock.beats_at(now);
         // The other clock a pass can be read off. A free-running clip is
@@ -489,6 +510,7 @@ impl Playback {
                             rate: show.composition.render_rate,
                             trigger: live.trigger,
                             now,
+                            passes,
                             overrides: &state.generators,
                         },
                         compositor,
@@ -931,6 +953,7 @@ impl Playback {
             rate,
             trigger,
             now,
+            passes,
             overrides: wanted_overrides,
         } = wanted;
 
@@ -1057,6 +1080,7 @@ impl Playback {
         let moment = Moment {
             wall: SystemTime::now(),
             since_anchor: now.saturating_duration_since(generated.anchor),
+            frames: passes,
         };
         let tick = generated.source.tick_at(moment).unwrap_or(0);
 
