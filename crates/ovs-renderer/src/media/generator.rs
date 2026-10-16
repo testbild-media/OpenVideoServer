@@ -754,7 +754,7 @@ impl GeneratorSource {
             }
         }
 
-        let seconds = tick as f32 / PATTERN_TICKS_PER_SECOND as f32;
+        let seconds = f64::from(tick) / f64::from(PATTERN_TICKS_PER_SECOND);
         self.pattern.as_mut().map(|pattern| pattern.draw(seconds))
     }
 
@@ -897,7 +897,7 @@ impl GeneratorSource {
         }
 
         let pattern = self.pattern.as_ref()?;
-        let seconds = tick as f32 / PATTERN_TICKS_PER_SECOND as f32;
+        let seconds = f64::from(tick) / f64::from(PATTERN_TICKS_PER_SECOND);
         Some((
             stale.then(|| pattern.source_picture()),
             pattern.moment(seconds),
@@ -943,7 +943,7 @@ impl FrameSource for GeneratorSource {
         // invented, and the caption says so on the picture.
         if let Kind::ServicePattern { caption } = &self.kind {
             let mut pattern = ServicePattern::new(self.size, FrameRate::FPS_60, caption);
-            let seconds = index as f32 / PATTERN_TICKS_PER_SECOND as f32;
+            let seconds = f64::from(index) / f64::from(PATTERN_TICKS_PER_SECOND);
             return Ok(Frame::new(index, pattern.draw(seconds).clone()));
         }
 
@@ -2419,6 +2419,48 @@ mod tests {
             SizePx::new(192, 108),
         )
         .expect("published")
+    }
+
+    #[test]
+    fn the_pattern_moves_on_every_frame_however_long_the_clock_has_run() {
+        // The owner, 2026-10-16: "testpattern generator sieht im vergleich zum
+        // noise und dem video nicht flüssig aus im preview." This one is timed
+        // by the time of day in milliseconds, so the number reaching it is over
+        // a billion — and a `f32` holds that to the nearest 128, so eight
+        // frames in a row were handed the same moment and the drift moved
+        // about eight times a second against the sixty everything beside it
+        // moves at.
+        //
+        // The tick is one read off the clock the night it was found rather
+        // than a round number, because how much is lost depends on where in
+        // the forty-nine-day wrap it falls: a test at tick 2000 passes either
+        // way and says nothing.
+        let mut source = GeneratorSource::new(
+            "ovs.test_pattern",
+            2,
+            &ParameterMap::new(),
+            SizePx::new(1920, 1080),
+        )
+        .expect("published");
+
+        let frame = PATTERN_TICKS_PER_SECOND / 60;
+        let tick = 1_110_358_636_u32;
+        let mut at = |tick: u32| {
+            source
+                .pattern_on_card(tick, FrameRate::FPS_60)
+                .expect("the service pattern draws on the card")
+                .1
+        };
+
+        let first = at(tick);
+        let second = at(tick + frame);
+        let third = at(tick + frame * 2);
+
+        assert_ne!(first, second, "a frame later and the same moment");
+        assert_ne!(second, third, "and the frame after that");
+        // The bars themselves, not only the sweep: a hundred pixels a second
+        // is 1.6 of them between frames at this size, so every frame moves.
+        assert_ne!(first.shift_x, second.shift_x, "the bars stood still");
     }
 
     #[test]

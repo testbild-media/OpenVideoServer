@@ -1154,7 +1154,7 @@ impl RenderLoop {
             );
         }
 
-        let seconds = now.saturating_duration_since(self.epoch).as_secs_f32();
+        let seconds = now.saturating_duration_since(self.epoch).as_secs_f64();
         let Some(pattern) = self.test_pattern.as_mut() else {
             return;
         };
@@ -1318,7 +1318,7 @@ impl RenderLoop {
     /// pattern answers "is this cable reaching this wall, in this mode" and
     /// nothing else.
     fn draw_output_patterns(&mut self, now: Instant) {
-        let seconds = now.saturating_duration_since(self.epoch).as_secs_f32();
+        let seconds = now.saturating_duration_since(self.epoch).as_secs_f64();
 
         for (index, output) in self.outputs.iter_mut().enumerate() {
             if output.faulted.is_some() {

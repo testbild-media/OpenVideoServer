@@ -7864,7 +7864,7 @@ mod tests {
 
         // Several moments, so the drift is not zero and the sweep is caught
         // both inside the picture and gone from it.
-        for seconds in [0.0_f32, 0.9, 2.4, 4.8] {
+        for seconds in [0.0_f64, 0.9, 2.4, 4.8] {
             let moment = pattern.moment(seconds);
             let push = GeneratedPush {
                 values: [

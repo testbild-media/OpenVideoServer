@@ -213,7 +213,18 @@ impl ServicePattern {
     ///
     /// `seconds` is elapsed time, not a frame number: the pattern's movement is
     /// a property of the clock and must look the same at 50 Hz as at 60.
-    pub fn draw(&mut self, seconds: f32) -> &DecodedImage {
+    ///
+    /// **A `f64`, and that is the whole of a bug the owner saw.** This pattern
+    /// runs on the wall clock, so the number reaching it is milliseconds since
+    /// 1970 — about 1.1 billion of them after the wrap this build uses. A
+    /// single-precision float has 24 bits of mantissa, so that number rounds to
+    /// the nearest 128 milliseconds, and a drift computed from it moved eight
+    /// times a second while the noise beside it moved sixty (owner, 2026-10-16:
+    /// "testpattern generator sieht im vergleich zum noise und dem video nicht
+    /// flüssig aus im preview"). The arithmetic stays wide until each part of
+    /// it has been reduced — a position inside the picture, a point in the
+    /// sweep's cycle — and only then becomes a `f32`.
+    pub fn draw(&mut self, seconds: f64) -> &DecodedImage {
         self.drift(seconds);
         self.sweep(seconds);
         self.caption();
@@ -265,22 +276,25 @@ impl ServicePattern {
     /// [`drift`](Self::drift) and [`sweep`](Self::sweep) work out for
     /// themselves, which is what makes the two paths one picture.
     #[must_use]
-    pub fn moment(&self, seconds: f32) -> PatternMoment {
+    pub fn moment(&self, seconds: f64) -> PatternMoment {
         let width = self.size.width as f32;
         let height = self.size.height as f32;
         let trail = SWEEP_TRAIL_1080 * ((width + height) / 3000.0);
         let reach = (width + height) / std::f32::consts::SQRT_2;
         let speed = reach / SWEEP_SECONDS;
         let cycle = SWEEP_SECONDS + trail / speed;
-        let edge = speed * (seconds % cycle);
+        // Reduced while the number is still wide, then narrowed: a point
+        // inside a five-second cycle is something a `f32` holds to the
+        // microsecond, and the time of day is not. See [`Self::draw`].
+        let edge = speed * (seconds % f64::from(cycle)) as f32;
 
         PatternMoment {
             shift_x: wrap(
-                DRIFT_X_1080 * (self.size.width as f32 / 1920.0) * seconds,
+                f64::from(DRIFT_X_1080 * (self.size.width as f32 / 1920.0)) * seconds,
                 self.size.width as usize,
             ) as u32,
             shift_y: wrap(
-                -DRIFT_Y_1080 * (self.size.height as f32 / 1080.0) * seconds,
+                f64::from(-DRIFT_Y_1080 * (self.size.height as f32 / 1080.0)) * seconds,
                 self.size.height as usize,
             ) as u32,
             sweep_start: edge - trail,
@@ -290,17 +304,17 @@ impl ServicePattern {
     }
 
     /// Copies the bars in, shifted by where they have drifted to.
-    fn drift(&mut self, seconds: f32) {
+    fn drift(&mut self, seconds: f64) {
         let width = self.size.width as usize;
         let height = self.size.height as usize;
         let stride = width * 4;
 
         let scale_x = self.size.width as f32 / 1920.0;
         let scale_y = self.size.height as f32 / 1080.0;
-        let shift_x = wrap(DRIFT_X_1080 * scale_x * seconds, width);
+        let shift_x = wrap(f64::from(DRIFT_X_1080 * scale_x) * seconds, width);
         // Upward, which is what the drawing does, and the direction that reads
         // as "running" rather than "falling".
-        let shift_y = wrap(-DRIFT_Y_1080 * scale_y * seconds, height);
+        let shift_y = wrap(f64::from(-DRIFT_Y_1080 * scale_y) * seconds, height);
 
         let split = shift_x * 4;
         // Split the borrow by hand: the rows are read from the tile while they
@@ -329,7 +343,7 @@ impl ServicePattern {
     }
 
     /// Blends the sweep over what is there.
-    fn sweep(&mut self, seconds: f32) {
+    fn sweep(&mut self, seconds: f64) {
         let width = self.size.width as f32;
         let height = self.size.height as f32;
         let trail = SWEEP_TRAIL_1080 * ((width + height) / 3000.0);
@@ -340,7 +354,10 @@ impl ServicePattern {
         let reach = (width + height) / std::f32::consts::SQRT_2;
         let speed = reach / SWEEP_SECONDS;
         let cycle = SWEEP_SECONDS + trail / speed;
-        let edge = speed * (seconds % cycle);
+        // Reduced wide and narrowed after, exactly as `moment` does it — the
+        // two have to agree to the pixel, and a difference here would be a
+        // sweep in one place on the card and another on the processor.
+        let edge = speed * (seconds % f64::from(cycle)) as f32;
         let start = edge - trail;
         if start >= reach {
             return;
@@ -452,11 +469,16 @@ pub fn format_mode(size: SizePx, rate: FrameRate) -> String {
 }
 
 /// Where a drift has got to, wrapped into the picture.
-fn wrap(distance: f32, span: usize) -> usize {
+///
+/// Takes the distance as a `f64` because it is a speed times the time of day,
+/// and that product is far past what single precision counts in whole
+/// pixels — see [`ServicePattern::draw`]. The answer is a row or a column, so
+/// nothing is lost by reducing it here.
+fn wrap(distance: f64, span: usize) -> usize {
     if span == 0 {
         return 0;
     }
-    let span_f = span as f32;
+    let span_f = span as f64;
     let wrapped = distance % span_f;
     let positive = if wrapped < 0.0 {
         wrapped + span_f
@@ -908,7 +930,7 @@ mod tests {
             line.fill(u8::try_from(row).expect("under 256 rows"));
         }
 
-        for seconds in [0.0_f32, 0.37, 1.9, 4.5, 17.25] {
+        for seconds in [0.0_f64, 0.37, 1.9, 4.5, 17.25] {
             pattern.drift(seconds);
             let pixels = pattern.image.pixels();
             let first = pixels[0];
