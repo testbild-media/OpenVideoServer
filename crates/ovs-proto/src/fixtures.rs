@@ -219,7 +219,24 @@ pub fn markdown() -> String {
          not something this server substitutes for a zero it received — zero is a real\n\
          value and stays one — it is what a freshly patched fixture should be sent so\n\
          that a layer is visible, its normal size, upright and on black rather than a\n\
-         wall of zeros.\n\n",
+         wall of zeros.\n\n\
+         ## Reading a continuous channel\n\n\
+         Each personality below carries a **Where the values sit** table for its\n\
+         continuous channels: the DMX number for the bottom of the range, the middle,\n\
+         the top, and whatever home is, with what each one means.\n\n\
+         For anything between them the channel is linear end to end, so\n\n\
+         ```\n\
+         DMX   = (value - min) / (max - min) * full\n\
+         value = min + (max - min) * DMX / full\n\
+         ```\n\n\
+         where `full` is **255** for a one-channel control and **65535** for a\n\
+         two-channel one, and `min` and `max` are the two ends in the Values column.\n\
+         A scale running 0 to 10 therefore sits at 1 when the channel is at a tenth of\n\
+         its travel, which is 6554 of 65535 — not at the middle, which is 5.\n\n\
+         A two-channel control is programmed as two bytes, coarse then fine, and the\n\
+         landmark tables print both: `32768 (128/0)` means coarse 128, fine 0. Coarse\n\
+         alone moves in steps of 256, which is a quarter of a per cent of the travel —\n\
+         visible on a slow position move, which is why these are sixteen bits.\n\n",
     );
 
     for personality in catalogue().fixtures {
@@ -256,6 +273,63 @@ pub fn markdown() -> String {
         }
         out.push('\n');
 
+        // Where the numbers actually sit on a continuous channel.
+        //
+        // The owner, 2026-10-16: "außerdem brauche ich von jedem DMX Kabel die
+        // Werte für wo Mitte ist, welche Scale wo liegt etc." The table above
+        // gives the two ends, which is enough to describe a channel and not
+        // enough to programme one: somebody at a desk needs the number to type
+        // for the middle, and the number that gives a scale of one.
+        //
+        // Endpoints, the midpoint and home, and nothing invented between them.
+        // Which values are "round" depends on the parameter, and guessing would
+        // put numbers in this document that no part of this build agrees with.
+        // The formula is in the preamble for everything else.
+        let landmarks: Vec<&PersonalityChannel> = personality
+            .channels
+            .iter()
+            .filter(|channel| {
+                matches!(
+                    channel.encoding,
+                    ChannelEncodingInfo::Ranged8 { .. } | ChannelEncodingInfo::Ranged16 { .. }
+                )
+            })
+            .collect();
+        if !landmarks.is_empty() {
+            out.push_str("### Where the values sit\n\n");
+            out.push_str("| Channel | Name | Bottom | Middle | Top | Home |\n");
+            out.push_str("|---|---|---|---|---|---|\n");
+            for channel in landmarks {
+                let (min, max) = match channel.encoding {
+                    ChannelEncodingInfo::Ranged8 { min, max }
+                    | ChannelEncodingInfo::Ranged16 { min, max } => (min, max),
+                    _ => continue,
+                };
+                let top = if channel.width > 1 { 65_535_u32 } else { 255 };
+                let range = if channel.width > 1 {
+                    format!("{}–{}", channel.offset, channel.offset + channel.width - 1)
+                } else {
+                    channel.offset.to_string()
+                };
+                out.push_str(&format!(
+                    "| {range} | {} | {} | {} | {} | {} |\n",
+                    channel.name,
+                    landmark(0, top, min, max, channel.width),
+                    // `(top + 1) / 2`, not `top / 2`. A channel runs 0 to 255
+                    // or 0 to 65535, so its exact middle is a half and cannot
+                    // be sent. Rounding up is the one that matters: on the
+                    // sixteen-bit transforms it is 32768, which lands a
+                    // symmetric range exactly on zero — the number somebody is
+                    // looking for when they ask where the middle is. Rounding
+                    // down gives 32767 and a position of minus nothing.
+                    landmark(top.div_ceil(2), top, min, max, channel.width),
+                    landmark(top, top, min, max, channel.width),
+                    landmark(u32::from(channel.home), top, min, max, channel.width),
+                ));
+            }
+            out.push('\n');
+        }
+
         for channel in &personality.channels {
             let ChannelEncodingInfo::Stepped { bands } = &channel.encoding else {
                 continue;
@@ -275,6 +349,39 @@ pub fn markdown() -> String {
     }
 
     out
+}
+
+/// One cell of the landmark table: the DMX number, and what it means.
+///
+/// A sixteen-bit channel is shown as its whole number and as the two bytes a
+/// desk is actually programmed with, because that is the pair somebody types
+/// and getting the fine byte wrong is a fault nobody sees until the value is
+/// nearly right and will not sit still.
+///
+/// The value is printed to three decimals and then trimmed, so a scale of one
+/// reads `1` and a lift of minus a third does not pretend to be exact.
+fn landmark(dmx: u32, top: u32, min: f64, max: f64, width: u16) -> String {
+    let at = if top == 0 {
+        min
+    } else {
+        min + (max - min) * (f64::from(dmx) / f64::from(top))
+    };
+    let mut shown = format!("{at:.3}");
+    if shown.contains('.') {
+        shown = shown.trim_end_matches('0').trim_end_matches('.').to_owned();
+    }
+    // A value that rounded to nothing from below prints as `-0`, which reads
+    // like a direction and is not one.
+    if shown == "-0" {
+        shown = "0".to_owned();
+    }
+    if width > 1 {
+        let coarse = dmx / 256;
+        let fine = dmx % 256;
+        format!("`{dmx}` ({coarse}/{fine}) → {shown}")
+    } else {
+        format!("`{dmx}` → {shown}")
+    }
 }
 
 /// Describes one channel's values in a table cell.
