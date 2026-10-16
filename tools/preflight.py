@@ -183,7 +183,10 @@ print("== a real picture ==")
 says(status["previews_enabled"], "previews are on", "the client will show no pictures")
 shots = []
 refused = ""
-for index in range(2):
+# Only worth asking when they are on: a refusal with previews off is the same
+# fact reported twice, and two problems for one cause is how a list stops
+# being read.
+for index in range(2 if status["previews_enabled"] else 0):
     if index:
         time.sleep(1.5)
     try:
