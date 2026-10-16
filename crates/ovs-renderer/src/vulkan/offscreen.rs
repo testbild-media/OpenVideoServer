@@ -8787,6 +8787,50 @@ mod tests {
     }
 
     #[test]
+    fn switching_invert_on_turns_every_colour_into_its_opposite() {
+        let _gpu = crate::vulkan::one_gpu_at_a_time();
+        // The owner, 2026-10-16: "Invert Color. mit einfachen on/off auch per
+        // dmx." Measured on the card, at three colours rather than one, so
+        // that a pass which merely darkened the picture could not pass for a
+        // negative.
+        let Some(mut canvas) = backend(16, 16) else {
+            return;
+        };
+        let media = MediaItemId::new();
+        let layer = LayerId::new();
+        canvas
+            .set_media_texture(
+                media,
+                &rgba(&pattern(16, |_, _| [200, 60, 10, 255]), 16, 16),
+            )
+            .expect("uploads");
+
+        let at = |canvas: &mut VulkanOffscreenBackend, on: bool| {
+            let passes = effect_at("ovs.invert", 1, &[("on", ParameterValue::Bool(on))]);
+            let frame = composed_frame(canvas, &effected(layer, media, &passes), 16);
+            let at_middle = (8 * 16 + 8) * 4;
+            [
+                frame[at_middle],
+                frame[at_middle + 1],
+                frame[at_middle + 2],
+                frame[at_middle + 3],
+            ]
+        };
+
+        let off = at(&mut canvas, false);
+        let on = at(&mut canvas, true);
+
+        close_to(off[0], 200, "switched off it is the picture");
+        close_to(off[1], 60, "unchanged");
+        close_to(off[2], 10, "in every channel");
+
+        close_to(on[0], 55, "switched on, the red is its opposite");
+        close_to(on[1], 195, "and the green");
+        close_to(on[2], 245, "and the blue");
+        assert_eq!(on[3], off[3], "and the alpha is left where it was");
+    }
+
+    #[test]
     fn warming_a_picture_lifts_the_red_and_drops_the_blue_without_dimming_it() {
         let _gpu = crate::vulkan::one_gpu_at_a_time();
         // What temperature means, measured on the card rather than argued

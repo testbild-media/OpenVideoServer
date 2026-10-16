@@ -77,6 +77,8 @@ pub enum PassKind {
     /// A picture from the library, multiplied in or cut out. The one pass that
     /// samples a second texture.
     Mask,
+    /// Every colour swapped for its opposite, or nothing at all.
+    Invert,
 }
 
 impl PassKind {
@@ -98,6 +100,7 @@ impl PassKind {
             Self::RgbSplit => 11,
             Self::TvGlitch => 12,
             Self::Mask => 13,
+            Self::Invert => 14,
         }
     }
 }
@@ -246,6 +249,15 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
                 number("saturation"),
                 number("gamma"),
             ],
+            colour: [0.0; 4],
+            mask: None,
+        }),
+        // A switch, and the pass runs either way: an effect that appended
+        // nothing when it was off would never be drawn, and the renderer
+        // proves every published effect neutral at its defaults by drawing it.
+        ("ovs.invert", 1) => into.push(EffectPass {
+            kind: PassKind::Invert,
+            values: [f32::from(u8::from(values.flag("on"))), 0.0, 0.0, 0.0],
             colour: [0.0; 4],
             mask: None,
         }),

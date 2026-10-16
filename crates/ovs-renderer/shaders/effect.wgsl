@@ -93,6 +93,7 @@ const KIND_RGB_CORRECT: u32 = 10u;
 const KIND_RGB_SPLIT: u32 = 11u;
 const KIND_TV_GLITCH: u32 = 12u;
 const KIND_MASK: u32 = 13u;
+const KIND_INVERT: u32 = 14u;
 
 /// How often the line jumps are re-rolled, a second.
 ///
@@ -181,6 +182,22 @@ fn colour_correct(source: vec4<f32>) -> vec4<f32> {
     rgb = pow(max(rgb, vec3<f32>(0.0)), vec3<f32>(1.0 / gamma));
 
     return vec4<f32>(rgb, source.a);
+}
+
+/// Every colour for its opposite, or the picture untouched.
+///
+/// `1 - c` per channel, which is what a negative is, and the alpha left where
+/// it was: a half-transparent layer stays half transparent. Inverting the alpha
+/// too would turn a picture into its own hole.
+///
+/// The switch rather than a branch around the pass: the pass is appended
+/// whether it is on or off, because an effect that drew nothing when it was
+/// off could never be proved neutral.
+fn invert(source: vec4<f32>) -> vec4<f32> {
+    if effect.values.x <= 0.5 {
+        return source;
+    }
+    return vec4<f32>(vec3<f32>(1.0) - source.rgb, source.a);
 }
 
 /// Pushes a picture towards one colour.
@@ -646,6 +663,9 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     switch effect.kind {
         case KIND_COLOUR_CORRECT: {
             return colour_correct(source);
+        }
+        case KIND_INVERT: {
+            return invert(source);
         }
         case KIND_TINT: {
             return tint(source);

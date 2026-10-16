@@ -535,6 +535,42 @@ pub const BLUR_V1: EffectManifest = EffectManifest {
     ],
 };
 
+/// The picture, the other way round.
+///
+/// The owner, 2026-10-16: "Invert Color. mit einfachen on/off auch per dmx."
+/// One switch and nothing else — not an amount, not a per-channel version. A
+/// negative is a thing an operator either wants or does not, and the two
+/// things it is reached for are both all or nothing: a hard cut between a look
+/// and its opposite on a beat, and reading a wall that is showing something
+/// too dark to see.
+///
+/// **Off is the published default**, as every effect here is neutral at its
+/// defaults: an effect dragged onto a layer and left alone changes nothing
+/// until somebody switches it on. The pass runs either way — the renderer
+/// proves an effect neutral by drawing it, and an effect that appends no pass
+/// is never asked.
+///
+/// On the DMX side it is one coarse channel, which a desk gives a button: the
+/// standard reading of a channel as a switch is that anything from half up is
+/// on.
+///
+/// What it inverts is the colour and not the alpha. A layer that is half
+/// transparent is still half transparent after it; inverting the alpha as well
+/// would make the picture its own hole, which is a different effect and one
+/// nobody asked for.
+pub const INVERT_V1: EffectManifest = EffectManifest {
+    type_id: "ovs.invert",
+    version: 1,
+    name: "Invert",
+    description: "Turns every colour into its opposite.",
+    parameters: &[ParameterDefinition {
+        key: "on",
+        name: "Inverted",
+        kind: ParameterKind::Toggle { default: false },
+        dmx: Some(DmxChannel::Coarse),
+    }],
+};
+
 /// Four edges off the picture.
 ///
 /// What somebody reaches for when a camera feed has a letterbox in it, when a
@@ -608,7 +644,7 @@ pub const CROP_V1: EffectManifest = EffectManifest {
 };
 
 /// Every effect this build publishes.
-pub const PUBLISHED: [EffectManifest; 13] = [
+pub const PUBLISHED: [EffectManifest; 14] = [
     // Both versions, and the catalogue offers the newer: a show saved against
     // version one opens with the four controls it was saved with.
     COLOUR_CORRECT_V1,
@@ -624,6 +660,7 @@ pub const PUBLISHED: [EffectManifest; 13] = [
     TV_GLITCH_V1,
     TV_GLITCH_V2,
     MASK_V1,
+    INVERT_V1,
 ];
 
 /// How far out of vertical hold the picture can be thrown, as a fraction of
