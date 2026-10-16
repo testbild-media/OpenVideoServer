@@ -1984,6 +1984,17 @@ h2 {
   cursor: grabbing;
 }
 
+/* Nothing in the catalogue drives it — an effect that declares no DMX channels
+   of its own. Listed for the same reason a patched one is: somebody looking for
+   it finds it and is told why, instead of hunting a cable. Not a handle, so it
+   reads as a statement rather than something that failed to drag. */
+
+.patch-fixture-tile-unavailable {
+  cursor: default;
+  opacity: 0.5;
+  border-style: dashed;
+}
+
 /* Already patched: still listed, so somebody looking for a layer finds it and
    is told where it is rather than wondering why it is missing. */
 

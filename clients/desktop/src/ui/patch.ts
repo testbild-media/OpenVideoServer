@@ -55,6 +55,7 @@ import {
   channelRange,
   collides,
   describeTarget,
+  effectPersonalities,
   effectPlaces,
   findPersonality,
   fixtureForEffect,
@@ -65,7 +66,6 @@ import {
   layerPersonalities,
   masterFixture,
   masterPersonalities,
-  modulePersonalities,
   moveFixture,
   patchAdvisories,
   patchFixture,
@@ -119,6 +119,14 @@ interface Patchable {
   target: FixtureTarget;
   /** The personalities that can drive it, from the catalogue. */
   personalities: Personality[];
+  /**
+   * Why it cannot be patched, or left out when it can.
+   *
+   * Listed rather than dropped. Something in the show that a console cannot
+   * reach is a thing an operator will go looking for, and a list that answers
+   * by being silent sends them to the cabling.
+   */
+  unavailable?: string;
 }
 
 /** The DMX-over-IP patch. */
@@ -285,7 +293,9 @@ export class PatchPanel {
     if (!show) {
       return;
     }
-    const patchable = this.#patchable(show);
+    // Only what can actually be dragged: the chooser must never come to rest
+    // on a row that is listed to explain itself.
+    const patchable = this.#patchable(show).filter((each) => each.personalities.length > 0);
     if (!patchable.some((each) => each.key === this.#target)) {
       // What was being patched has been patched, or the layer it pointed at has
       // gone. Either way the chooser stands somewhere that exists.
@@ -384,21 +394,22 @@ export class PatchPanel {
     }
 
     // An effect's personality comes from that effect's own manifest, so the
-    // match is by type and version rather than by anything named here. No
-    // effect publishes one yet, which the panel says rather than leaving a gap.
-    const modules = modulePersonalities(catalogue);
+    // match is by type and version rather than by anything named here.
+    //
+    // **An effect only exists here once it is in the show.** Unlike the master
+    // and the layers, which the document always has, there is nothing to patch
+    // until somebody puts an effect on a layer or in a slot — which is the
+    // answer to "only Master and Layer are listed" on a show that has no
+    // effects in it, and worth knowing before anybody looks at a cable.
     for (const place of effectPlaces(show)) {
       if (fixtureForEffect(show, place.instance.id) !== null) {
         continue;
       }
-      const personalities = modules.filter(
-        (personality) =>
-          personality.type_id === place.instance.type_id &&
-          personality.version === place.instance.version,
+      const personalities = effectPersonalities(
+        catalogue,
+        place.instance.type_id,
+        place.instance.version,
       );
-      if (personalities.length === 0) {
-        continue;
-      }
       const where =
         place.slotIndex === undefined
           ? place.layer.name
@@ -408,6 +419,16 @@ export class PatchPanel {
         label: `Effect · ${place.instance.type_id} on ${where}`,
         target: { kind: 'effect', effect_instance_id: place.instance.id },
         personalities,
+        // Listed with its reason rather than dropped. An effect declares
+        // whether it wants to be driven by a desk, and one that declares no
+        // channels has no personality and cannot be patched — which is the
+        // plugin's answer, not a fault, and nothing an operator can work out
+        // from an empty list.
+        ...(personalities.length === 0
+          ? {
+              unavailable: `${place.instance.type_id} v${place.instance.version} publishes no DMX channels on this server`,
+            }
+          : {}),
       });
     }
 
@@ -550,6 +571,18 @@ export class PatchPanel {
     for (const patchable of free) {
       const personality = patchable.personalities[0];
       if (personality === undefined) {
+        // Shown, not skipped, and with the reason on it. This used to `continue`
+        // — so an effect a console cannot reach was simply absent, and the only
+        // way to find out why was to read this file.
+        const note = make('div', 'patch-fixture-tile patch-fixture-tile-unavailable');
+        note.append(
+          make('span', 'patch-fixture-name', patchable.label),
+          make('span', 'patch-fixture-size', 'no channels'),
+        );
+        note.title =
+          patchable.unavailable ??
+          `${patchable.label} cannot be patched: nothing in the catalogue drives it.`;
+        rows.push(note);
         continue;
       }
       const tile = make('div', 'patch-fixture-tile');

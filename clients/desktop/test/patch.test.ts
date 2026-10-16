@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import type { FixtureInstance, Personality, Show } from '@ovs/schema';
+import type { EffectInstance, FixtureInstance, Personality, Show } from '@ovs/schema';
 
 import { newId, removeLayer, validate } from '../src/shared/editor.js';
 import {
@@ -30,6 +30,8 @@ import {
   channelRange,
   collides,
   collisions,
+  effectPersonalities,
+  effectPlaces,
   emptyFixtures,
   moveFixture,
   patchAdvisories,
@@ -118,8 +120,53 @@ const DESK_LAYER: Personality = {
   ],
 };
 
+/**
+ * A module personality, which is what an effect's own manifest produces.
+ *
+ * `target: 'effect'` is the value the server sends for one; the client treats
+ * anything that is not the master's or a layer's as a module's, so that a
+ * personality for a kind this build has no name for still reaches the patch.
+ */
+const DESK_EFFECT: Personality = {
+  type_id: 'third.party.wobble',
+  version: 4,
+  name: 'Desk Wobble',
+  footprint: 2,
+  target: 'effect',
+  channels: [
+    {
+      offset: 1,
+      width: 1,
+      name: 'Amount',
+      control: 'amount',
+      momentary: false,
+      encoding: { encoding: 'ranged8', min: 0, max: 1 },
+      home: 0,
+    },
+    {
+      offset: 2,
+      width: 1,
+      name: 'On',
+      control: 'on',
+      momentary: false,
+      encoding: { encoding: 'switch', threshold: 128 },
+      home: 0,
+    },
+  ],
+};
+
 function catalogue(): FixtureCatalogue {
   return { loaded: true, fixtures: [DESK_MASTER, DESK_LAYER] };
+}
+
+/** The same, with a module personality in it. */
+function catalogueWithEffect(): FixtureCatalogue {
+  return { loaded: true, fixtures: [DESK_MASTER, DESK_LAYER, DESK_EFFECT] };
+}
+
+/** One effect instance of a type and version. */
+function effectInstance(typeId: string, version: number): EffectInstance {
+  return { id: newId(), type_id: typeId, version, enabled: true };
 }
 
 function layerAt(name: string, order: number): Show['layers'][number] {
@@ -799,5 +846,66 @@ describe('a document with a patch in it', () => {
     expect(Object.keys(written.fixture_patch[0]!)).toEqual(
       Object.keys(JSON.parse(raw).fixture_patch[0]),
     );
+  });
+});
+
+describe('what a console can reach on an effect', () => {
+  // None of this had a test. The owner, 2026-10-16: "Ich kann nicht einen
+  // Effekt mehr per DMX steuern. Die Effekte tauchen im DMX Patch nicht auf.
+  // Nur Master Fixture und Layer." The matching rule below is what decides
+  // that, and it was only ever exercised by running the client.
+
+  it('offers an effect the personality its own manifest published', () => {
+    const found = effectPersonalities(catalogueWithEffect(), 'third.party.wobble', 4);
+    expect(found).toEqual([DESK_EFFECT]);
+  });
+
+  it('will not drive an instance with another version of the same effect', () => {
+    // A published personality is immutable, so an instance saved at v4 keeps
+    // v4's channels. Offering v5's would silently move an operator's faders.
+    expect(effectPersonalities(catalogueWithEffect(), 'third.party.wobble', 5)).toEqual([]);
+  });
+
+  it('never offers the master or a layer personality to an effect', () => {
+    // The catalogue is one list. Without the target filter a desk's Grand
+    // Master would appear as something to patch onto an effect.
+    expect(effectPersonalities(catalogue(), 'third.party.layer', 2)).toEqual([]);
+    expect(effectPersonalities(catalogue(), 'third.party.master', 3)).toEqual([]);
+  });
+
+  it('has nothing to offer when the catalogue carries no module personalities', () => {
+    // Which is what a server that publishes none looks like, and is a
+    // different thing from the show having no effects in it.
+    expect(effectPersonalities(catalogue(), 'third.party.wobble', 4)).toEqual([]);
+    // And a catalogue that has not been fetched at all, which is the state a
+    // client is in before it has signed in.
+    expect(effectPersonalities(emptyFixtures(), 'third.party.wobble', 4)).toEqual([]);
+  });
+
+  it('finds an effect whether it sits on the layer or in a slot', () => {
+    // Both chains, because an operator who put theirs on a slot and found
+    // nothing in the patch would reasonably conclude slots cannot be patched.
+    const onLayer = effectInstance('third.party.wobble', 4);
+    const onSlot = effectInstance('third.party.wobble', 4);
+    const layer = { ...layerAt('Wall', 0), effects: [onLayer] };
+    layer.slots = [
+      {
+        index: 3,
+        effects: [onSlot],
+        source: { kind: 'generator', type_id: 'ovs.noise', version: 1, instance_id: newId() },
+      } as unknown as Show['layers'][number]['slots'][number],
+    ];
+
+    const places = effectPlaces(show({ layers: [layer] }));
+    expect(places.map((place) => place.instance.id)).toEqual([onLayer.id, onSlot.id]);
+    expect(places[0]?.slotIndex).toBeUndefined();
+    expect(places[1]?.slotIndex).toBe(3);
+  });
+
+  it('says nothing is patchable only when the show has no effects at all', () => {
+    // The answer to the owner's report: the master and the layers are in every
+    // document, an effect is in one only once somebody puts it there. An empty
+    // list of places is a show without effects, not a broken catalogue.
+    expect(effectPlaces(show({ layers: [layerAt('Wall', 0)] }))).toEqual([]);
   });
 });

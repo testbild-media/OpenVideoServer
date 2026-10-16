@@ -133,6 +133,28 @@ export function modulePersonalities(catalogue: FixtureCatalogue): Personality[] 
 }
 
 /**
+ * The personalities that can drive one effect instance.
+ *
+ * By type *and* version, because a personality is fixed once published: an
+ * instance saved at v1 keeps v1's channels even where a v2 exists, which is the
+ * whole point of versioning them.
+ *
+ * Separate from the panel so the matching rule is a test rather than something
+ * only a running client can show. It had never been tested, and an effect that
+ * matched nothing was dropped from the list without a word — twice, once here
+ * and once again when the tiles were drawn.
+ */
+export function effectPersonalities(
+  catalogue: FixtureCatalogue,
+  typeId: string,
+  version: number,
+): Personality[] {
+  return modulePersonalities(catalogue).filter(
+    (personality) => personality.type_id === typeId && personality.version === version,
+  );
+}
+
+/**
  * Whether a personality fits what a patch entry points at.
  *
  * `FixtureDefinition::drives`, which the server checks a saved patch against: a
