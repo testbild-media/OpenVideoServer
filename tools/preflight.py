@@ -46,13 +46,21 @@ def fetched(path, raw=False):
     return body if raw else json.loads(body)
 
 
-def says(ok, line, remedy=""):
-    """One finding, and what to do about it when it is not good news."""
-    print("  %-8s %s" % ("OK" if ok else "PROBLEM", line))
+def says(ok, line, remedy="", bad=None):
+    """One finding, and what to do about it when it is not good news.
+
+    `bad` is the line to print when the finding is not good, for the checks
+    whose wording is a verdict rather than a state. Without it,
+    `PROBLEM  the composition preview is moving` reads as though moving were
+    the fault, which is the opposite of what it means -- and this page is read
+    at a get-in, quickly, by somebody who is already looking for trouble.
+    """
+    shown = line if ok or bad is None else bad
+    print("  %-8s %s" % ("OK" if ok else "PROBLEM", shown))
     if not ok:
         if remedy:
             print("           -> %s" % remedy)
-        TROUBLE.append(line)
+        TROUBLE.append(shown)
 
 
 print("== the server ==")
@@ -198,6 +206,8 @@ for output in body.get("outputs", []) or []:
         "%s wants %s, and %s offers it" % (output["name"], wanted, connector["connector"]),
         "this panel does not build that mode -- pick one listed above, in the client's "
         "output settings, and set the composition to the same rate",
+        bad="%s wants %s, which %s does not offer"
+        % (output["name"], wanted, connector["connector"]),
     )
 
 print("== a real picture ==")
@@ -228,7 +238,10 @@ elif len(shots) == 2:
     says(
         shots[0] != shots[1],
         "the composition preview is moving",
-        "a still preview means a black or frozen show -- check the layers and the master dimmer",
+        "a still preview is a black or frozen show -- check the layers and the master dimmer. "
+        "After an install or a reboot this is ordinary: the show reloads to its opening "
+        "slots, so bring it back up from the desk",
+        bad="the composition preview is not moving",
     )
 
 # NDI on Linux discovers through Avahi: libndi is linked against
