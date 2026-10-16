@@ -656,18 +656,27 @@ impl GeneratorSource {
                 Some((ms % u128::from(u32::MAX)) as u32)
             }
             Kind::ServicePattern { .. } => {
-                // **Free-running, on a clock of its own** (owner, 2026-10-12:
-                // "Das Testbild läuft immer Freerun, es hat seine eigene
-                // Zeit"). The wall clock rather than how long the layer has
-                // been up, which is what everything else here is timed by:
-                // this one must not restart when a slot is switched back to
-                // it, when a caption is edited or when the composition is
-                // resized, and two layers showing it have to be in step. It is
-                // what somebody checks a wall with — "um nicht in die WebGUI
-                // oder an den Server gehen zu müssen" — rather than something
-                // a show is built out of, so nothing about the show reaches
-                // it: not the trigger, not the transport, not the master
-                // speed.
+                // **Free-running: nothing a show does reaches it.** The owner,
+                // 2026-10-12, "Das Testbild läuft immer Freerun, es hat seine
+                // eigene Zeit", and what that means, 2026-10-16 after I had it
+                // the wrong way round: "dass es unabhängig von BPM oder
+                // irgendeiner Speedscale läuft. das testbild ist so schnell
+                // wie es ist … und sollte niemals auf speedscale und bpm
+                // reagieren."
+                //
+                // That is structural here rather than enforced: this function
+                // is handed a wall time and the layer's age and nothing else,
+                // so there is no tempo or scale to react to — the master's
+                // speed and the slot's belong to the playhead, which a
+                // generator does not have.
+                //
+                // The wall clock rather than the layer's age, which is what
+                // everything else here is timed by: this one must not restart
+                // when a slot is switched back to it, when a caption is edited
+                // or when the composition is resized, and two layers showing
+                // it have to be in step. It is what somebody checks a wall
+                // with — "um nicht in die WebGUI oder an den Server gehen zu
+                // müssen" — rather than something a show is built out of.
                 //
                 // A clock somebody steps, by hand or by NTP, steps this
                 // picture with it. That is the cost of a time of its own and
@@ -2422,6 +2431,46 @@ mod tests {
     }
 
     #[test]
+    fn at_sixty_hertz_it_makes_sixty_different_pictures_a_second() {
+        // The owner, 2026-10-16: "wenn die composition 60 Hz ist muss das
+        // testpattern auch 60 unterschiedliche bilder generieren und
+        // anzeigen." Not sixty passes over the same moment: sixty moments.
+        //
+        // One second of a 1080p wall, at the millisecond each frame of it
+        // really lands on, from a tick read off a real clock — a round number
+        // hides the fault this is here for.
+        let mut source = GeneratorSource::new(
+            "ovs.test_pattern",
+            2,
+            &ParameterMap::new(),
+            SizePx::new(1920, 1080),
+        )
+        .expect("published");
+
+        let start = 1_110_358_636_u32;
+        let moments: Vec<crate::pattern::PatternMoment> = (0..60)
+            .map(|frame| {
+                source
+                    .pattern_on_card(
+                        start + frame * PATTERN_TICKS_PER_SECOND / 60,
+                        FrameRate::FPS_60,
+                    )
+                    .expect("the service pattern draws on the card")
+                    .1
+            })
+            .collect();
+
+        for (at, moment) in moments.iter().enumerate() {
+            for (other_at, other) in moments.iter().enumerate().skip(at + 1) {
+                assert_ne!(
+                    moment, other,
+                    "frames {at} and {other_at} of one second are the same picture"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn the_pattern_moves_on_every_frame_however_long_the_clock_has_run() {
         // The owner, 2026-10-16: "testpattern generator sieht im vergleich zum
         // noise und dem video nicht flüssig aus im preview." This one is timed
@@ -2536,9 +2585,11 @@ mod tests {
     #[test]
     fn the_service_pattern_runs_free_rather_than_from_when_the_layer_started() {
         // The owner's rule for this one generator: "Das Testbild läuft immer
-        // Freerun, es hat seine eigene Zeit." So the layer's own age must not
-        // reach it — otherwise it restarts every time the generator is rebuilt
-        // and two layers showing it fall out of step.
+        // Freerun, es hat seine eigene Zeit" — which means, in his words of
+        // 2026-10-16, "unabhängig von BPM oder irgendeiner Speedscale … so
+        // schnell wie es ist". The layer's own age must not reach it either,
+        // or it restarts every time the generator is rebuilt and two layers
+        // showing it fall out of step.
         let source = service_pattern();
         let at = |wall_seconds: u64, layer_seconds: u64| {
             source
