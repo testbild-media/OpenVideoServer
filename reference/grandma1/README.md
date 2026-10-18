@@ -67,17 +67,25 @@ here to it.
   fixtures; no OVS fixture has them. **OVS_RGBX_BG is the background**, which
   for a gradient is its far colour.
 - **Everything else is a parameter, under Video**, so the Video window keeps
-  presets of it and no fixture brings a group of its own. The encoder says
-  "Parameter 1"; what it is on the fixture you have selected is in its named
-  values — Blur's Parameter 1 reads `Radius 0`, `Radius 32`, `Radius 64`, a
-  layer's reads `Black`, `Slot 1` to `Slot 84` — and in the fixture's comment.
+  presets of it and no fixture brings a group of its own. The encoder's label
+  says "Parameter 1"; beside the value it shows the channel's functional
+  block, which is named for what it is on that fixture — "40 Hue",
+  "Block size", "Slot" — and so are its named values: Blur's Parameter 1
+  reads `Radius 0`, `Radius 32`, `Radius 64`, a layer's `Black`, `Slot 1` to
+  `Slot 84`. The fixture's comment lists them all.
+- **Colorize's hue is visualised as Color**, which is what lets the desk take
+  it in degrees, 0 to 360, and its named values are the colours: Red 0,
+  Orange 30, Yellow 60, Green 120, Cyan 180, Blue 240, Magenta 300.
 
 The first set of files was refused for every fixture with a colour, and put a
 module's alpha into the desk's own RGB group as a fourth attribute. Nothing
 goes there now.
 
 Choices and switches snap, and every step is a named value with the name the
-client shows. Every channel's home is the fixture's default, so a freshly
+client shows. Each named value is **one** DMX value, not its whole band — the
+desk's sheet shows a name only for a value that sits on one — chosen inside
+the band so the server reads it as that step: home where home is in the band,
+the band's middle elsewhere, nought and full for a switch. Every channel's home is the fixture's default, so a freshly
 patched layer is visible, full size and upright, and a freshly patched effect
 changes nothing.
 

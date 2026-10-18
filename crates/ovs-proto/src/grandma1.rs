@@ -427,7 +427,7 @@ fn comment(personality: &Personality) -> String {
 }
 
 /// Where one channel sits on a desk.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 struct Attribute {
     attribute: String,
     feature: String,
@@ -440,6 +440,13 @@ struct Attribute {
     /// What a shared parameter is in this module, which its named values say
     /// because its label cannot.
     named_for: Option<String>,
+    /// What the channel's functional block is called, which the desk shows
+    /// beside the value on the encoder — "40 Hue" rather than "40 Function".
+    /// Unset, it is a parameter's own name or else the channel's.
+    function: Option<&'static str>,
+    /// Named values in the control's own units, in place of its bottom,
+    /// middle and top: a hue's colours.
+    values: Option<&'static [(f64, &'static str)]>,
 }
 
 impl Attribute {
@@ -460,7 +467,15 @@ impl Attribute {
             effect: "NONE",
             effect_sub: None,
             named_for: None,
+            function: None,
+            values: None,
         }
+    }
+
+    /// The same channel, its functional block named.
+    fn called(mut self, function: &'static str) -> Self {
+        self.function = Some(function);
+        self
     }
 
     /// The same channel, taken by one of the desk's tools.
@@ -581,7 +596,7 @@ fn slot_of(personality: &Personality, channel: &PersonalityChannel) -> Option<Pa
 /// one's attribute.
 fn fixed(control: &str) -> Option<Attribute> {
     let attribute = match control {
-        "master_dimmer" | "layer_opacity" => Attribute::dimmer(),
+        "master_dimmer" | "layer_opacity" => Attribute::dimmer().called("Dimmer"),
         // Parameters, so the master and the layer bring no group of their own
         // (owner, 2026-10-18: "ja passt und baue es").
         "master_freeze" => Attribute::parameter(1, "Freeze"),
@@ -591,12 +606,16 @@ fn fixed(control: &str) -> Option<Attribute> {
         "layer_slot" => Attribute::parameter(1, "Slot"),
         // The trackball's. Up is up: a larger value moves the picture up the
         // wall, as a larger tilt lifts a head.
-        "layer_position_x" => Attribute::desk("PAN").for_the_desk("PAN", None),
-        "layer_position_y" => Attribute::desk("TILT").for_the_desk("TILT", None),
+        "layer_position_x" => Attribute::desk("PAN")
+            .for_the_desk("PAN", None)
+            .called("Position X"),
+        "layer_position_y" => Attribute::desk("TILT")
+            .for_the_desk("TILT", None)
+            .called("Position Y"),
         // X, Y and the turn about Z on one page.
-        "layer_rotation" => Attribute::desk("OVS_ROTATION"),
-        "layer_scale_x" => Attribute::desk("OVS_SCALE_X"),
-        "layer_scale_y" => Attribute::desk("OVS_SCALE_Y"),
+        "layer_rotation" => Attribute::desk("OVS_ROTATION").called("Rotation"),
+        "layer_scale_x" => Attribute::desk("OVS_SCALE_X").called("Scale X"),
+        "layer_scale_y" => Attribute::desk("OVS_SCALE_Y").called("Scale Y"),
         _ => return None,
     };
     Some(attribute)
@@ -693,8 +712,31 @@ fn attribute_of(
         .find(|defined| defined.key == parameter.key)
         .map_or(parameter.key, |defined| defined.name);
     *numbered += 1;
-    Attribute::parameter(*numbered, name)
+    let attribute = Attribute::parameter(*numbered, name);
+    if parameter.key == "hue" {
+        // "Ohne den Visualize Color kann man nicht die Werte von 0 bis 360
+        // angeben als Degree" (owner, 2026-10-18): with it, a hue is typed in
+        // degrees, and its named values are the colours.
+        let mut attribute = attribute.for_the_desk("COLOR", None);
+        attribute.values = Some(&HUES);
+        return attribute;
+    }
+    attribute
 }
+
+/// A hue's colours, in degrees. The owner, 2026-10-18: "Bei Hue kannst du noch
+/// bei 0 Red, 30 Orange, 60 Yellow, 120 Green, 180 Cyan, 240 Blue, 300 Magenta
+/// als Werte eintragen? Dann können Leute das einfacher machen und schneller
+/// zu den richtigen Farben kommen."
+const HUES: [(f64, &str); 7] = [
+    (0.0, "Red"),
+    (30.0, "Orange"),
+    (60.0, "Yellow"),
+    (120.0, "Green"),
+    (180.0, "Cyan"),
+    (240.0, "Blue"),
+    (300.0, "Magenta"),
+];
 
 /// Writes one channel, and its fine half when it has one.
 fn channel_block(
@@ -739,9 +781,17 @@ fn channel_block(
         ChannelEncodingInfo::Index8 => (0.0, 255.0),
         _ => (0.0, 1.0),
     };
+    // What the control is on this fixture, which the encoder shows beside its
+    // value: the owner's screen read "40 Function" when every block was called
+    // that, and a shared parameter's label cannot say it.
+    let called = attribute
+        .function
+        .map(str::to_owned)
+        .or_else(|| attribute.named_for.clone())
+        .unwrap_or_else(|| field(&channel.name));
     let mut function = format!(
         "\t\t{{ _NAME {} _RANGE [  0,255] _EFF {}",
-        padded(&quoted("Function")),
+        padded(&quoted(&called)),
         attribute.effect
     );
     if let Some(sub) = attribute.effect_sub {
@@ -777,17 +827,32 @@ fn channel_block(
 }
 
 /// The named values on a channel, as a name and a range in per cent.
+///
+/// **Each is one value, never a band.** The owner's sheet showed "25" for an
+/// echo resting on Behind, "16" for a mirror on Off and "-" for a layer on
+/// Black, and names wherever a named value was a single value — a radius of
+/// nought, a centred pan. So a step is named at one value inside its band,
+/// which the server reads as that step like any other in it: the channel's
+/// home where home is in the band, so a fixture at rest shows a name, and the
+/// band's middle elsewhere, so a nudge does not leave it. A switch is named at
+/// nought and full, as MA's own switches are.
 fn channel_sets(
     personality: &Personality,
     channel: &PersonalityChannel,
     attribute: &Attribute,
 ) -> Vec<(String, f64, f64)> {
     let named_for = attribute.named_for.as_deref();
+    let home = channel.home;
     match &channel.encoding {
         ChannelEncodingInfo::Stepped { bands } => bands
             .iter()
             .map(|band| {
-                let (from, to) = byte_band(band.from, band.to);
+                let at = if (u16::from(band.from)..=u16::from(band.to)).contains(&home) {
+                    home as u8
+                } else {
+                    ((u16::from(band.from) + u16::from(band.to)) / 2) as u8
+                };
+                let (from, to) = byte_band(at, at);
                 (step_name(personality, channel, band), from, to)
             })
             .collect(),
@@ -801,9 +866,18 @@ fn channel_sets(
                 Some(control) => (format!("{control} {off}"), format!("{control} {on}")),
                 None => (off.to_owned(), on.to_owned()),
             };
-            let below = threshold.saturating_sub(1);
-            let (low_from, low_to) = byte_band(0, below);
-            let (high_from, high_to) = byte_band(*threshold, 255);
+            let low = if home < u16::from(*threshold) {
+                home as u8
+            } else {
+                0
+            };
+            let high = if home >= u16::from(*threshold) {
+                home.min(255) as u8
+            } else {
+                255
+            };
+            let (low_from, low_to) = byte_band(low, low);
+            let (high_from, high_to) = byte_band(high, high);
             vec![(off, low_from, low_to), (on, high_from, high_to)]
         }
         // A colour and a dimmer are faders and nothing else, as they are on
@@ -814,7 +888,7 @@ fn channel_sets(
             Vec::new()
         }
         ChannelEncodingInfo::Ranged8 { min, max } => {
-            landmarks(*min, *max, 255, channel.home, named_for)
+            named_values(attribute, *min, *max, 255, home, named_for)
                 .into_iter()
                 .map(|(name, dmx)| {
                     let (from, to) = byte_band(dmx as u8, dmx as u8);
@@ -825,7 +899,7 @@ fn channel_sets(
         // Exactly the value, not a coarse step's worth of them: a desk sends
         // the start of a set, and a home of a scale of one has to be one.
         ChannelEncodingInfo::Ranged16 { min, max } => {
-            landmarks(*min, *max, 65_535, channel.home, named_for)
+            named_values(attribute, *min, *max, 65_535, home, named_for)
                 .into_iter()
                 .map(|(name, dmx)| {
                     let at = f64::from(dmx) * 100.0 / 65_535.0;
@@ -834,6 +908,30 @@ fn channel_sets(
                 .collect()
         }
         ChannelEncodingInfo::Index8 => Vec::new(),
+    }
+}
+
+/// A continuous channel's named values, as a name and the DMX value: the ones
+/// the control has of its own — a hue's colours — or else its landmarks.
+fn named_values(
+    attribute: &Attribute,
+    min: f64,
+    max: f64,
+    top: u32,
+    home: u16,
+    named_for: Option<&str>,
+) -> Vec<(String, u32)> {
+    match attribute.values {
+        Some(values) => values
+            .iter()
+            .map(|&(value, name)| {
+                let dmx = ((value - min) / (max - min) * f64::from(top))
+                    .round()
+                    .clamp(0.0, f64::from(top)) as u32;
+                (name.to_owned(), dmx)
+            })
+            .collect(),
+        None => landmarks(min, max, top, home, named_for),
     }
 }
 
@@ -1308,26 +1406,27 @@ mod tests {
             "Parameter 1 Freeze, Parameter 2 BPM Tap, Parameter 3 BPM Scale, \
              Parameter 4 Crossfade"
         ));
-        assert!(master.contains("{ _NAME \"Freeze On\" _RANGE [50.0008%,100.0000%] }"));
+        assert!(master.contains("{ _NAME \"Freeze On\" _RANGE [99.6109%,100.0000%] }"));
         assert!(named("OVS Layer").contains("Parameter 1 Slot"));
     }
 
     #[test]
     fn the_layer_names_every_slot_where_the_server_reads_it() {
-        // "inkl. aller Slots": Black and eighty-four slots, each where the
-        // decoder puts it. Slot 1 is DMX 4 to 6, which is 1024 to 1791 of
-        // 65535 on the desk.
+        // "inkl. aller Slots": Black and eighty-four slots, each at one value
+        // the decoder reads as it. Black is home, DMX 0; slot 1 is the middle
+        // of 4 to 6, DMX 5, which is 1280 of 65535 on the desk; slot 84 the
+        // middle of 253 to 255.
         let layer = named("OVS Layer");
         assert!(
-            layer.contains("{ _NAME \"Black\" _RANGE [0.0000%,1.5610%] }"),
+            layer.contains("{ _NAME \"Black\" _RANGE [0.0000%,0.3891%] }"),
             "{layer}"
         );
         assert!(
-            layer.contains("{ _NAME \"Slot 1\" _RANGE [1.5625%,2.7329%] }"),
+            layer.contains("{ _NAME \"Slot 1\" _RANGE [1.9532%,2.3423%] }"),
             "{layer}"
         );
         assert!(
-            layer.contains("{ _NAME \"Slot 84\" _RANGE [98.8296%,100.0000%] }"),
+            layer.contains("{ _NAME \"Slot 84\" _RANGE [99.2203%,99.6094%] }"),
             "{layer}"
         );
         assert_eq!(layer.matches("\"Slot ").count(), 84);
@@ -1472,8 +1571,11 @@ mod tests {
     #[test]
     fn an_attribute_means_one_thing_in_every_file() {
         // The desk keeps one label and one group for an attribute, for the
-        // whole show: whatever a second file said would not be shown.
-        let mut seen: BTreeMap<String, (String, &str, String, String, &str)> = BTreeMap::new();
+        // whole show: whatever a second file said would not be shown. How a
+        // channel is visualised belongs to its functional block, which is the
+        // fixture type's own — a hue is shown as a colour, Parameter 1 of
+        // another module is not.
+        let mut seen: BTreeMap<String, (String, &str, String, String)> = BTreeMap::new();
         let mut groups: BTreeMap<String, (&str, String)> = BTreeMap::new();
         for (fixture, attribute) in every_attribute() {
             let meaning = (
@@ -1481,7 +1583,6 @@ mod tests {
                 attribute.preset,
                 attribute.attribute_label.clone(),
                 attribute.feature_label.clone(),
-                attribute.effect,
             );
             let first = seen
                 .entry(attribute.attribute.clone())
@@ -1502,6 +1603,107 @@ mod tests {
             );
         }
         assert!(seen.contains_key("PARA_6"));
+    }
+
+    #[test]
+    fn every_functional_block_is_named_for_what_it_does() {
+        // The owner's encoder read "40 Function" for a hue. The block's name is
+        // the fixture type's own, so it can say what Parameter 1 cannot.
+        for file in fixture_files() {
+            assert!(
+                !file.contents.contains("_NAME \"Function\""),
+                "{}",
+                file.file_name
+            );
+        }
+        assert!(named("OVS FX Colorize").contains("{ _NAME \"Hue\" _RANGE [ 0,255]"));
+        assert!(named("OVS FX Colorize").contains("{ _NAME \"Amount\" _RANGE [ 0,255] _EFF DIMMER"));
+        assert!(named("OVS FX Pixelate").contains("{ _NAME \"Block size\" _RANGE"));
+        let layer = named("OVS Layer");
+        for block in [
+            "Dimmer",
+            "Slot",
+            "Position X",
+            "Position Y",
+            "Rotation",
+            "Scale X",
+        ] {
+            assert!(
+                layer.contains(&format!("{{ _NAME \"{block}\" _RANGE [ 0,255]")),
+                "{block} in {layer}"
+            );
+        }
+        assert!(named("OVS Gen Text").contains("{ _NAME \"Background Red\" _RANGE [ 0,255]"));
+    }
+
+    #[test]
+    fn a_hue_is_in_degrees_with_its_colours_named() {
+        // "Ohne den Visualize Color kann man nicht die Werte von 0 bis 360
+        // angeben als Degree", and "Bei Hue kannst du noch bei 0 Red, 30
+        // Orange, 60 Yellow, 120 Green, 180 Cyan, 240 Blue, 300 Magenta als
+        // Werte eintragen?"
+        let colorize = named("OVS FX Colorize");
+        assert!(
+            colorize.contains(
+                "{ _NAME \"Hue\" _RANGE [ 0,255] _EFF COLOR _PHYS [ 0.00, 360.00] \t\t\t_CHANSET"
+            ),
+            "{colorize}"
+        );
+        // 30 degrees of 360 is 5461 of 65535, and 180 is the middle, 32768.
+        for set in [
+            "{ _NAME \"Red\" _RANGE [0.0000%,0.0000%] }",
+            "{ _NAME \"Orange\" _RANGE [8.3330%,8.3330%] }",
+            "{ _NAME \"Yellow\" _RANGE [16.6674%,16.6674%] }",
+            "{ _NAME \"Green\" _RANGE [33.3333%,33.3333%] }",
+            "{ _NAME \"Cyan\" _RANGE [50.0008%,50.0008%] }",
+            "{ _NAME \"Blue\" _RANGE [66.6667%,66.6667%] }",
+            "{ _NAME \"Magenta\" _RANGE [83.3341%,83.3341%] }",
+        ] {
+            assert!(colorize.contains(set), "{set} in {colorize}");
+        }
+        assert!(
+            !colorize.contains("\"Hue 180\""),
+            "the colours replace the landmarks"
+        );
+    }
+
+    #[test]
+    fn every_named_step_is_one_value_the_server_reads_as_that_step() {
+        // The sheet showed a number for anything resting inside a band-wide
+        // named value, so each is one DMX value — and it must still be one the
+        // server reads as the step it is named for.
+        let step = 256.0 * 100.0 / 65_535.0;
+        for personality in generated() {
+            let layout = Layout::of(&personality);
+            for (channel, attribute) in personality.channels.iter().zip(&layout.attributes) {
+                let sets = channel_sets(&personality, channel, attribute);
+                match &channel.encoding {
+                    ChannelEncodingInfo::Stepped { bands } => {
+                        assert_eq!(sets.len(), bands.len(), "{}", channel.name);
+                        for ((name, from, to), band) in sets.iter().zip(bands) {
+                            assert!(
+                                (to - from - (step - 100.0 / 65_535.0)).abs() < 1e-3,
+                                "{name}"
+                            );
+                            let dmx = (from * 65_535.0 / 100.0 / 256.0).round() as u8;
+                            assert!(
+                                (band.from..=band.to).contains(&dmx),
+                                "{} {name} at {dmx}, outside {}..={}",
+                                personality.type_id,
+                                band.from,
+                                band.to
+                            );
+                        }
+                    }
+                    ChannelEncodingInfo::Switch { threshold } => {
+                        let at = |percent: f64| (percent * 65_535.0 / 100.0 / 256.0).round() as u8;
+                        assert!(at(sets[0].1) < *threshold, "{}", channel.name);
+                        assert!(at(sets[1].1) >= *threshold, "{}", channel.name);
+                    }
+                    _ => {}
+                }
+            }
+        }
     }
 
     #[test]
@@ -1547,13 +1749,14 @@ mod tests {
 
     #[test]
     fn a_choice_is_named_as_the_client_names_it() {
+        // Behind at the echo's home, 64; Lighten in the middle of 128 to 255.
         let echo = named("OVS FX Echo");
         assert!(
-            echo.contains("{ _NAME \"Behind\" _RANGE [0.0000%,49.9992%] }"),
+            echo.contains("{ _NAME \"Behind\" _RANGE [25.0004%,25.3895%] }"),
             "{echo}"
         );
         assert!(
-            echo.contains("{ _NAME \"Lighten\" _RANGE [50.0008%,100.0000%] }"),
+            echo.contains("{ _NAME \"Lighten\" _RANGE [74.6105%,74.9996%] }"),
             "{echo}"
         );
     }
@@ -1562,12 +1765,16 @@ mod tests {
     fn the_master_names_its_speed_steps_and_its_triggers() {
         let master = named("OVS Master");
         assert!(master.contains("\"0.125x\""), "{master}");
-        assert!(master.contains("\"1x\""), "{master}");
+        // 1x at home, 128, so a master at rest reads 1x.
+        assert!(
+            master.contains("{ _NAME \"1x\" _RANGE [50.0008%,50.3899%] }"),
+            "{master}"
+        );
         assert!(master.contains("_ATTRIBUT \"PARA_2\" _FEATURE \"OVS_PARAMETER\""));
         assert!(!master.contains("Sync"), "{master}");
         assert!(master.contains("ovs.master, 5 channels"), "{master}");
         assert!(
-            master.contains("{ _NAME \"BPM Tap Fire\" _RANGE [50.0008%,100.0000%] }"),
+            master.contains("{ _NAME \"BPM Tap Fire\" _RANGE [99.6109%,100.0000%] }"),
             "{master}"
         );
     }
@@ -1581,9 +1788,9 @@ mod tests {
             .find(|file| file.name == "OVS Layer")
             .expect("the layer")
             .contents;
-        assert!(raw.contains("\t\t{ _NAME \"Function\"   _RANGE [  0,255] _EFF DIMMER _PHYS [    0.00,    1.00] }\r\n"), "{raw}");
+        assert!(raw.contains("\t\t{ _NAME \"Dimmer\"     _RANGE [  0,255] _EFF DIMMER _PHYS [    0.00,    1.00] }\r\n"), "{raw}");
         assert!(
-            raw.contains("\t\t\t{ _NAME \"Black\"      _RANGE [0.0000%,1.5610%] }\r\n"),
+            raw.contains("\t\t\t{ _NAME \"Black\"      _RANGE [0.0000%,0.3891%] }\r\n"),
             "{raw}"
         );
     }

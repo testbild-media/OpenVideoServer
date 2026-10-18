@@ -9,17 +9,17 @@ _FIXTURETYPE
 	_BRIGHTMAXW 5000.000000
 	_CHANTYPE
 	{ _ATTRIBUT "PARA_1" _FEATURE "OVS_PARAMETER" _PRESET "VIDEO" _ATT_LABEL "Parameter 1" _FEA_LABEL "OVS Parameter" _DEFAULT 16.4065% _ETIME 0.000000 _SNAP YES 		_CHANFUNC
-		{ _NAME "Function"   _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] 			_CHANSET
-			{ _NAME "Off"        _RANGE [0.0000%,33.5927%] }
-			{ _NAME "Keep left"  _RANGE [33.5943%,66.7964%] }
-			{ _NAME "Keep right" _RANGE [66.7979%,100.0000%] }
+		{ _NAME "Horizontal" _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] 			_CHANSET
+			{ _NAME "Off"        _RANGE [16.4065%,16.7956%] }
+			{ _NAME "Keep left"  _RANGE [50.0008%,50.3899%] }
+			{ _NAME "Keep right" _RANGE [83.2044%,83.5935%] }
 		}
 	}
 	{ _ATTRIBUT "PARA_2" _FEATURE "OVS_PARAMETER" _PRESET "VIDEO" _ATT_LABEL "Parameter 2" _FEA_LABEL "OVS Parameter" _DEFAULT 16.4065% _ETIME 0.000000 _SNAP YES 		_CHANFUNC
-		{ _NAME "Function"   _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] 			_CHANSET
-			{ _NAME "Off"        _RANGE [0.0000%,33.5927%] }
-			{ _NAME "Keep top"   _RANGE [33.5943%,66.7964%] }
-			{ _NAME "Keep bottom" _RANGE [66.7979%,100.0000%] }
+		{ _NAME "Vertical"   _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] 			_CHANSET
+			{ _NAME "Off"        _RANGE [16.4065%,16.7956%] }
+			{ _NAME "Keep top"   _RANGE [50.0008%,50.3899%] }
+			{ _NAME "Keep bottom" _RANGE [83.2044%,83.5935%] }
 		}
 	}
 }

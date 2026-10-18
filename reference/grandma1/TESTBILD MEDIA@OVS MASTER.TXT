@@ -9,32 +9,32 @@ _FIXTURETYPE
 	_BRIGHTMAXW 5000.000000
 	_CHANTYPE
 	{ _ATTRIBUT "DIM" _FEATURE "DIMMER" _PRESET "DIMMER" _ATT_LABEL "Dim" _FEA_LABEL "Dimmer" _DEFAULT 99.6109% _HIGHLITE 100.0000% _ETIME -1.000000 		_CHANFUNC
-		{ _NAME "Function"   _RANGE [  0,255] _EFF DIMMER _PHYS [    0.00,    1.00] }
+		{ _NAME "Dimmer"     _RANGE [  0,255] _EFF DIMMER _PHYS [    0.00,    1.00] }
 	}
 	{ _ATTRIBUT "PARA_1" _FEATURE "OVS_PARAMETER" _PRESET "VIDEO" _ATT_LABEL "Parameter 1" _FEA_LABEL "OVS Parameter" _DEFAULT 0.0000% _ETIME 0.000000 _SNAP YES 		_CHANFUNC
-		{ _NAME "Function"   _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] 			_CHANSET
-			{ _NAME "Freeze Off" _RANGE [0.0000%,49.9992%] }
-			{ _NAME "Freeze On"  _RANGE [50.0008%,100.0000%] }
+		{ _NAME "Freeze"     _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] 			_CHANSET
+			{ _NAME "Freeze Off" _RANGE [0.0000%,0.3891%] }
+			{ _NAME "Freeze On"  _RANGE [99.6109%,100.0000%] }
 		}
 	}
 	{ _ATTRIBUT "PARA_2" _FEATURE "OVS_PARAMETER" _PRESET "VIDEO" _ATT_LABEL "Parameter 2" _FEA_LABEL "OVS Parameter" _DEFAULT 0.0000% _ETIME 0.000000 _SNAP YES 		_CHANFUNC
-		{ _NAME "Function"   _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] 			_CHANSET
-			{ _NAME "BPM Tap Idle" _RANGE [0.0000%,49.9992%] }
-			{ _NAME "BPM Tap Fire" _RANGE [50.0008%,100.0000%] }
+		{ _NAME "BPM Tap"    _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] 			_CHANSET
+			{ _NAME "BPM Tap Idle" _RANGE [0.0000%,0.3891%] }
+			{ _NAME "BPM Tap Fire" _RANGE [99.6109%,100.0000%] }
 		}
 	}
 	{ _ATTRIBUT "PARA_3" _FEATURE "OVS_PARAMETER" _PRESET "VIDEO" _ATT_LABEL "Parameter 3" _FEA_LABEL "OVS Parameter" _DEFAULT 50.0008% _ETIME 0.000000 _SNAP YES 		_CHANFUNC
-		{ _NAME "Function"   _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] 			_CHANSET
-			{ _NAME "0.125x"     _RANGE [0.0000%,16.7956%] }
-			{ _NAME "0.25x"      _RANGE [16.7971%,33.5927%] }
-			{ _NAME "0.5x"       _RANGE [33.5943%,49.9992%] }
-			{ _NAME "1x"         _RANGE [50.0008%,66.7964%] }
-			{ _NAME "2x"         _RANGE [66.7979%,83.5935%] }
-			{ _NAME "4x"         _RANGE [83.5950%,100.0000%] }
+		{ _NAME "BPM Scale"  _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] 			_CHANSET
+			{ _NAME "0.125x"     _RANGE [8.2033%,8.5924%] }
+			{ _NAME "0.25x"      _RANGE [25.0004%,25.3895%] }
+			{ _NAME "0.5x"       _RANGE [41.4069%,41.7960%] }
+			{ _NAME "1x"         _RANGE [50.0008%,50.3899%] }
+			{ _NAME "2x"         _RANGE [75.0011%,75.3902%] }
+			{ _NAME "4x"         _RANGE [91.4076%,91.7967%] }
 		}
 	}
 	{ _ATTRIBUT "PARA_4" _FEATURE "OVS_PARAMETER" _PRESET "VIDEO" _ATT_LABEL "Parameter 4" _FEA_LABEL "OVS Parameter" _DEFAULT 0.0000% _ETIME -1.000000 		_CHANFUNC
-		{ _NAME "Function"   _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] 			_CHANSET
+		{ _NAME "Crossfade"  _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] 			_CHANSET
 			{ _NAME "Crossfade 0" _RANGE [0.0000%,0.3891%] }
 			{ _NAME "Crossfade 0.5" _RANGE [50.0008%,50.3899%] }
 			{ _NAME "Crossfade 1" _RANGE [99.6109%,100.0000%] }
