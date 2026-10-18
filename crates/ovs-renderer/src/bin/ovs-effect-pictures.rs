@@ -276,6 +276,22 @@ fn settings(type_id: &str, version: u32, mask: MediaItemId) -> ParameterMap {
         // Enough to soften the lettering without losing the bars.
         "ovs.blur" => ParameterMap::from([number("radius_px", 28.0), number("amount", 1.0)]),
         "ovs.invert" => ParameterMap::from([flag("on", true)]),
+        // All the way in, in a colour the pattern does not use, and three
+        // pixels wide so the outlines of the bars and the lettering survive
+        // being shrunk to a sixth: the tile has to say "only the outlines" at
+        // ninety-two pixels across, where a one-pixel line is gone.
+        "ovs.edges" => {
+            let colour = (
+                "colour".to_owned(),
+                ParameterValue::Color([0.2, 0.9, 1.0, 1.0]),
+            );
+            ParameterMap::from([
+                number("amount", 1.0),
+                number("threshold", 0.12),
+                number("width_px", 3.0),
+                colour,
+            ])
+        }
         // A wide frame off the sides and a narrow one off the top, so the tile
         // shows both that it cuts and that the cut is transparent.
         "ovs.crop" => ParameterMap::from([

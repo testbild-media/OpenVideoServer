@@ -79,6 +79,9 @@ pub enum PassKind {
     Mask,
     /// Every colour swapped for its opposite, or nothing at all.
     Invert,
+    /// Only the outlines, in one colour, transparent between them. Reads its
+    /// neighbours, like the blur.
+    Edges,
 }
 
 impl PassKind {
@@ -101,6 +104,7 @@ impl PassKind {
             Self::TvGlitch => 12,
             Self::Mask => 13,
             Self::Invert => 14,
+            Self::Edges => 15,
         }
     }
 }
@@ -277,6 +281,21 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
                 0.0,
             ],
             colour: [0.0; 4],
+            mask: None,
+        }),
+        // One pass: the outlines are found and the crossfade done in the same
+        // place, reading the eight neighbours of each pixel at `width_px`
+        // apart. Appended at amount nought as well, for the reason every pass
+        // is — the renderer proves an effect neutral by drawing it.
+        ("ovs.edges", 1) => into.push(EffectPass {
+            kind: PassKind::Edges,
+            values: [
+                number("amount"),
+                number("threshold"),
+                number("width_px"),
+                0.0,
+            ],
+            colour: values.colour("colour"),
             mask: None,
         }),
         ("ovs.tint", 1) => into.push(EffectPass {

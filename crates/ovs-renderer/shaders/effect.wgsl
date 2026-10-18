@@ -94,6 +94,16 @@ const KIND_RGB_SPLIT: u32 = 11u;
 const KIND_TV_GLITCH: u32 = 12u;
 const KIND_MASK: u32 = 13u;
 const KIND_INVERT: u32 = 14u;
+const KIND_EDGES: u32 = 15u;
+
+/// How far past the threshold an edge takes to come fully in, in the same
+/// units as the threshold.
+///
+/// **Mine.** A hard cut at the threshold makes a line that crawls as the
+/// picture moves, because a pixel either side of the boundary flips on and off
+/// from one frame to the next; a short ramp keeps the line still. Small enough
+/// that the threshold still means what an operator thinks it means.
+const EDGE_SOFTNESS: f32 = 0.08;
 
 /// How often the line jumps are re-rolled, a second.
 ///
@@ -663,6 +673,73 @@ fn mask(uv: vec2<f32>, source: vec4<f32>) -> vec4<f32> {
     return vec4<f32>(source.rgb * level, source.a);
 }
 
+/// How bright one neighbour is, with its transparency counted.
+///
+/// Brightness times alpha, so the border between a placed picture and the
+/// empty canvas around it is an edge like any other: a camera scaled down on a
+/// wall is outlined, which is what an outline of "the picture" means.
+fn edge_luma(at: vec2<f32>) -> f32 {
+    let pixel = read(at);
+    return dot(pixel.rgb, LUMA_WEIGHTS) * pixel.a;
+}
+
+/// Only the outlines, in one colour, transparent between them.
+///
+/// A Sobel operator on brightness: the change across the pixel horizontally
+/// and vertically, each weighted towards the pixel's own row and column, and
+/// the size of the two together. Compared at `width_px` apart rather than
+/// against the immediate neighbours, which is what makes the line wide enough
+/// to survive being spread over LED panels.
+///
+/// `values` is amount, threshold, width; `colour` is the line's.
+///
+/// **The crossfade is done premultiplied** and turned back at the end. A
+/// straight-alpha mix of a picture with a line that is transparent off the
+/// edges would pull the line's colour into every pixel the picture covers, at
+/// half strength by the middle of the fader — a tint nobody asked for. Mixed
+/// premultiplied, a transparent pixel of the outlines contributes nothing,
+/// which is what transparent means.
+fn edges(uv: vec2<f32>, source: vec4<f32>) -> vec4<f32> {
+    let amount = clamp(effect.values.x, 0.0, 1.0);
+    // Off is the picture untouched, to the bit: the renderer proves every
+    // published effect neutral at its defaults, and a crossfade at nought that
+    // merely rounded back would not be.
+    if amount <= 0.0 {
+        return source;
+    }
+    let threshold = clamp(effect.values.y, 0.0, 1.0);
+    let width = max(effect.values.z, 1.0);
+    let step = effect.texel * width;
+
+    let top_left = edge_luma(uv + vec2<f32>(-step.x, -step.y));
+    let top = edge_luma(uv + vec2<f32>(0.0, -step.y));
+    let top_right = edge_luma(uv + vec2<f32>(step.x, -step.y));
+    let left = edge_luma(uv + vec2<f32>(-step.x, 0.0));
+    let right = edge_luma(uv + vec2<f32>(step.x, 0.0));
+    let bottom_left = edge_luma(uv + vec2<f32>(-step.x, step.y));
+    let bottom = edge_luma(uv + vec2<f32>(0.0, step.y));
+    let bottom_right = edge_luma(uv + vec2<f32>(step.x, step.y));
+
+    let across = (top_right + 2.0 * right + bottom_right) - (top_left + 2.0 * left + bottom_left);
+    let down = (bottom_left + 2.0 * bottom + bottom_right) - (top_left + 2.0 * top + top_right);
+    // Four is the most either can be for brightness between nought and one,
+    // so this is nought to about one and a half and the threshold can be read
+    // as a share of a hard black-to-white step.
+    let strength = length(vec2<f32>(across, down)) / 4.0;
+    let edge = smoothstep(threshold, threshold + EDGE_SOFTNESS, strength);
+
+    let line_alpha = edge * clamp(effect.colour.a, 0.0, 1.0);
+    let line = effect.colour.rgb * line_alpha;
+    let picture = source.rgb * source.a;
+
+    let alpha = mix(source.a, line_alpha, amount);
+    let premultiplied = mix(picture, line, amount);
+    if alpha <= 0.0 {
+        return vec4<f32>(0.0);
+    }
+    return vec4<f32>(premultiplied / alpha, alpha);
+}
+
 @fragment
 fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // Straight alpha throughout, never premultiplied. What comes out of the
@@ -716,6 +793,9 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         }
         case KIND_MASK: {
             return mask(input.uv, source);
+        }
+        case KIND_EDGES: {
+            return edges(input.uv, source);
         }
         // Unreachable: the renderer only ever writes a kind it has a branch
         // for. Returning the picture untouched is the one answer that cannot

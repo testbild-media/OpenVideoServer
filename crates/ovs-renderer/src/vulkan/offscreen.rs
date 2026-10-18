@@ -8846,6 +8846,139 @@ mod tests {
     }
 
     #[test]
+    fn edges_keep_the_outline_in_its_colour_and_let_the_rest_through() {
+        let _gpu = crate::vulkan::one_gpu_at_a_time();
+        // The owner, 2026-10-17: "nur Outlines … als eine Farbe", and "sollte
+        // transparent sein". A picture black on the left and white on the
+        // right has one edge, down the middle, over a red layer.
+        //
+        // **Transparent has to be proved with something underneath.** Over the
+        // composition's own black, a pixel the effect left transparent and one
+        // it painted opaque black are the same pixel — which is what this test
+        // measured the first time it was written, and passed for the wrong
+        // reason. So: the flat white must show the *red* layer below it.
+        let Some(mut canvas) = backend(16, 16) else {
+            return;
+        };
+        let media = MediaItemId::new();
+        let under = LayerId::new();
+        let over = LayerId::new();
+        canvas
+            .set_media_texture(
+                media,
+                &rgba(
+                    &pattern(16, |x, _| if x < 8 { [0, 0, 0, 255] } else { [255; 4] }),
+                    16,
+                    16,
+                ),
+            )
+            .expect("uploads");
+
+        let scene = |amount: f64| {
+            let mut scene = Scene::new();
+            let mut below = quad_at(-1.0, -1.0, 1.0, 1.0, RED);
+            below.layer_id = Some(under);
+            scene.push(below);
+
+            let mut above = textured_quad_at(-1.0, -1.0, 1.0, 1.0, [1.0, 1.0, 1.0, 1.0], media);
+            above.layer_id = Some(over);
+            scene.push(above);
+            scene.set_effects(
+                over,
+                &effect_at(
+                    "ovs.edges",
+                    1,
+                    &[
+                        ("amount", ParameterValue::Float(amount)),
+                        ("threshold", ParameterValue::Float(0.2)),
+                        ("width_px", ParameterValue::Float(1.0)),
+                        ("colour", ParameterValue::Color([0.0, 1.0, 0.0, 1.0])),
+                    ],
+                ),
+            );
+            scene
+        };
+        let at = |frame: &[u8], x: usize| {
+            let first = (8 * 16 + x) * 4;
+            [frame[first], frame[first + 1], frame[first + 2]]
+        };
+
+        let on = composed_frame(&mut canvas, &scene(1.0), 16);
+        close_to(at(&on, 8)[1], 255, "on the edge, the outline is green");
+        close_to(at(&on, 8)[0], 0, "and covers the red below it");
+        close_to(
+            at(&on, 13)[0],
+            255,
+            "on the flat white there is no outline, and the red comes through",
+        );
+        close_to(
+            at(&on, 13)[1],
+            0,
+            "the red, not the white the picture had there",
+        );
+        close_to(at(&on, 3)[0], 255, "and the same on the flat black");
+
+        let off = composed_frame(&mut canvas, &scene(0.0), 16);
+        close_to(
+            at(&off, 13)[0],
+            255,
+            "at amount nought the picture is back: white",
+        );
+        close_to(at(&off, 13)[1], 255, "in every channel, covering the red");
+        close_to(at(&off, 3)[0], 0, "and its black covers the red too");
+    }
+
+    #[test]
+    fn a_wider_line_reaches_further_from_the_edge() {
+        let _gpu = crate::vulkan::one_gpu_at_a_time();
+        // Why the width exists: a one-pixel line spread over LED panels with a
+        // coarse pitch disappears. Two pixels from the edge the narrow line has
+        // already ended; the wide one has not.
+        let Some(mut canvas) = backend(16, 16) else {
+            return;
+        };
+        let media = MediaItemId::new();
+        let layer = LayerId::new();
+        canvas
+            .set_media_texture(
+                media,
+                &rgba(
+                    &pattern(16, |x, _| if x < 8 { [0, 0, 0, 255] } else { [255; 4] }),
+                    16,
+                    16,
+                ),
+            )
+            .expect("uploads");
+
+        // Brightness rather than alpha: the composition is opaque, so the
+        // outline is read as the white line against the black it leaves.
+        let light_at = |canvas: &mut VulkanOffscreenBackend, width: f64, x: usize| {
+            let passes = effect_at(
+                "ovs.edges",
+                1,
+                &[
+                    ("amount", ParameterValue::Float(1.0)),
+                    ("threshold", ParameterValue::Float(0.2)),
+                    ("width_px", ParameterValue::Float(width)),
+                ],
+            );
+            let frame = composed_frame(canvas, &effected(layer, media, &passes), 16);
+            frame[(8 * 16 + x) * 4]
+        };
+
+        close_to(
+            light_at(&mut canvas, 1.0, 11),
+            0,
+            "three pixels out, a thin line has ended",
+        );
+        close_to(
+            light_at(&mut canvas, 4.0, 11),
+            255,
+            "and a wide one is still there",
+        );
+    }
+
+    #[test]
     fn warming_a_picture_lifts_the_red_and_drops_the_blue_without_dimming_it() {
         let _gpu = crate::vulkan::one_gpu_at_a_time();
         // What temperature means, measured on the card rather than argued

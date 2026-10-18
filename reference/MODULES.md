@@ -309,3 +309,14 @@ Turns every colour into its opposite, steadily or at a rate.
 | Inverted | `on` | on or off | off |
 | Rate | `hz` | a number from 0 to 30 | 0 |
 
+### Edges — `ovs.edges` v1
+
+Keeps only the outlines of the picture, in one colour.
+
+| Parameter | Key | Takes | Default |
+|---|---|---|---|
+| Amount | `amount` | a number from 0 to 1 | 0 |
+| Threshold | `threshold` | a number from 0 to 1 | 0.2 |
+| Line width | `width_px` | a number from 1 to 12 | 2 |
+| Colour | `colour` | a colour, linear RGBA | 1.00, 1.00, 1.00, 1.00 |
+

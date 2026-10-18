@@ -625,6 +625,75 @@ pub const INVERT_V2: EffectManifest = EffectManifest {
     ],
 };
 
+/// Only the outlines of the picture, in one colour, and nothing else.
+///
+/// The owner, 2026-10-17: "einen Effekt …, der Kantenerkennung hat, also nur
+/// Outlines von Live Kamera oder Video anzeigt als eine Farbe", and on the
+/// colour: "rgba sprich man kann es einfärben, aber sollte transparent sein".
+///
+/// **Transparent between the lines**, so the outlines sit over whatever the
+/// layers underneath are showing, and on a wall with nothing underneath the
+/// rest is black. Meant to be chained into `ovs.echo` for outlines that leave
+/// a trail, and kept separate from it because each is useful alone.
+///
+/// **`amount` is a crossfade**, from the picture as it came in to the outlines
+/// alone, and nought is the published default — so the effect is neutral until
+/// somebody brings it in, as every effect here must be. A fader rather than a
+/// switch because bringing outlines in over a camera is a move an operator
+/// makes on a desk.
+///
+/// **`width_px` is a decision about LED walls.** A one-pixel line in a 1080p
+/// composition is cut into pieces and spread over panels whose pitch can be
+/// several millimetres; it reads on a monitor and vanishes on the wall. The
+/// width is how far apart the compared pixels are, which thickens the line and
+/// also coarsens what counts as an edge — on a camera, usually what is wanted.
+pub const EDGES_V1: EffectManifest = EffectManifest {
+    type_id: "ovs.edges",
+    version: 1,
+    name: "Edges",
+    description: "Keeps only the outlines of the picture, in one colour.",
+    parameters: &[
+        ParameterDefinition {
+            key: "amount",
+            name: "Amount",
+            kind: ParameterKind::Number {
+                min: 0.0,
+                max: 1.0,
+                default: 0.0,
+            },
+            dmx: Some(DmxChannel::Fine),
+        },
+        ParameterDefinition {
+            key: "threshold",
+            name: "Threshold",
+            kind: ParameterKind::Number {
+                min: 0.0,
+                max: 1.0,
+                default: 0.2,
+            },
+            dmx: Some(DmxChannel::Coarse),
+        },
+        ParameterDefinition {
+            key: "width_px",
+            name: "Line width",
+            kind: ParameterKind::Number {
+                min: 1.0,
+                max: 12.0,
+                default: 2.0,
+            },
+            dmx: Some(DmxChannel::Coarse),
+        },
+        ParameterDefinition {
+            key: "colour",
+            name: "Colour",
+            kind: ParameterKind::Colour {
+                default: [1.0, 1.0, 1.0, 1.0],
+            },
+            dmx: Some(DmxChannel::Coarse),
+        },
+    ],
+};
+
 /// Four edges off the picture.
 ///
 /// What somebody reaches for when a camera feed has a letterbox in it, when a
@@ -698,7 +767,7 @@ pub const CROP_V1: EffectManifest = EffectManifest {
 };
 
 /// Every effect this build publishes.
-pub const PUBLISHED: [EffectManifest; 15] = [
+pub const PUBLISHED: [EffectManifest; 16] = [
     // Both versions, and the catalogue offers the newer: a show saved against
     // version one opens with the four controls it was saved with.
     COLOUR_CORRECT_V1,
@@ -716,6 +785,7 @@ pub const PUBLISHED: [EffectManifest; 15] = [
     MASK_V1,
     INVERT_V1,
     INVERT_V2,
+    EDGES_V1,
 ];
 
 /// How far out of vertical hold the picture can be thrown, as a fraction of

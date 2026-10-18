@@ -469,6 +469,32 @@ Footprint: **2 channels**. Patch to: **one effect instance in a chain**.
 |---|---|---|---|---|---|
 | 2 | Rate | `0` → 0 | `128` → 15.059 | `255` → 30 | `0` → 0 |
 
+## Edges — `ovs.edges` v1
+
+Footprint: **8 channels**. Patch to: **one effect instance in a chain**.
+
+| Channel | Name | Control | Values | Home |
+|---|---|---|---|---|
+| 1–2 | Amount | `amount` | 0 at 0, 1 at 65535 | 0 |
+| 3 | Threshold | `threshold` | 0 at 0, 1 at 255 | 51 |
+| 4 | Line width | `width_px` | 1 at 0, 12 at 255 | 23 |
+| 5 | Colour Red | `colour` | 0 at 0, 1 at 255 | 255 |
+| 6 | Colour Green | `colour` | 0 at 0, 1 at 255 | 255 |
+| 7 | Colour Blue | `colour` | 0 at 0, 1 at 255 | 255 |
+| 8 | Colour Alpha | `colour` | 0 at 0, 1 at 255 | 255 |
+
+### Where the values sit
+
+| Channel | Name | Bottom | Middle | Top | Home |
+|---|---|---|---|---|---|
+| 1–2 | Amount | `0` (0/0) → 0 | `32768` (128/0) → 0.5 | `65535` (255/255) → 1 | `0` (0/0) → 0 |
+| 3 | Threshold | `0` → 0 | `128` → 0.502 | `255` → 1 | `51` → 0.2 |
+| 4 | Line width | `0` → 1 | `128` → 6.522 | `255` → 12 | `23` → 1.992 |
+| 5 | Colour Red | `0` → 0 | `128` → 0.502 | `255` → 1 | `255` → 1 |
+| 6 | Colour Green | `0` → 0 | `128` → 0.502 | `255` → 1 | `255` → 1 |
+| 7 | Colour Blue | `0` → 0 | `128` → 0.502 | `255` → 1 | `255` → 1 |
+| 8 | Colour Alpha | `0` → 0 | `128` → 0.502 | `255` → 1 | `255` → 1 |
+
 ## Solid Colour — `ovs.solid_colour` v1
 
 Footprint: **4 channels**. Patch to: **one generator instance in a slot**.
