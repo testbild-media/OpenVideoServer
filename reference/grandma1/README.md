@@ -1,8 +1,8 @@
 # grandMA1 fixture types
 
-One file per OpenVideoServer DMX personality, for a grandMA1 (console or onPC
-6.x), manufacturer **testbild.media**. Generated from the same catalogue as
-[`../FIXTURES.md`](../FIXTURES.md) — do not edit by hand; run
+One file per thing a desk can patch on OpenVideoServer, for a grandMA1
+(console or onPC 6.x), manufacturer **testbild.media**. Generated from the same
+catalogue as [`../FIXTURES.md`](../FIXTURES.md) — do not edit by hand; run
 
 ```
 cargo run -p ovs-proto --bin ovs-grandma1
@@ -23,63 +23,92 @@ disagree.
 the one before `TXT` — so the manufacturer is `TESTBILD MEDIA` in the name of
 every file, as in `TESTBILD MEDIA@OVS FX ECHO.TXT`. A grandMA1 refuses a file
 named any other way (found on the first import, 2026-10-18). Inside the files
-nothing changed: the desk still lists them under `testbild.media`.
+the desk lists them under `testbild.media`.
 
-## Names
+## What there is
 
 | On the desk | What it is | Patch in OVS to |
 |---|---|---|
-| `OVS Master` | the show master | the master, once per show |
+| `OVS Master` | the show master, 5 channels | the master, once per show |
 | `OVS Layer` | one layer, with every slot named | one layer |
 | `OVS FX …` | one effect | one effect instance in a chain |
 | `OVS Gen …` | one generator | one generator instance in a slot |
 
-Version one of a module carries no number and later versions end in `v2`,
-`v3`: a name already in a show file never has to change. Retired modules
-(Tint, Clock, Countdown) have no file, because nothing can be given one any
-more.
+**One of each, and no version in any name.** The owner, 2026-10-18: "Ich habe
+aber in der Software keine Versionsvergabe und ist auch nicht gewünscht. TV
+Glitch V2 ist TV Glitch." Each file is the module as a client adds it today.
+Retired modules (Tint, Clock, Countdown, Grid) have no file, and neither has
+Noise, which has no DMX: it is set up in the client and faded with its layer.
 
-## Where things sit
+The master has no BPM Sync channel any more — the client's phase reset does
+that — so BPM Scale is channel 4 and the crossfader channel 5.
 
-A control takes one of the desk's own attributes only where a tool of the
-desk answers to it, and then exactly as MA's library writes it:
+## Groups
 
-- **Layer position is `PAN` and `TILT`**, so the trackball moves a layer and
-  the desk's position effects (circles and the like) run on it. Pan is
-  across, tilt is up: a larger tilt moves the picture up the wall. If it goes
-  the wrong way on a desk, invert tilt in the patch.
-- **Every dimmer is `DIM`**: the master's, each layer's, and in a module the
-  control that says how much of it there is (below). The grand master, a
-  group master, Highlight and `At` all act on it.
-- **The first colour of a module is `RED`/`GREEN`/`BLUE`** with the colour-mix
-  effect, so the colour picker drives it.
-- **A layer's turn and size** are `Z ROT` and `X SCALE`/`Y SCALE` under
-  Pan/Tilt, as the library's media servers have them. Home on the scales is
-  exactly 1.
+Six, so a show with every one of these patched lists six groups of ours and
+the desk's.
 
-**Everything else is ours and says so.** An attribute is `OVS`, the module and
-the control — `OVS BLUR RADIUS`, `OVS CC SATURATION` — in a group that is `OVS`
-and the module: `OVS BLUR`, `OVS COLOUR CORRECT`. The layer's slot is
-`OVS SLOT` under Gobo, with `Black` and `Slot 1` to `Slot 84` as named values
-at the exact bands the server reads. A module's alpha is `OVS ALPHA` beside its
-red, green and blue; a background is `OVS BG RED` and so on in
-`OVS BACKGROUND`, whichever generator it belongs to; the far end of a gradient
-is `OVS TO RED` in `OVS GRADIENT TO`. No attribute of ours means two things in
-two modules, so a show that keeps one list of attributes cannot mix them up.
+| Group | Preset | Attributes | Pages |
+|---|---|---|---|
+| Dimmer | Dimmer | `DIM` | 1 |
+| Pan/Tilt | Pan/Tilt | `PAN` (X), `TILT` (Y), `OVS ROTATION` (Z) | 1 |
+| RGBX | Color | `R`, `G`, `B`, `X` · `BG R`, `BG G`, `BG B`, `BG X` | 2 |
+| OVS Layer | Video | `OVS SLOT`, `OVS SCALE X`, `OVS SCALE Y` | 1 |
+| OVS Master | Video | `OVS FREEZE`, `OVS BPM TAP`, `OVS BPM SCALE`, `OVS CROSSFADE` | 1 |
+| OVS Param | Video | `OVS PARAM 1` to `OVS PARAM 6` | 2 |
+
+- **Pan and tilt are a layer's X and Y**, so the trackball moves a layer and
+  the desk's position effects run on it. A larger tilt moves the picture up
+  the wall; if it goes the wrong way, invert tilt in the patch.
+- **RGBX is a colour of four parts** — red, green, blue and an X that is alpha
+  here and could be amber or white on another fixture. The first page is the
+  foreground, and its R, G and B are what the colour picker drives; the second
+  is the background (`BG`), which for a gradient is its far colour.
+- **Everything of ours that is not a colour is under Video**, so the Video
+  window keeps presets of it.
+- **A module's controls are Param 1 to 6**, shared by every effect and
+  generator. The encoder says "Param 1"; what it is in the module you have
+  selected is in its named values — Blur's Param 1 reads `Radius 0`,
+  `Radius 32`, `Radius 64` — and in the fixture's comment.
 
 Choices and switches snap, and every step is a named value with the name the
 client shows. Every channel's home is the fixture's default, so a freshly
 patched layer is visible, full size and upright, and a freshly patched effect
 changes nothing.
 
+## Every fixture
+
+| Fixture | Dimmer | Param 1 to 6 | RGBX |
+|---|---|---|---|
+| OVS Master | Master dimmer | — (Freeze, BPM Tap, BPM Scale, Crossfade in OVS Master) | — |
+| OVS Layer | Layer dimmer | — (Slot and Scale in OVS Layer, position in Pan/Tilt) | — |
+| FX Blur | Amount | Radius | — |
+| FX Colorize | Amount | Hue, Saturation | — |
+| FX Colour Correct | — | Brightness, Contrast, Saturation, Gamma, Temperature, Tint | — |
+| FX Crop | — | Left, Right, Top, Bottom | — |
+| FX Echo | Length | Mode | — |
+| FX Edges | Amount | Threshold, Line width | foreground |
+| FX Invert | Inverted (a switch) | Rate | — |
+| FX Mask | Amount | — | — |
+| FX Mirror | — | Horizontal, Vertical | — |
+| FX Pixelate | Block size | — | — |
+| FX RGB Correct | — | Red black, Green black, Blue black, Red white, Green white, Blue white | — |
+| FX RGB Split | Offset | Angle | — |
+| FX TV Glitch | Amount | Line jumps, Snow, Rolling error, Out of sync | — |
+| Gen Gradient | — | Angle | from (foreground), to (background) |
+| Gen Shape | — | Shape, Width, Height, Rotation | foreground, background |
+| Gen Solid Colour | — | — | foreground |
+| Gen Strobe | — | Rate, Mode | foreground |
+| Gen Text | — | Cap height, Stroke weight, Tracking, Alignment | foreground, background |
+
 ## A group master for the effects
 
-Every module that has an `Amount` has it as its dimmer, and four more have
-their strength there:
+A module's dimmer is the control that says how much of it there is, with
+nothing at all at nought:
 
 | Module | Its dimmer | At nought |
 |---|---|---|
-| Blur, Colorize, Edges, Mask, TV Glitch, Noise | Amount | none of it |
+| Blur, Colorize, Edges, Mask, TV Glitch | Amount | none of it |
 | Pixelate | Block size | blocks of one pixel |
 | RGB Split | Offset | no split |
 | Echo | Length | no trail |
@@ -94,3 +123,20 @@ master does not reach them.
 **The grand master reaches these dimmers too.** Pulling it down to fade a show
 out also pulls the effects' amounts down on the way, and Blackout takes them to
 nought with everything else.
+
+## The probe files
+
+`probe/` holds two fixture types that are not for a show. The first set of
+files was refused for every fixture with a colour, and the likeliest reason is
+that it put a fourth attribute into the desk's own RGB group. RGBX is a group
+of its own, but it still has an X beside three colour-mix attributes. Import
+`OVS Gen Solid Colour` and both probes, and the three answers say which:
+
+| Solid Colour | Probe RGBX no X | Probe MA RGB | Then |
+|---|---|---|---|
+| taken | — | — | RGBX works; delete the probes |
+| refused | taken | — | X must not sit beside the colour mix |
+| refused | refused | taken | the colour mix must be the desk's RED, GREEN, BLUE |
+| refused | refused | refused | it is not the colour group at all |
+
+Delete them from the desk and from here once that is answered.

@@ -48,8 +48,6 @@ pub enum Parameter {
     MasterFreeze,
     /// One tap of the tempo.
     MasterTapTempo,
-    /// Put the beat back on the downbeat.
-    MasterResetPhase,
 
     /// One layer's live opacity.
     LayerOpacity {
@@ -139,7 +137,6 @@ impl Parameter {
             Self::MasterSpeedScale => "master_speed_scale",
             Self::MasterFreeze => "master_freeze",
             Self::MasterTapTempo => "master_tap_tempo",
-            Self::MasterResetPhase => "master_reset_phase",
             Self::LayerOpacity { .. } => "layer_opacity",
             Self::LayerSlot { .. } => "layer_slot",
             Self::LayerTrigger { .. } => "layer_trigger",
@@ -157,8 +154,8 @@ impl Parameter {
 
     /// Returns true when this parameter is fired rather than set.
     ///
-    /// Three of them are moments, not values: a tap, a phase reset and a layer
-    /// trigger. A transport turns a channel *crossing* its threshold into one of
+    /// Two of them are moments, not values: a tap and a layer trigger. A
+    /// transport turns a channel *crossing* its threshold into one of
     /// these arriving at all, so a momentary parameter reaching
     /// [`crate::config::Parameter`]'s consumer means "it happened", never "it is
     /// still on". Without that distinction a console holding a trigger channel
@@ -167,10 +164,7 @@ impl Parameter {
     /// down.
     #[must_use]
     pub const fn is_momentary(self) -> bool {
-        matches!(
-            self,
-            Self::MasterTapTempo | Self::MasterResetPhase | Self::LayerTrigger { .. }
-        )
+        matches!(self, Self::MasterTapTempo | Self::LayerTrigger { .. })
     }
 }
 
@@ -817,17 +811,19 @@ impl FixtureDefinition {
 
 /// The single show-wide master fixture, version 1.
 ///
-/// Six channels, every one of them eight bits, exactly as the owner set them
-/// down on 2026-09-22. What was here before was this renderer's guess at the
+/// Five channels, every one of them eight bits: the six the owner set down on
+/// 2026-09-22, less sync. What was here before was this renderer's guess at the
 /// same thing — ten channels, sixteen bits for the dimmer, the crossfader and a
 /// BPM *value* — and it was wrong in ways worth naming, because each of them
 /// says something about how a desk is actually used:
 ///
-/// - **There is no BPM value channel.** A tempo is tapped or synced, not typed
-///   into a fader: a sixteen-bit channel across 20 to 999 BPM puts about a
-///   seventh of a beat per step in the range anybody works in, and an operator
-///   who wants 128 cannot get it by hand. Tap and sync are the two channels
-///   that remain.
+/// - **There is no BPM value channel.** A tempo is tapped, not typed into a
+///   fader: a sixteen-bit channel across 20 to 999 BPM puts about a seventh of
+///   a beat per step in the range anybody works in, and an operator who wants
+///   128 cannot get it by hand.
+/// - **There is no sync channel either**, since 2026-10-18: "BPM Sync
+///   entfernen wir komplett aus DMX und existiert nur noch im Clienten." The
+///   client's phase reset is a request of its own, and a desk has a tap.
 /// - **The scale is a ladder, not a range.** Eight steps, each a doubling, so a
 ///   console's percentage readout lands on a step instead of between two.
 /// - **Eight bits throughout.** Sixteen was reserved for what an operator fades
@@ -838,11 +834,17 @@ impl FixtureDefinition {
 /// version 2 — the same reasoning the owner gave for the slot transform
 /// (owner decision Q14). After the first release a channel layout is physically
 /// programmed into a desk's show file and a new control is a new version.
+///
+/// Taking sync out moved the scale and the crossfader down one channel in
+/// version 1 itself, after release, on the owner's word that every desk is
+/// being programmed again for the new fixture types (2026-10-18: "Wir
+/// definieren gerade neu, was alles umschmeißt und das Pult muss eh neu
+/// gemacht werden").
 pub const MASTER_V1: FixtureDefinition = FixtureDefinition {
     type_id: "ovs.master",
     version: 1,
     name: "OVS Master",
-    footprint: 6,
+    footprint: 5,
     channels: &[
         ChannelDefinition {
             offset: 1,
@@ -871,14 +873,6 @@ pub const MASTER_V1: FixtureDefinition = FixtureDefinition {
         },
         ChannelDefinition {
             offset: 4,
-            name: "BPM Sync",
-            parameter: ParameterSlot::Master(Parameter::MasterResetPhase),
-            encoding: ChannelEncoding::Switch { threshold: 128 },
-            // A trigger at rest.
-            home: 0,
-        },
-        ChannelDefinition {
-            offset: 5,
             name: "BPM Scale",
             parameter: ParameterSlot::Master(Parameter::MasterSpeedScale),
             encoding: ChannelEncoding::ScaleLadder,
@@ -889,7 +883,7 @@ pub const MASTER_V1: FixtureDefinition = FixtureDefinition {
             home: 128,
         },
         ChannelDefinition {
-            offset: 6,
+            offset: 5,
             name: "Crossfade A/B",
             parameter: ParameterSlot::Master(Parameter::MasterCrossfader),
             encoding: ChannelEncoding::Ranged8 { min: 0.0, max: 1.0 },
@@ -1304,7 +1298,7 @@ mod tests {
             "the speed scale homed to {scale}"
         );
 
-        for trigger in ["BPM Tap", "BPM Sync", "Freeze Output"] {
+        for trigger in ["BPM Tap", "Freeze Output"] {
             assert_eq!(
                 homed(&MASTER_V1, trigger),
                 ChannelValue::Flag(false),
@@ -1322,6 +1316,16 @@ mod tests {
                 .any(|channel| channel.name == "BPM"),
             "the master personality has a BPM fader again"
         );
+        // Nor a sync: "BPM Sync entfernen wir komplett aus DMX und existiert
+        // nur noch im Clienten" (owner, 2026-10-18).
+        assert!(
+            !MASTER_V1
+                .channels
+                .iter()
+                .any(|channel| channel.name.contains("Sync")),
+            "the master personality has a sync channel again"
+        );
+        assert_eq!(MASTER_V1.footprint, 5);
     }
 
     #[test]

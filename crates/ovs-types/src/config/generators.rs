@@ -447,9 +447,13 @@ pub const GRID_V1: GeneratorManifest = GeneratorManifest {
 /// looks like a slide; the same colour with a little grain in it looks like a
 /// surface, and unlike a grain clip it costs no decoder and no storage.
 ///
-/// Published as monochrome grain at thirty-two pixels and full amount, which is
-/// unmistakably noise rather than a field somebody has to walk up to the wall to
-/// see.
+/// Published as monochrome grain at the finest scale and full amount. The
+/// owner, 2026-10-18: "Noise sollte standard scale 0 haben, weil das wirklich
+/// noise ist" — the bottom of the scale, static rather than blobs.
+///
+/// **No DMX.** The same message: "danach hat noise keine DMX Parameter mehr".
+/// It is set up in the client and faded with its layer's dimmer, so a desk
+/// patches nothing for it and there is no fixture type to import.
 pub const NOISE_V1: GeneratorManifest = GeneratorManifest {
     type_id: "ovs.noise",
     version: 1,
@@ -465,15 +469,15 @@ pub const NOISE_V1: GeneratorManifest = GeneratorManifest {
             kind: ParameterKind::Number {
                 min: 2.0,
                 max: 512.0,
-                default: 32.0,
+                default: 2.0,
             },
-            dmx: Some(DmxChannel::Fine),
+            dmx: None,
         },
         ParameterDefinition {
             key: "coloured",
             name: "Coloured",
             kind: ParameterKind::Toggle { default: false },
-            dmx: Some(DmxChannel::Coarse),
+            dmx: None,
         },
         // How far the grain swings either side of mid grey. Published at the top
         // of its range because a generator an operator has just added should
@@ -488,7 +492,7 @@ pub const NOISE_V1: GeneratorManifest = GeneratorManifest {
                 max: 1.0,
                 default: 1.0,
             },
-            dmx: Some(DmxChannel::Fine),
+            dmx: None,
         },
     ],
 };
@@ -941,8 +945,10 @@ pub const PUBLISHED: [GeneratorManifest; 11] = [
 ///
 /// The owner, 2026-10-12: "Was sowieso dann weg kann und mir keinen Mehrwert
 /// bringt: Generator Countdown, Generator Clock". Both draw the time, and the
-/// time is not what this system is for.
-pub const RETIRED: [&str; 2] = ["ovs.clock", "ovs.countdown"];
+/// time is not what this system is for. And 2026-10-18: "Grid Generator wird
+/// nicht benötigt und sollte entfernt sein, dadurch auch kein DMX haben" — a
+/// desk is given no fixture type for a retired generator.
+pub const RETIRED: [&str; 3] = ["ovs.clock", "ovs.countdown", "ovs.grid"];
 
 /// Returns a published generator by type and version.
 ///

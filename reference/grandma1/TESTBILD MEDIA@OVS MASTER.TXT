@@ -4,32 +4,26 @@ _FIXTURETYPE
 	_MANUFAC    "testbild.media"
 	_SHORTNAME  "OVS Master"
 	_VERSION    ORIGINAL
-	_COMMENT    "OpenVideoServer ovs.master v1, 6 channels. Patch in OVS to the show master, one per show, at the same address. Generated from the OVS fixture catalogue; reference/FIXTURES.md lists every value."
+	_COMMENT    "OpenVideoServer ovs.master, 5 channels. Patch in OVS to the show master, one per show, at the same address. Generated from the OVS fixture catalogue; reference/FIXTURES.md lists every value."
 	_BRIGHTMINW 5000.000000
 	_BRIGHTMAXW 5000.000000
 	_CHANTYPE
 	{ _ATTRIBUT "DIM" _FEATURE "DIMMER" _PRESET "DIMMER" _ATT_LABEL "Dim" _FEA_LABEL "Dimmer" _DEFAULT 99.6109% _HIGHLITE 100.0000% _ETIME -1.000000 		_CHANFUNC
 		{ _NAME "Function"   _RANGE [  0,255] _EFF DIMMER _PHYS [    0.00,    1.00] }
 	}
-	{ _ATTRIBUT "OVS FREEZE" _FEATURE "OVS MASTER" _PRESET "CONTROL" _ATT_LABEL "Freeze" _FEA_LABEL "OVS Master" _DEFAULT 0.0000% _ETIME 0.000000 _SNAP YES 		_CHANFUNC
+	{ _ATTRIBUT "OVS FREEZE" _FEATURE "OVS MASTER" _PRESET "VIDEO" _ATT_LABEL "Freeze" _FEA_LABEL "OVS Master" _DEFAULT 0.0000% _ETIME 0.000000 _SNAP YES 		_CHANFUNC
 		{ _NAME "Function"   _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] 			_CHANSET
 			{ _NAME "Off"        _RANGE [0.0000%,49.9992%] }
 			{ _NAME "On"         _RANGE [50.0008%,100.0000%] }
 		}
 	}
-	{ _ATTRIBUT "OVS BPM TAP" _FEATURE "OVS MASTER" _PRESET "CONTROL" _ATT_LABEL "BPM Tap" _FEA_LABEL "OVS Master" _DEFAULT 0.0000% _ETIME 0.000000 _SNAP YES 		_CHANFUNC
+	{ _ATTRIBUT "OVS BPM TAP" _FEATURE "OVS MASTER" _PRESET "VIDEO" _ATT_LABEL "BPM Tap" _FEA_LABEL "OVS Master" _DEFAULT 0.0000% _ETIME 0.000000 _SNAP YES 		_CHANFUNC
 		{ _NAME "Function"   _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] 			_CHANSET
 			{ _NAME "Idle"       _RANGE [0.0000%,49.9992%] }
 			{ _NAME "Fire"       _RANGE [50.0008%,100.0000%] }
 		}
 	}
-	{ _ATTRIBUT "OVS BPM SYNC" _FEATURE "OVS MASTER" _PRESET "CONTROL" _ATT_LABEL "BPM Sync" _FEA_LABEL "OVS Master" _DEFAULT 0.0000% _ETIME 0.000000 _SNAP YES 		_CHANFUNC
-		{ _NAME "Function"   _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] 			_CHANSET
-			{ _NAME "Idle"       _RANGE [0.0000%,49.9992%] }
-			{ _NAME "Fire"       _RANGE [50.0008%,100.0000%] }
-		}
-	}
-	{ _ATTRIBUT "OVS BPM SCALE" _FEATURE "OVS MASTER" _PRESET "CONTROL" _ATT_LABEL "BPM Scale" _FEA_LABEL "OVS Master" _DEFAULT 50.0008% _ETIME 0.000000 _SNAP YES 		_CHANFUNC
+	{ _ATTRIBUT "OVS BPM SCALE" _FEATURE "OVS MASTER" _PRESET "VIDEO" _ATT_LABEL "BPM Scale" _FEA_LABEL "OVS Master" _DEFAULT 50.0008% _ETIME 0.000000 _SNAP YES 		_CHANFUNC
 		{ _NAME "Function"   _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] 			_CHANSET
 			{ _NAME "0.125x"     _RANGE [0.0000%,16.7956%] }
 			{ _NAME "0.25x"      _RANGE [16.7971%,33.5927%] }
@@ -39,7 +33,7 @@ _FIXTURETYPE
 			{ _NAME "4x"         _RANGE [83.5950%,100.0000%] }
 		}
 	}
-	{ _ATTRIBUT "OVS CROSSFADE" _FEATURE "OVS MASTER" _PRESET "CONTROL" _ATT_LABEL "Crossfade A/B" _FEA_LABEL "OVS Master" _DEFAULT 0.0000% _ETIME -1.000000 		_CHANFUNC
+	{ _ATTRIBUT "OVS CROSSFADE" _FEATURE "OVS MASTER" _PRESET "VIDEO" _ATT_LABEL "Crossfade A/B" _FEA_LABEL "OVS Master" _DEFAULT 0.0000% _ETIME -1.000000 		_CHANFUNC
 		{ _NAME "Function"   _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] 			_CHANSET
 			{ _NAME "Min 0"      _RANGE [0.0000%,0.3891%] }
 			{ _NAME "Center 0.5" _RANGE [50.0008%,50.3899%] }

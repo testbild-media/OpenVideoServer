@@ -46,25 +46,24 @@ visible on a slow position move, which is why these are sixteen bits.
 
 ## OVS Master — `ovs.master` v1
 
-Footprint: **6 channels**. Patch to: **the show master (one per show)**.
+Footprint: **5 channels**. Patch to: **the show master (one per show)**.
 
 | Channel | Name | Control | Values | Home |
 |---|---|---|---|---|
 | 1 | Master Dimmer | `master_dimmer` | 0 at 0, 1 at 255 | 255 |
 | 2 | Freeze Output | `master_freeze` | on at 128 and above | 0 |
 | 3 | BPM Tap | `master_tap_tempo` | fires once when it reaches 128; held is not repeated | 0 |
-| 4 | BPM Sync | `master_reset_phase` | fires once when it reaches 128; held is not repeated | 0 |
-| 5 | BPM Scale | `master_speed_scale` | 6 steps, listed below | 128 |
-| 6 | Crossfade A/B | `master_crossfader` | 0 at 0, 1 at 255 | 0 |
+| 4 | BPM Scale | `master_speed_scale` | 6 steps, listed below | 128 |
+| 5 | Crossfade A/B | `master_crossfader` | 0 at 0, 1 at 255 | 0 |
 
 ### Where the values sit
 
 | Channel | Name | Bottom | Middle | Top | Home |
 |---|---|---|---|---|---|
 | 1 | Master Dimmer | `0` → 0 | `128` → 0.502 | `255` → 1 | `255` → 1 |
-| 6 | Crossfade A/B | `0` → 0 | `128` → 0.502 | `255` → 1 | `0` → 0 |
+| 5 | Crossfade A/B | `0` → 0 | `128` → 0.502 | `255` → 1 | `0` → 0 |
 
-### BPM Scale (channel 5)
+### BPM Scale (channel 4)
 
 | DMX | Step |
 |---|---|
@@ -693,23 +692,6 @@ Footprint: **15 channels**. Patch to: **one generator instance in a slot**.
 | 0–85 | `ellipse` |
 | 86–170 | `rectangle` |
 | 171–255 | `triangle` |
-
-## Noise — `ovs.noise` v1
-
-Footprint: **5 channels**. Patch to: **one generator instance in a slot**.
-
-| Channel | Name | Control | Values | Home |
-|---|---|---|---|---|
-| 1–2 | Scale | `scale_px` | 2 at 0, 512 at 65535 | 3855 |
-| 3 | Coloured | `coloured` | on at 128 and above | 0 |
-| 4–5 | Amount | `amount` | 0 at 0, 1 at 65535 | 65535 |
-
-### Where the values sit
-
-| Channel | Name | Bottom | Middle | Top | Home |
-|---|---|---|---|---|---|
-| 1–2 | Scale | `0` (0/0) → 2 | `32768` (128/0) → 257.004 | `65535` (255/255) → 512 | `3855` (15/15) → 32 |
-| 4–5 | Amount | `0` (0/0) → 0 | `32768` (128/0) → 0.5 | `65535` (255/255) → 1 | `65535` (255/255) → 1 |
 
 ## Clock — `ovs.clock` v1
 

@@ -575,7 +575,9 @@ mod tests {
 
         let console = UdpSocket::bind("127.0.0.1:0").expect("a console");
         let target = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
-        let mut dimmer = vec![0_u8; MASTER_V1.footprint as usize];
+        // Rounded up to an even count: Art-Net carries no odd length, and the
+        // master has been five channels since sync left it.
+        let mut dimmer = vec![0_u8; usize::from(MASTER_V1.footprint).next_multiple_of(2)];
         dimmer[0] = 0xFF;
         dimmer[1] = 0xFF;
 
@@ -701,7 +703,8 @@ mod tests {
         let target = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
         // Every channel at zero: on this personality that is a blackout, and it
         // is exactly what the show must not take while the switch is off.
-        let blackout = vec![0_u8; MASTER_V1.footprint as usize];
+        // Even, as Art-Net requires.
+        let blackout = vec![0_u8; usize::from(MASTER_V1.footprint).next_multiple_of(2)];
         let mut sequence = 1_u8;
 
         // Long enough for many passes of a ten-millisecond loop, and for the

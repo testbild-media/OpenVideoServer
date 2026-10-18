@@ -4,7 +4,7 @@ _FIXTURETYPE
 	_MANUFAC    "testbild.media"
 	_SHORTNAME  "FX Mask"
 	_VERSION    ORIGINAL
-	_COMMENT    "OpenVideoServer ovs.mask v1, 2 channels. Patch in OVS to one effect instance in a chain, at the same address. Generated from the OVS fixture catalogue; reference/FIXTURES.md lists every value."
+	_COMMENT    "OpenVideoServer ovs.mask, 2 channels. Patch in OVS to one effect instance in a chain, at the same address. Generated from the OVS fixture catalogue; reference/FIXTURES.md lists every value."
 	_BRIGHTMINW 5000.000000
 	_BRIGHTMAXW 5000.000000
 	_CHANTYPE

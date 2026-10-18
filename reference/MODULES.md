@@ -66,6 +66,9 @@ A linear gradient between two colours, at an angle.
 
 Lines at a spacing, in one colour on another.
 
+**Retired.** Not offered when adding one, and still served to a show that already
+             names it, so nothing that was saved with it loses a layer.
+
 | Parameter | Key | Takes | Default |
 |---|---|---|---|
 | Spacing | `spacing_px` | a number from 4 to 512 | 64 |
@@ -92,7 +95,7 @@ Value noise at a scale, monochrome or coloured.
 
 | Parameter | Key | Takes | Default |
 |---|---|---|---|
-| Scale | `scale_px` | a number from 2 to 512 | 32 |
+| Scale | `scale_px` | a number from 2 to 512 | 2 |
 | Coloured | `coloured` | on or off | off |
 | Amount | `amount` | a number from 0 to 1 | 1 |
 

@@ -113,14 +113,10 @@ pub fn apply(
             state.update_master(|master| master.freeze = frozen)
         }
 
-        // The two the master fixture fires rather than sets. A transport turns
-        // a channel crossing its threshold into one of these arriving at all,
-        // so reaching here means "it happened", not "it is on".
+        // The one the master fixture fires rather than sets. A transport turns
+        // a channel crossing its threshold into it arriving at all, so reaching
+        // here means "it happened", not "it is on".
         Parameter::MasterTapTempo => state.tap_tempo(std::time::Instant::now()),
-        Parameter::MasterResetPhase => {
-            state.reset_phase(std::time::Instant::now());
-            None
-        }
 
         Parameter::LayerOpacity { layer_id } => {
             let level = number(value)?;

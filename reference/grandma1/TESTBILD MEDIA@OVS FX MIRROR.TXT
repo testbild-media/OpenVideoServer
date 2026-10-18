@@ -4,18 +4,18 @@ _FIXTURETYPE
 	_MANUFAC    "testbild.media"
 	_SHORTNAME  "FX Mirror"
 	_VERSION    ORIGINAL
-	_COMMENT    "OpenVideoServer ovs.mirror v1, 2 channels. Patch in OVS to one effect instance in a chain, at the same address. Generated from the OVS fixture catalogue; reference/FIXTURES.md lists every value."
+	_COMMENT    "OpenVideoServer ovs.mirror, 2 channels. Patch in OVS to one effect instance in a chain, at the same address. Param 1 Horizontal, Param 2 Vertical. Generated from the OVS fixture catalogue; reference/FIXTURES.md lists every value."
 	_BRIGHTMINW 5000.000000
 	_BRIGHTMAXW 5000.000000
 	_CHANTYPE
-	{ _ATTRIBUT "OVS MIRROR HORIZ" _FEATURE "OVS MIRROR" _PRESET "VIDEO" _ATT_LABEL "Horizontal" _FEA_LABEL "OVS Mirror" _DEFAULT 16.4065% _ETIME 0.000000 _SNAP YES 		_CHANFUNC
+	{ _ATTRIBUT "OVS PARAM 1" _FEATURE "OVS PARAM" _PRESET "VIDEO" _ATT_LABEL "Param 1" _FEA_LABEL "OVS Param" _DEFAULT 16.4065% _ETIME 0.000000 _SNAP YES 		_CHANFUNC
 		{ _NAME "Function"   _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] 			_CHANSET
 			{ _NAME "Off"        _RANGE [0.0000%,33.5927%] }
 			{ _NAME "Keep left"  _RANGE [33.5943%,66.7964%] }
 			{ _NAME "Keep right" _RANGE [66.7979%,100.0000%] }
 		}
 	}
-	{ _ATTRIBUT "OVS MIRROR VERT" _FEATURE "OVS MIRROR" _PRESET "VIDEO" _ATT_LABEL "Vertical" _FEA_LABEL "OVS Mirror" _DEFAULT 16.4065% _ETIME 0.000000 _SNAP YES 		_CHANFUNC
+	{ _ATTRIBUT "OVS PARAM 2" _FEATURE "OVS PARAM" _PRESET "VIDEO" _ATT_LABEL "Param 2" _FEA_LABEL "OVS Param" _DEFAULT 16.4065% _ETIME 0.000000 _SNAP YES 		_CHANFUNC
 		{ _NAME "Function"   _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] 			_CHANSET
 			{ _NAME "Off"        _RANGE [0.0000%,33.5927%] }
 			{ _NAME "Keep top"   _RANGE [33.5943%,66.7964%] }

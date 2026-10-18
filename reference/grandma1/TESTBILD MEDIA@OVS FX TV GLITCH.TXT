@@ -4,7 +4,7 @@ _FIXTURETYPE
 	_MANUFAC    "testbild.media"
 	_SHORTNAME  "FX TV Glitch"
 	_VERSION    ORIGINAL
-	_COMMENT    "OpenVideoServer ovs.tv_glitch v1, 8 channels. Patch in OVS to one effect instance in a chain, at the same address. Generated from the OVS fixture catalogue; reference/FIXTURES.md lists every value."
+	_COMMENT    "OpenVideoServer ovs.tv_glitch, 10 channels. Patch in OVS to one effect instance in a chain, at the same address. Param 1 Line jumps, Param 2 Snow, Param 3 Rolling error, Param 4 Out of sync. Generated from the OVS fixture catalogue; reference/FIXTURES.md lists every value."
 	_BRIGHTMINW 5000.000000
 	_BRIGHTMAXW 5000.000000
 	_CHANTYPE
@@ -12,28 +12,36 @@ _FIXTURETYPE
 		{ _NAME "Function"   _RANGE [  0,255] _EFF DIMMER _PHYS [    0.00,    1.00] }
 	}
 	{ _ATTRIBUT "DIM" _FEATURE "DIMMER" _PRESET "DIMMER" _TYPE FINE }
-	{ _ATTRIBUT "OVS TVG LINE JUMPS" _FEATURE "OVS TV GLITCH" _PRESET "VIDEO" _ATT_LABEL "Line jumps" _FEA_LABEL "OVS TV Glitch" _DEFAULT 50.0008% _ETIME -1.000000 		_CHANFUNC
+	{ _ATTRIBUT "OVS PARAM 1" _FEATURE "OVS PARAM" _PRESET "VIDEO" _ATT_LABEL "Param 1" _FEA_LABEL "OVS Param" _DEFAULT 50.0008% _ETIME -1.000000 		_CHANFUNC
 		{ _NAME "Function"   _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] 			_CHANSET
-			{ _NAME "Min 0"      _RANGE [0.0000%,0.0000%] }
-			{ _NAME "Center 0.5" _RANGE [50.0008%,50.0008%] }
-			{ _NAME "Max 1"      _RANGE [100.0000%,100.0000%] }
+			{ _NAME "Line jumps 0" _RANGE [0.0000%,0.0000%] }
+			{ _NAME "Line jumps 0.5" _RANGE [50.0008%,50.0008%] }
+			{ _NAME "Line jumps 1" _RANGE [100.0000%,100.0000%] }
 		}
 	}
-	{ _ATTRIBUT "OVS TVG LINE JUMPS" _FEATURE "OVS TV GLITCH" _PRESET "VIDEO" _TYPE FINE }
-	{ _ATTRIBUT "OVS TVG SNOW" _FEATURE "OVS TV GLITCH" _PRESET "VIDEO" _ATT_LABEL "Snow" _FEA_LABEL "OVS TV Glitch" _DEFAULT 50.0008% _ETIME -1.000000 		_CHANFUNC
+	{ _ATTRIBUT "OVS PARAM 1" _FEATURE "OVS PARAM" _PRESET "VIDEO" _TYPE FINE }
+	{ _ATTRIBUT "OVS PARAM 2" _FEATURE "OVS PARAM" _PRESET "VIDEO" _ATT_LABEL "Param 2" _FEA_LABEL "OVS Param" _DEFAULT 50.0008% _ETIME -1.000000 		_CHANFUNC
 		{ _NAME "Function"   _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] 			_CHANSET
-			{ _NAME "Min 0"      _RANGE [0.0000%,0.0000%] }
-			{ _NAME "Center 0.5" _RANGE [50.0008%,50.0008%] }
-			{ _NAME "Max 1"      _RANGE [100.0000%,100.0000%] }
+			{ _NAME "Snow 0"     _RANGE [0.0000%,0.0000%] }
+			{ _NAME "Snow 0.5"   _RANGE [50.0008%,50.0008%] }
+			{ _NAME "Snow 1"     _RANGE [100.0000%,100.0000%] }
 		}
 	}
-	{ _ATTRIBUT "OVS TVG SNOW" _FEATURE "OVS TV GLITCH" _PRESET "VIDEO" _TYPE FINE }
-	{ _ATTRIBUT "OVS TVG ROLL" _FEATURE "OVS TV GLITCH" _PRESET "VIDEO" _ATT_LABEL "Rolling error" _FEA_LABEL "OVS TV Glitch" _DEFAULT 50.0008% _ETIME -1.000000 		_CHANFUNC
+	{ _ATTRIBUT "OVS PARAM 2" _FEATURE "OVS PARAM" _PRESET "VIDEO" _TYPE FINE }
+	{ _ATTRIBUT "OVS PARAM 3" _FEATURE "OVS PARAM" _PRESET "VIDEO" _ATT_LABEL "Param 3" _FEA_LABEL "OVS Param" _DEFAULT 50.0008% _ETIME -1.000000 		_CHANFUNC
 		{ _NAME "Function"   _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] 			_CHANSET
-			{ _NAME "Min 0"      _RANGE [0.0000%,0.0000%] }
-			{ _NAME "Center 0.5" _RANGE [50.0008%,50.0008%] }
-			{ _NAME "Max 1"      _RANGE [100.0000%,100.0000%] }
+			{ _NAME "Rolling error 0" _RANGE [0.0000%,0.0000%] }
+			{ _NAME "Rolling error 0.5" _RANGE [50.0008%,50.0008%] }
+			{ _NAME "Rolling error 1" _RANGE [100.0000%,100.0000%] }
 		}
 	}
-	{ _ATTRIBUT "OVS TVG ROLL" _FEATURE "OVS TV GLITCH" _PRESET "VIDEO" _TYPE FINE }
+	{ _ATTRIBUT "OVS PARAM 3" _FEATURE "OVS PARAM" _PRESET "VIDEO" _TYPE FINE }
+	{ _ATTRIBUT "OVS PARAM 4" _FEATURE "OVS PARAM" _PRESET "VIDEO" _ATT_LABEL "Param 4" _FEA_LABEL "OVS Param" _DEFAULT 50.0008% _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Function"   _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] 			_CHANSET
+			{ _NAME "Out of sync 0" _RANGE [0.0000%,0.0000%] }
+			{ _NAME "Out of sync 0.5" _RANGE [50.0008%,50.0008%] }
+			{ _NAME "Out of sync 1" _RANGE [100.0000%,100.0000%] }
+		}
+	}
+	{ _ATTRIBUT "OVS PARAM 4" _FEATURE "OVS PARAM" _PRESET "VIDEO" _TYPE FINE }
 }

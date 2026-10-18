@@ -216,10 +216,11 @@ mod tests {
             "ovs.solid_colour",
             "ovs.test_pattern",
             "ovs.gradient",
-            "ovs.grid",
             "ovs.noise",
         ] {
             assert!(offered.contains(type_id), "{type_id} is not offered");
         }
+        // Retired on the owner's word, 2026-10-18.
+        assert!(!offered.contains("ovs.grid"));
     }
 }

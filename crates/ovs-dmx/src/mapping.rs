@@ -18,9 +18,8 @@
 //!
 //! # Moments and values
 //!
-//! Three parameters are moments rather than values: a tempo tap, a phase reset
-//! and a layer trigger. Those are emitted on the rising edge of their channel
-//! only. A console holding a trigger channel high is a finger resting on a
+//! Two parameters are moments rather than values: a tempo tap and a layer
+//! trigger. Those are emitted on the rising edge of their channel only. A console holding a trigger channel high is a finger resting on a
 //! button, not a request to restart the clip forty-four times a second — and the
 //! difference is visible, because the second reading pins the layer to its first
 //! frame for as long as the finger is down.
@@ -614,7 +613,8 @@ mod tests {
         let mut channels = master_channels(255, 0, 0);
 
         for (value, wanted) in [(0, 0.125), (128, 1.0), (170, 1.0), (255, 4.0)] {
-            channels[4] = value;
+            // Channel 4, since sync left the master.
+            channels[3] = value;
             let collected = Mapper::new().collect(
                 &patch,
                 &universes_holding(&channels),
@@ -724,7 +724,7 @@ mod tests {
             collected.problems.as_slice(),
             [PatchProblem::Truncated {
                 universe: 1,
-                needed: 205,
+                needed: 204,
                 received: 4,
                 ..
             }]
