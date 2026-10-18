@@ -528,7 +528,16 @@
 
       /* Six seconds of deliberate pressure. The screen says what is about to
          happen and how to stop it, because the person holding the button is
-         about to end a show. */
+         about to end a show.
+
+         **Seen, never touched.** The panel's finger reaches this page as a
+         mouse, and a mouse is not captured by the button it pressed: when this
+         covered the screen, the next wobble of the finger landed on it instead,
+         the button heard `pointerleave`, and the countdown stopped before its
+         first second. Restart and Shutdown did nothing from the touchscreen on
+         the location server, 2026-10-18, while every other button worked. With
+         the overlay out of the hit test, the finger is still on the button, and
+         leaving the button still cancels, as the overlay says. */
       #holding {
         position: fixed;
         inset: 0;
@@ -537,6 +546,7 @@
         text-align: center;
         background: rgba(15, 12, 8, 0.72);
         z-index: 10;
+        pointer-events: none;
       }
 
       #holding.shown {
