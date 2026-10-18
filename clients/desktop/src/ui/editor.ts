@@ -1762,14 +1762,16 @@ export class EditorPanel {
       block.classList.toggle('off', !instance.enabled);
       const path = effectPath(show, chain, instance.id) ?? '';
 
-      const published = findEffect(this.#catalogue, instance.type_id, instance.version);
+      // Named and nothing more. The document's `version` is not shown, because
+      // a module has none an operator could tell apart: "Es gibt kein Invert
+      // V2.. nirgendwo. Es ist Invert!" (owner, 2026-10-18).
+      const published = findEffect(this.#catalogue, instance.type_id);
       const head = make('div', 'effect-head');
       head.append(
         this.#toggle(instance.enabled, (value) =>
           this.#edit(setEffectEnabled(show, chain, instance.id, value)),
         ),
         make('span', 'effect-name', published?.name ?? instance.type_id),
-        make('span', 'effect-version', `v${instance.version}`),
         button('▲', () => this.#edit(moveEffect(show, chain, instance.id, 'earlier')), {
           title: 'one place earlier in the chain',
         }),
@@ -1798,7 +1800,7 @@ export class EditorPanel {
           make(
             'p',
             'empty-note',
-            `This server does not publish ${instance.type_id} version ${instance.version}. It is kept in the document exactly as it was.`,
+            `This server does not publish ${instance.type_id}. It is kept in the document exactly as it was.`,
           ),
         );
       }
@@ -1810,26 +1812,18 @@ export class EditorPanel {
     const chooser = this.#select(
       [
         { value: '', label: 'Add an effect…' },
+        // The type alone, which is the whole of a module's identity.
         ...this.#catalogue.effects.map((effect) => ({
-          value: `${effect.type_id}:${effect.version}`,
+          value: effect.type_id,
           label: effect.name,
         })),
       ],
       '',
       (value) => {
-        const split = value.lastIndexOf(':');
-        if (split < 0) {
+        if (value === '') {
           return;
         }
-        this.#edit(
-          addEffect(
-            show,
-            this.#catalogue,
-            chain,
-            value.slice(0, split),
-            Number(value.slice(split + 1)),
-          ),
-        );
+        this.#edit(addEffect(show, this.#catalogue, chain, value));
       },
     );
     add.append(chooser);

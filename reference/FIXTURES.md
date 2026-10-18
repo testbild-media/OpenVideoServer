@@ -3,10 +3,10 @@
 Generated from the personalities this build publishes. Do not edit by hand:
 run `cargo run -p ovs-proto --bin ovs-fixture-doc` and commit the result.
 
-A published personality never changes. A console has the channel layout
-physically programmed into its show file, so a new control is a new version
-rather than a changed one, and a server refuses a patch naming a version it
-does not have rather than serving the nearest one.
+There is one personality of each type. A console has the channel layout
+physically programmed into its show file, so a patch entry records how many
+channels it was patched with, and a server refuses one that disagrees with
+the personality rather than reading the channels after it shifted.
 
 The server receives only. It answers no ArtPoll, appears in no console's node
 list, and transmits nothing.
@@ -44,7 +44,7 @@ landmark tables print both: `32768 (128/0)` means coarse 128, fine 0. Coarse
 alone moves in steps of 256, which is a quarter of a per cent of the travel —
 visible on a slow position move, which is why these are sixteen bits.
 
-## OVS Master — `ovs.master` v1
+## OVS Master — `ovs.master`
 
 Footprint: **5 channels**. Patch to: **the show master (one per show)**.
 
@@ -74,7 +74,7 @@ Footprint: **5 channels**. Patch to: **the show master (one per show)**.
 | 171–213 | `2.0` |
 | 214–255 | `4.0` |
 
-## OVS Layer — `ovs.layer` v1
+## OVS Layer — `ovs.layer`
 
 Footprint: **12 channels**. Patch to: **one layer**.
 
@@ -189,27 +189,7 @@ Footprint: **12 channels**. Patch to: **one layer**.
 | 250–252 | `83` |
 | 253–255 | `84` |
 
-## Colour Correct — `ovs.colour_correct` v1
-
-Footprint: **8 channels**. Patch to: **one effect instance in a chain**.
-
-| Channel | Name | Control | Values | Home |
-|---|---|---|---|---|
-| 1–2 | Brightness | `brightness` | 0 at 0, 4 at 65535 | 16384 |
-| 3–4 | Contrast | `contrast` | 0 at 0, 4 at 65535 | 16384 |
-| 5–6 | Saturation | `saturation` | 0 at 0, 4 at 65535 | 16384 |
-| 7–8 | Gamma | `gamma` | 0.1 at 0, 4 at 65535 | 15123 |
-
-### Where the values sit
-
-| Channel | Name | Bottom | Middle | Top | Home |
-|---|---|---|---|---|---|
-| 1–2 | Brightness | `0` (0/0) → 0 | `32768` (128/0) → 2 | `65535` (255/255) → 4 | `16384` (64/0) → 1 |
-| 3–4 | Contrast | `0` (0/0) → 0 | `32768` (128/0) → 2 | `65535` (255/255) → 4 | `16384` (64/0) → 1 |
-| 5–6 | Saturation | `0` (0/0) → 0 | `32768` (128/0) → 2 | `65535` (255/255) → 4 | `16384` (64/0) → 1 |
-| 7–8 | Gamma | `0` (0/0) → 0.1 | `32768` (128/0) → 2.05 | `65535` (255/255) → 4 | `15123` (59/19) → 1 |
-
-## Colour Correct — `ovs.colour_correct` v2
+## Colour Correct — `ovs.colour_correct`
 
 Footprint: **12 channels**. Patch to: **one effect instance in a chain**.
 
@@ -233,7 +213,7 @@ Footprint: **12 channels**. Patch to: **one effect instance in a chain**.
 | 9–10 | Temperature | `0` (0/0) → 2000 | `32768` (128/0) → 6000.061 | `65535` (255/255) → 10000 | `36863` (143/255) → 6499.947 |
 | 11–12 | Tint | `0` (0/0) → -1 | `32768` (128/0) → 0 | `65535` (255/255) → 1 | `32768` (128/0) → 0 |
 
-## Tint — `ovs.tint` v1
+## Tint — `ovs.tint`
 
 Footprint: **7 channels**. Patch to: **one effect instance in a chain**.
 
@@ -256,7 +236,7 @@ Footprint: **7 channels**. Patch to: **one effect instance in a chain**.
 | 4 | Colour Alpha | `0` → 0 | `128` → 0.502 | `255` → 1 | `255` → 1 |
 | 5–6 | Amount | `0` (0/0) → 0 | `32768` (128/0) → 0.5 | `65535` (255/255) → 1 | `0` (0/0) → 0 |
 
-## Pixelate — `ovs.pixelate` v1
+## Pixelate — `ovs.pixelate`
 
 Footprint: **2 channels**. Patch to: **one effect instance in a chain**.
 
@@ -270,7 +250,7 @@ Footprint: **2 channels**. Patch to: **one effect instance in a chain**.
 |---|---|---|---|---|---|
 | 1–2 | Block size | `0` (0/0) → 1 | `32768` (128/0) → 128.502 | `65535` (255/255) → 256 | `0` (0/0) → 1 |
 
-## Blur — `ovs.blur` v1
+## Blur — `ovs.blur`
 
 Footprint: **4 channels**. Patch to: **one effect instance in a chain**.
 
@@ -286,7 +266,7 @@ Footprint: **4 channels**. Patch to: **one effect instance in a chain**.
 | 1–2 | Radius | `0` (0/0) → 0 | `32768` (128/0) → 32 | `65535` (255/255) → 64 | `0` (0/0) → 0 |
 | 3–4 | Amount | `0` (0/0) → 0 | `32768` (128/0) → 0.5 | `65535` (255/255) → 1 | `65535` (255/255) → 1 |
 
-## Crop — `ovs.crop` v1
+## Crop — `ovs.crop`
 
 Footprint: **8 channels**. Patch to: **one effect instance in a chain**.
 
@@ -306,7 +286,7 @@ Footprint: **8 channels**. Patch to: **one effect instance in a chain**.
 | 5–6 | Top | `0` (0/0) → 0 | `32768` (128/0) → 4096.063 | `65535` (255/255) → 8192 | `0` (0/0) → 0 |
 | 7–8 | Bottom | `0` (0/0) → 0 | `32768` (128/0) → 4096.063 | `65535` (255/255) → 8192 | `0` (0/0) → 0 |
 
-## Mirror — `ovs.mirror` v1
+## Mirror — `ovs.mirror`
 
 Footprint: **2 channels**. Patch to: **one effect instance in a chain**.
 
@@ -331,7 +311,7 @@ Footprint: **2 channels**. Patch to: **one effect instance in a chain**.
 | 86–170 | `top` |
 | 171–255 | `bottom` |
 
-## Colorize — `ovs.colorize` v1
+## Colorize — `ovs.colorize`
 
 Footprint: **6 channels**. Patch to: **one effect instance in a chain**.
 
@@ -349,7 +329,7 @@ Footprint: **6 channels**. Patch to: **one effect instance in a chain**.
 | 3–4 | Saturation | `0` (0/0) → 0 | `32768` (128/0) → 0.5 | `65535` (255/255) → 1 | `65535` (255/255) → 1 |
 | 5–6 | Amount | `0` (0/0) → 0 | `32768` (128/0) → 0.5 | `65535` (255/255) → 1 | `0` (0/0) → 0 |
 
-## RGB Correct — `ovs.rgb_correct` v1
+## RGB Correct — `ovs.rgb_correct`
 
 Footprint: **12 channels**. Patch to: **one effect instance in a chain**.
 
@@ -373,7 +353,7 @@ Footprint: **12 channels**. Patch to: **one effect instance in a chain**.
 | 9–10 | Green white | `0` (0/0) → 0 | `32768` (128/0) → 2 | `65535` (255/255) → 4 | `16384` (64/0) → 1 |
 | 11–12 | Blue white | `0` (0/0) → 0 | `32768` (128/0) → 2 | `65535` (255/255) → 4 | `16384` (64/0) → 1 |
 
-## RGB Split — `ovs.rgb_split` v1
+## RGB Split — `ovs.rgb_split`
 
 Footprint: **4 channels**. Patch to: **one effect instance in a chain**.
 
@@ -389,27 +369,7 @@ Footprint: **4 channels**. Patch to: **one effect instance in a chain**.
 | 1–2 | Offset | `0` (0/0) → 0 | `32768` (128/0) → 128.002 | `65535` (255/255) → 256 | `0` (0/0) → 0 |
 | 3–4 | Angle | `0` (0/0) → 0 | `32768` (128/0) → 180.003 | `65535` (255/255) → 360 | `0` (0/0) → 0 |
 
-## TV Glitch — `ovs.tv_glitch` v1
-
-Footprint: **8 channels**. Patch to: **one effect instance in a chain**.
-
-| Channel | Name | Control | Values | Home |
-|---|---|---|---|---|
-| 1–2 | Amount | `amount` | 0 at 0, 1 at 65535 | 0 |
-| 3–4 | Line jumps | `tear` | 0 at 0, 1 at 65535 | 32768 |
-| 5–6 | Snow | `noise` | 0 at 0, 1 at 65535 | 32768 |
-| 7–8 | Rolling error | `roll` | 0 at 0, 1 at 65535 | 32768 |
-
-### Where the values sit
-
-| Channel | Name | Bottom | Middle | Top | Home |
-|---|---|---|---|---|---|
-| 1–2 | Amount | `0` (0/0) → 0 | `32768` (128/0) → 0.5 | `65535` (255/255) → 1 | `0` (0/0) → 0 |
-| 3–4 | Line jumps | `0` (0/0) → 0 | `32768` (128/0) → 0.5 | `65535` (255/255) → 1 | `32768` (128/0) → 0.5 |
-| 5–6 | Snow | `0` (0/0) → 0 | `32768` (128/0) → 0.5 | `65535` (255/255) → 1 | `32768` (128/0) → 0.5 |
-| 7–8 | Rolling error | `0` (0/0) → 0 | `32768` (128/0) → 0.5 | `65535` (255/255) → 1 | `32768` (128/0) → 0.5 |
-
-## TV Glitch — `ovs.tv_glitch` v2
+## TV Glitch — `ovs.tv_glitch`
 
 Footprint: **10 channels**. Patch to: **one effect instance in a chain**.
 
@@ -431,7 +391,7 @@ Footprint: **10 channels**. Patch to: **one effect instance in a chain**.
 | 7–8 | Rolling error | `0` (0/0) → 0 | `32768` (128/0) → 0.5 | `65535` (255/255) → 1 | `32768` (128/0) → 0.5 |
 | 9–10 | Out of sync | `0` (0/0) → 0 | `32768` (128/0) → 0.5 | `65535` (255/255) → 1 | `32768` (128/0) → 0.5 |
 
-## Mask — `ovs.mask` v1
+## Mask — `ovs.mask`
 
 Footprint: **2 channels**. Patch to: **one effect instance in a chain**.
 
@@ -445,15 +405,7 @@ Footprint: **2 channels**. Patch to: **one effect instance in a chain**.
 |---|---|---|---|---|---|
 | 1–2 | Amount | `0` (0/0) → 0 | `32768` (128/0) → 0.5 | `65535` (255/255) → 1 | `65535` (255/255) → 1 |
 
-## Invert — `ovs.invert` v1
-
-Footprint: **1 channels**. Patch to: **one effect instance in a chain**.
-
-| Channel | Name | Control | Values | Home |
-|---|---|---|---|---|
-| 1 | Inverted | `on` | on at 128 and above | 0 |
-
-## Invert — `ovs.invert` v2
+## Invert — `ovs.invert`
 
 Footprint: **2 channels**. Patch to: **one effect instance in a chain**.
 
@@ -468,7 +420,7 @@ Footprint: **2 channels**. Patch to: **one effect instance in a chain**.
 |---|---|---|---|---|---|
 | 2 | Rate | `0` → 0 | `128` → 15.059 | `255` → 30 | `0` → 0 |
 
-## Edges — `ovs.edges` v1
+## Edges — `ovs.edges`
 
 Footprint: **8 channels**. Patch to: **one effect instance in a chain**.
 
@@ -494,7 +446,7 @@ Footprint: **8 channels**. Patch to: **one effect instance in a chain**.
 | 7 | Colour Blue | `0` → 0 | `128` → 0.502 | `255` → 1 | `255` → 1 |
 | 8 | Colour Alpha | `0` → 0 | `128` → 0.502 | `255` → 1 | `255` → 1 |
 
-## Echo — `ovs.echo` v1
+## Echo — `ovs.echo`
 
 Footprint: **3 channels**. Patch to: **one effect instance in a chain**.
 
@@ -516,7 +468,7 @@ Footprint: **3 channels**. Patch to: **one effect instance in a chain**.
 | 0–127 | `behind` |
 | 128–255 | `lighten` |
 
-## Solid Colour — `ovs.solid_colour` v1
+## Solid Colour — `ovs.solid_colour`
 
 Footprint: **4 channels**. Patch to: **one generator instance in a slot**.
 
@@ -536,29 +488,7 @@ Footprint: **4 channels**. Patch to: **one generator instance in a slot**.
 | 3 | Colour Blue | `0` → 0 | `128` → 0.502 | `255` → 1 | `255` → 1 |
 | 4 | Colour Alpha | `0` → 0 | `128` → 0.502 | `255` → 1 | `255` → 1 |
 
-## Strobe — `ovs.strobe` v1
-
-Footprint: **5 channels**. Patch to: **one generator instance in a slot**.
-
-| Channel | Name | Control | Values | Home |
-|---|---|---|---|---|
-| 1 | Colour Red | `colour` | 0 at 0, 1 at 255 | 255 |
-| 2 | Colour Green | `colour` | 0 at 0, 1 at 255 | 255 |
-| 3 | Colour Blue | `colour` | 0 at 0, 1 at 255 | 255 |
-| 4 | Colour Alpha | `colour` | 0 at 0, 1 at 255 | 255 |
-| 5 | Rate | `hz` | 0.5 at 0, 30 at 255 | 82 |
-
-### Where the values sit
-
-| Channel | Name | Bottom | Middle | Top | Home |
-|---|---|---|---|---|---|
-| 1 | Colour Red | `0` → 0 | `128` → 0.502 | `255` → 1 | `255` → 1 |
-| 2 | Colour Green | `0` → 0 | `128` → 0.502 | `255` → 1 | `255` → 1 |
-| 3 | Colour Blue | `0` → 0 | `128` → 0.502 | `255` → 1 | `255` → 1 |
-| 4 | Colour Alpha | `0` → 0 | `128` → 0.502 | `255` → 1 | `255` → 1 |
-| 5 | Rate | `0` → 0.5 | `128` → 15.308 | `255` → 30 | `82` → 9.986 |
-
-## Strobe — `ovs.strobe` v2
+## Strobe — `ovs.strobe`
 
 Footprint: **6 channels**. Patch to: **one generator instance in a slot**.
 
@@ -588,7 +518,7 @@ Footprint: **6 channels**. Patch to: **one generator instance in a slot**.
 | 0–127 | `colour` |
 | 128–255 | `invert` |
 
-## Gradient — `ovs.gradient` v1
+## Gradient — `ovs.gradient`
 
 Footprint: **10 channels**. Patch to: **one generator instance in a slot**.
 
@@ -618,7 +548,7 @@ Footprint: **10 channels**. Patch to: **one generator instance in a slot**.
 | 8 | To Alpha | `0` → 0 | `128` → 0.502 | `255` → 1 | `255` → 1 |
 | 9–10 | Angle | `0` (0/0) → 0 | `32768` (128/0) → 180.003 | `65535` (255/255) → 360 | `16384` (64/0) → 90.001 |
 
-## Grid — `ovs.grid` v1
+## Grid — `ovs.grid`
 
 Footprint: **11 channels**. Patch to: **one generator instance in a slot**.
 
@@ -650,7 +580,7 @@ Footprint: **11 channels**. Patch to: **one generator instance in a slot**.
 | 10 | Background Blue | `0` → 0 | `128` → 0.502 | `255` → 1 | `0` → 0 |
 | 11 | Background Alpha | `0` → 0 | `128` → 0.502 | `255` → 1 | `255` → 1 |
 
-## Shape — `ovs.shape` v1
+## Shape — `ovs.shape`
 
 Footprint: **15 channels**. Patch to: **one generator instance in a slot**.
 
@@ -693,7 +623,7 @@ Footprint: **15 channels**. Patch to: **one generator instance in a slot**.
 | 86–170 | `rectangle` |
 | 171–255 | `triangle` |
 
-## Clock — `ovs.clock` v1
+## Clock — `ovs.clock`
 
 Footprint: **8 channels**. Patch to: **one generator instance in a slot**.
 
@@ -721,7 +651,7 @@ Footprint: **8 channels**. Patch to: **one generator instance in a slot**.
 | 7 | Background Blue | `0` → 0 | `128` → 0.502 | `255` → 1 | `0` → 0 |
 | 8 | Background Alpha | `0` → 0 | `128` → 0.502 | `255` → 1 | `255` → 1 |
 
-## Countdown — `ovs.countdown` v1
+## Countdown — `ovs.countdown`
 
 Footprint: **8 channels**. Patch to: **one generator instance in a slot**.
 
@@ -749,7 +679,7 @@ Footprint: **8 channels**. Patch to: **one generator instance in a slot**.
 | 7 | Background Blue | `0` → 0 | `128` → 0.502 | `255` → 1 | `0` → 0 |
 | 8 | Background Alpha | `0` → 0 | `128` → 0.502 | `255` → 1 | `255` → 1 |
 
-## Text — `ovs.text` v1
+## Text — `ovs.text`
 
 Footprint: **15 channels**. Patch to: **one generator instance in a slot**.
 

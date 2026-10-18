@@ -397,7 +397,8 @@ export class PatchPanel {
     }
 
     // An effect's personality comes from that effect's own manifest, so the
-    // match is by type and version rather than by anything named here.
+    // match is by its type alone rather than by anything named here: there is
+    // one module per type and no versions of it (owner, 2026-10-18).
     //
     // **An effect only exists here once it is in the show.** Unlike the master
     // and the layers, which the document always has, there is nothing to patch
@@ -408,11 +409,7 @@ export class PatchPanel {
       if (fixtureForEffect(show, place.instance.id) !== null) {
         continue;
       }
-      const personalities = effectPersonalities(
-        catalogue,
-        place.instance.type_id,
-        place.instance.version,
-      );
+      const personalities = effectPersonalities(catalogue, place.instance.type_id);
       const where =
         place.slotIndex === undefined
           ? place.layer.name
@@ -429,7 +426,7 @@ export class PatchPanel {
         // from an empty list.
         ...(personalities.length === 0
           ? {
-              unavailable: `${place.instance.type_id} v${place.instance.version} publishes no DMX channels on this server`,
+              unavailable: `${place.instance.type_id} publishes no DMX channels on this server`,
             }
           : {}),
       });
@@ -456,7 +453,7 @@ export class PatchPanel {
       if (fixtureForGenerator(show, place.instanceId) !== null) {
         continue;
       }
-      const personalities = generatorPersonalities(catalogue, place.typeId, place.version);
+      const personalities = generatorPersonalities(catalogue, place.typeId);
       found.push({
         key: `generator:${place.instanceId}`,
         label: `Generator · ${place.typeId} on ${place.layer.name}, slot ${place.slotIndex}`,
@@ -464,7 +461,7 @@ export class PatchPanel {
         personalities,
         ...(personalities.length === 0
           ? {
-              unavailable: `${place.typeId} v${place.version} publishes no DMX channels on this server`,
+              unavailable: `${place.typeId} publishes no DMX channels on this server`,
             }
           : {}),
       });
@@ -490,7 +487,7 @@ export class PatchPanel {
     }
 
     const catalogue = this.#deps.catalogue();
-    const personality = findPersonality(catalogue, fixture.type_id, fixture.version);
+    const personality = findPersonality(catalogue, fixture.type_id);
     const base = fixturePath(show, fixture.id) ?? '';
     this.#ui.fixtureTitle.textContent = `Fixture · ${describeTarget(show, fixture.target)}`;
 
@@ -1055,9 +1052,14 @@ export class PatchPanel {
   }
 }
 
-/** How one personality is named in a chooser's value. */
+/**
+ * How one personality is named in a chooser's value.
+ *
+ * Its type is the whole of its name: there is one personality per module type,
+ * and no versions of it (owner, 2026-10-18).
+ */
 function key(personality: Personality): string {
-  return `${personality.type_id}:${personality.version}`;
+  return personality.type_id;
 }
 
 /**

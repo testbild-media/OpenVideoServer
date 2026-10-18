@@ -242,17 +242,14 @@ pub struct FixtureFile {
 /// Every fixture type a desk needs for this build.
 ///
 /// The master, the layer, and every effect and generator a client can add
-/// that declares DMX: **one each, the version a client adds today**. The
-/// owner, 2026-10-18: "Ich habe aber in der Software keine Versionsvergabe und
-/// ist auch nicht gewünscht. TV Glitch V2 ist TV Glitch." The older versions
-/// stay in the server so a show saved with one still opens; each grew only by
-/// channels at its end, so the first channels of a type still drive an older
-/// instance patched with it.
+/// that declares DMX: one each, because there is one of each (owner,
+/// 2026-10-18: "Es gibt kein Invert V2.. nirgendwo").
 #[must_use]
 pub fn fixture_files() -> Vec<FixtureFile> {
-    let all = catalogue().fixtures;
-    all.iter()
-        .filter(|personality| !retired(personality) && current(personality, &all))
+    catalogue()
+        .fixtures
+        .iter()
+        .filter(|personality| !retired(personality))
         .map(|personality| FixtureFile {
             file_name: file_name(personality),
             name: fixture_name(personality),
@@ -269,33 +266,6 @@ fn retired(personality: &Personality) -> bool {
         PersonalityTarget::Generator => ovs_types::config::generators::RETIRED.contains(&type_id),
         PersonalityTarget::Master | PersonalityTarget::Layer => false,
     }
-}
-
-/// Whether this is the version of its type a client adds today.
-///
-/// For a module, the newest *manifest*, not the newest personality: a version
-/// that dropped its DMX has no personality, and the one before it must not
-/// stand in for it.
-fn current(personality: &Personality, all: &[Personality]) -> bool {
-    let type_id = personality.type_id.as_str();
-    let newest = match personality.target {
-        PersonalityTarget::Effect => ovs_types::config::effects::PUBLISHED
-            .iter()
-            .filter(|manifest| manifest.type_id == type_id)
-            .map(|manifest| manifest.version)
-            .max(),
-        PersonalityTarget::Generator => ovs_types::config::generators::PUBLISHED
-            .iter()
-            .filter(|manifest| manifest.type_id == type_id)
-            .map(|manifest| manifest.version)
-            .max(),
-        PersonalityTarget::Master | PersonalityTarget::Layer => all
-            .iter()
-            .filter(|other| other.type_id == personality.type_id)
-            .map(|other| other.version)
-            .max(),
-    };
-    newest == Some(personality.version)
 }
 
 /// What the desk's fixture list calls a personality: `OVS FX` and `OVS Gen`
@@ -571,10 +541,10 @@ impl Layout {
 
 /// The manifest's parameters, for an effect or a generator.
 fn parameters_of(personality: &Personality) -> &'static [ParameterDefinition] {
-    ovs_types::config::effects::manifest(&personality.type_id, personality.version)
+    ovs_types::config::effects::manifest(&personality.type_id)
         .map(|manifest| manifest.parameters)
         .or_else(|| {
-            ovs_types::config::generators::manifest(&personality.type_id, personality.version)
+            ovs_types::config::generators::manifest(&personality.type_id)
                 .map(|manifest| manifest.parameters)
         })
         .unwrap_or(&[])
@@ -582,7 +552,7 @@ fn parameters_of(personality: &Personality) -> &'static [ParameterDefinition] {
 
 /// What a channel of the catalogue drives, from the definition it came from.
 fn slot_of(personality: &Personality, channel: &PersonalityChannel) -> Option<ParameterSlot> {
-    definition(&personality.type_id, personality.version)?
+    definition(&personality.type_id)?
         .channels
         .iter()
         .find(|defined| defined.offset == channel.offset)
@@ -1212,10 +1182,10 @@ mod tests {
 
     /// The personalities a file is written for.
     fn generated() -> Vec<Personality> {
-        let all = catalogue().fixtures;
-        all.iter()
-            .filter(|personality| !retired(personality) && current(personality, &all))
-            .cloned()
+        catalogue()
+            .fixtures
+            .into_iter()
+            .filter(|personality| !retired(personality))
             .collect()
     }
 
@@ -1254,7 +1224,7 @@ mod tests {
         for name in &names {
             assert!(!name.contains(" v"), "{name} carries a version");
         }
-        // The newest of each: TV Glitch with Out of sync, Invert with a rate.
+        // The one of each: TV Glitch with Out of sync, Invert with a rate.
         assert!(named("OVS FX TV Glitch").contains("ovs.tv_glitch, 10 channels"));
         assert!(named("OVS FX Invert").contains("ovs.invert, 2 channels"));
         assert!(named("OVS Gen Strobe").contains("ovs.strobe, 6 channels"));

@@ -202,14 +202,9 @@ fn refresh_patch(
 /// Says once what is wrong with a patch entry.
 fn report(problem: &PatchProblem) {
     match problem {
-        PatchProblem::UnknownDefinition {
-            fixture,
-            type_id,
-            version,
-        } => tracing::warn!(
+        PatchProblem::UnknownDefinition { fixture, type_id } => tracing::warn!(
             %fixture,
             type_id,
-            version,
             "this build does not publish that fixture personality, so the fixture is not being read"
         ),
         PatchProblem::FootprintDisagrees {

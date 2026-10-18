@@ -4,8 +4,7 @@
 //! from a printed channel list and a list that disagrees with the machine is
 //! worse than none. The same is true of these: an operator choosing a generator
 //! or an effect wants to know what it takes before they open the client, and a
-//! list maintained by hand drifts the first time somebody publishes a new
-//! version.
+//! list maintained by hand drifts the first time somebody adds a control.
 //!
 //! So it is generated from the manifests, committed, and checked by a golden
 //! test — the same arrangement, for the same reason.
@@ -24,11 +23,8 @@ pub fn markdown() -> String {
         "Generated from the published manifests by `cargo run -p ovs-proto --bin ovs-module-doc`.\n\
          Do not edit by hand: a printed list that disagrees with the machine is worse than none,\n\
          because it is believed.\n\n\
-         A manifest is published once and never edited. Adding a parameter is a new version, so a\n\
-         show saved last year opens looking the way it was left.\n\n\
-         Every published version is listed here, which is not what a slot offers: a source list\n\
-         shows the newest of each type, and an older one is kept so that a show naming it still\n\
-         opens. Two entries with the same name are that, rather than a mistake.\n\n",
+         There is one of each. A control added later goes on the end with a default that changes\n\
+         nothing, so a show saved last year opens looking the way it was left.\n\n",
     );
 
     out.push_str("## Generators\n\n");
@@ -42,7 +38,6 @@ pub fn markdown() -> String {
             &mut out,
             manifest.name,
             manifest.type_id,
-            manifest.version,
             manifest.description,
             manifest.parameters,
             ovs_types::config::generators::RETIRED.contains(&manifest.type_id),
@@ -64,7 +59,6 @@ pub fn markdown() -> String {
             &mut out,
             manifest.name,
             manifest.type_id,
-            manifest.version,
             manifest.description,
             manifest.parameters,
             ovs_types::config::effects::RETIRED.contains(&manifest.type_id),
@@ -79,14 +73,13 @@ fn module(
     out: &mut String,
     name: &str,
     type_id: &str,
-    version: u32,
     description: &str,
     parameters: &[ParameterDefinition],
     retired: bool,
 ) {
     use std::fmt::Write as _;
 
-    let _ = writeln!(out, "### {name} — `{type_id}` v{version}\n");
+    let _ = writeln!(out, "### {name} — `{type_id}`\n");
     let _ = writeln!(out, "{description}\n");
     if retired {
         out.push_str(
@@ -195,17 +188,20 @@ mod tests {
     }
 
     #[test]
-    fn a_version_is_written_beside_every_module() {
-        // A show stores a type and a version, so a document that named only
-        // the type would be ambiguous the first time one is published twice.
+    fn every_module_is_written_once_and_without_a_version() {
+        // "Es gibt kein Invert V2.. nirgendwo" (owner, 2026-10-18).
         let document = markdown();
-        for manifest in &EFFECTS {
-            assert!(
-                document.contains(&format!("`{}` v{}", manifest.type_id, manifest.version)),
-                "{} v{} is not written with its version",
-                manifest.type_id,
-                manifest.version
-            );
+        for type_id in GENERATORS
+            .iter()
+            .map(|manifest| manifest.type_id)
+            .chain(EFFECTS.iter().map(|manifest| manifest.type_id))
+        {
+            let heading = format!("— `{type_id}`\n");
+            assert_eq!(document.matches(&heading).count(), 1, "{type_id}");
         }
+        assert!(
+            !document.contains("` v"),
+            "a heading still carries a version"
+        );
     }
 }

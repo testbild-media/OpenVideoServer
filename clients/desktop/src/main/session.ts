@@ -641,8 +641,8 @@ export class Session {
   /**
    * The fixture personalities this server publishes.
    *
-   * The whole of what the patch editor may offer: the type, the version, the
-   * footprint, what a personality may be patched to and its channels. A client
+   * The whole of what the patch editor may offer: the type, the footprint,
+   * what a personality may be patched to and its channels. A client
    * that carried its own copy of any of that would patch the next fixture on top
    * of the last one the day a personality changed.
    */

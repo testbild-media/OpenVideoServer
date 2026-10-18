@@ -57,10 +57,9 @@ pub struct FixtureInstance {
     pub id: FixtureInstanceId,
     /// Stable fixture type identifier, for example `ovs.master`.
     pub type_id: String,
-    /// Definition version this patch was created against.
-    ///
-    /// Published fixture definitions are immutable, because a console has the
-    /// channel layout physically programmed into its show file.
+    /// Always one, and not read: there is one personality of each type. What
+    /// keeps a console's programmed layout and the server's in step is the
+    /// footprint below, which validation holds to the personality's.
     pub version: u32,
     /// What this fixture controls.
     pub target: FixtureTarget,

@@ -398,7 +398,6 @@ impl Slot {
 
         if let SourceRef::Generator {
             type_id,
-            version,
             parameters,
             ..
         } = &self.source
@@ -412,7 +411,7 @@ impl Slot {
                 // Checked here so that a show which cannot be drawn is
                 // refused when it is saved, rather than becoming a layer that
                 // shows its placeholder on the night.
-                match crate::config::generators::manifest(type_id, *version) {
+                match crate::config::generators::manifest(type_id) {
                     Some(manifest) => {
                         for (key, reason) in manifest.problems(parameters) {
                             out.push(ValidationError::new(
@@ -423,7 +422,7 @@ impl Slot {
                     }
                     None => out.push(ValidationError::new(
                         format!("{path}.source.type_id"),
-                        format!("this build does not publish {type_id} version {version}"),
+                        format!("this build does not publish {type_id}"),
                     )),
                 }
             }

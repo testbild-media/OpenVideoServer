@@ -4,8 +4,8 @@
 //! cannot read a Rust constant, and an operator adding an effect needs its
 //! parameters, their types, their ranges and where they start.
 //!
-//! Manifests are immutable once published, so this is a rendering of them rather
-//! than a second source of truth.
+//! A rendering of the manifests rather than a second source of truth, and one
+//! entry a type: there is one of each.
 
 use ovs_types::config::effects::{PUBLISHED, RETIRED};
 use serde::{Deserialize, Serialize};
@@ -17,7 +17,8 @@ use crate::parameters::ModuleParameter;
 pub struct Effect {
     /// Stable type identifier, for example `ovs.colour_correct`.
     pub type_id: String,
-    /// Version. A new parameter is a new version, never a changed one.
+    /// Always one: there is one effect of each type. Still served because a
+    /// show carries the number.
     pub version: u32,
     /// What an effect list shows.
     pub name: String,
@@ -34,19 +35,6 @@ pub struct EffectCatalogueResponse {
     pub effects: Vec<Effect>,
 }
 
-/// Whether this is the newest published version of its type.
-///
-/// A retired type is left out before this is asked; see `RETIRED`.
-///
-/// What a catalogue answers is "what can I put in a slot now", and the answer
-/// is one entry a type. An older version is still served to a show that names
-/// it: that is `manifest(type_id, version)`, and it is why both are published.
-fn is_newest(type_id: &str, version: u32) -> bool {
-    !PUBLISHED
-        .iter()
-        .any(|other| other.type_id == type_id && other.version > version)
-}
-
 /// Returns the catalogue for this build.
 #[must_use]
 pub fn catalogue() -> EffectCatalogueResponse {
@@ -54,7 +42,6 @@ pub fn catalogue() -> EffectCatalogueResponse {
         effects: PUBLISHED
             .iter()
             .filter(|manifest| !RETIRED.contains(&manifest.type_id))
-            .filter(|manifest| is_newest(manifest.type_id, manifest.version))
             .map(|manifest| Effect {
                 type_id: manifest.type_id.to_owned(),
                 version: manifest.version,
@@ -76,41 +63,32 @@ mod tests {
     use ovs_types::config::effects::manifest;
 
     #[test]
-    fn the_catalogue_offers_the_newest_of_every_effect_still_published() {
+    fn the_catalogue_offers_one_of_every_effect_still_published() {
+        // One entry a type, and nothing that has been retired. There is
+        // only one of each to offer (owner, 2026-10-18: "Es gibt kein
+        // Invert V2.. nirgendwo").
         let catalogue = catalogue();
-
-        // One entry a type that is still offered: the newest version of it,
-        // and nothing that has been retired.
-        let mut types: Vec<&str> = PUBLISHED
+        let offered: Vec<&str> = PUBLISHED
             .iter()
             .map(|manifest| manifest.type_id)
             .filter(|type_id| !RETIRED.contains(type_id))
             .collect();
-        types.sort_unstable();
-        types.dedup();
-        assert_eq!(catalogue.effects.len(), types.len());
-
-        for rendered in &catalogue.effects {
-            assert!(
-                !RETIRED.contains(&rendered.type_id.as_str()),
-                "{} is offered after being retired",
-                rendered.type_id
-            );
-            let newest = PUBLISHED
+        assert_eq!(
+            catalogue
+                .effects
                 .iter()
-                .filter(|manifest| manifest.type_id == rendered.type_id)
-                .map(|manifest| manifest.version)
-                .max()
-                .expect("a version of a type that is in the catalogue");
-            assert_eq!(rendered.version, newest, "{}", rendered.type_id);
-        }
+                .map(|effect| effect.type_id.as_str())
+                .collect::<Vec<_>>(),
+            offered
+        );
+        assert!(catalogue.effects.iter().all(|effect| effect.version == 1));
     }
 
     #[test]
     fn a_retired_effect_is_still_served_to_a_show_that_has_one() {
         // Retired, not deleted: a show with a Tint in a chain opens with it.
         for type_id in RETIRED {
-            assert!(manifest(type_id, 1).is_some(), "{type_id} is still served");
+            assert!(manifest(type_id).is_some(), "{type_id} is still served");
         }
     }
 

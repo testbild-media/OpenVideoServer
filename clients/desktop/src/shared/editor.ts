@@ -846,13 +846,13 @@ export function setGeneratorParameter(
   }
 
   const source = slot.source;
-  const generator = findGenerator(catalogue, source.type_id, source.version);
+  const generator = findGenerator(catalogue, source.type_id);
   if (!generator) {
-    return refused(`this server does not publish ${source.type_id} version ${source.version}`);
+    return refused(`this server does not publish ${source.type_id}`);
   }
   const declared = generator.parameters.find((parameter) => parameter.key === key);
   if (!declared) {
-    return refused(`${source.type_id} version ${source.version} has no parameter ${key}`);
+    return refused(`${source.type_id} has no parameter ${key}`);
   }
   if (value !== null) {
     const reason = refuseParameter(declared, value);
@@ -888,23 +888,28 @@ export function setGeneratorParameter(
  * The effect must be one this server publishes. Adding one it does not would
  * make a document it will refuse, and the refusal would arrive at the save
  * rather than at the button.
+ *
+ * Asked for by type alone, because that is the whole of a module's identity
+ * (owner, 2026-10-18). The instance still carries a `version`, since the show
+ * document has the field; it is the catalogue's own number, written down as
+ * data rather than chosen here.
  */
 export function addEffect(
   show: Show,
   catalogue: Catalogue,
   chain: ChainRef,
   typeId: string,
-  version: number,
 ): Edit {
-  if (!findEffect(catalogue, typeId, version)) {
-    return refused(`this server does not publish ${typeId} version ${version}`);
+  const published = findEffect(catalogue, typeId);
+  if (!published) {
+    return refused(`this server does not publish ${typeId}`);
   }
   // No parameter values: an effect that has just been added is the effect as it
   // was published, and every published effect is neutral at its defaults.
   const instance: EffectInstance = {
     id: newId(),
     type_id: typeId,
-    version,
+    version: published.version,
     enabled: true,
     parameters: {},
   };
@@ -986,15 +991,13 @@ export function setEffectParameter(
     return refused('that effect is not in this chain');
   }
 
-  const published = findEffect(catalogue, instance.type_id, instance.version);
+  const published = findEffect(catalogue, instance.type_id);
   if (!published) {
-    return refused(
-      `this server does not publish ${instance.type_id} version ${instance.version}`,
-    );
+    return refused(`this server does not publish ${instance.type_id}`);
   }
   const declared = published.parameters.find((parameter) => parameter.key === key);
   if (!declared) {
-    return refused(`${instance.type_id} version ${instance.version} has no parameter ${key}`);
+    return refused(`${instance.type_id} has no parameter ${key}`);
   }
   if (value !== null) {
     const reason = refuseParameter(declared, value);
@@ -1786,12 +1789,11 @@ function validateSlot(slot: Slot, path: string, catalogue: Catalogue, fault: Fau
     if (source.type_id.trim() === '') {
       fault(`${path}.source.type_id`, 'must not be empty');
     } else if (catalogue.loaded) {
-      const generator = findGenerator(catalogue, source.type_id, source.version);
+      // By type alone: a slot saved as `version: 2` plays the one generator
+      // of its type, and is checked against that one (owner, 2026-10-18).
+      const generator = findGenerator(catalogue, source.type_id);
       if (!generator) {
-        fault(
-          `${path}.source.type_id`,
-          `this build does not publish ${source.type_id} version ${source.version}`,
-        );
+        fault(`${path}.source.type_id`, `this build does not publish ${source.type_id}`);
       } else {
         for (const problem of parameterProblems(generator, source.parameters)) {
           fault(`${path}.source.parameters.${problem.key}`, problem.reason);
@@ -1822,12 +1824,9 @@ function validateChain(
     if (!catalogue.loaded) {
       continue;
     }
-    const published = findEffect(catalogue, effect.type_id, effect.version);
+    const published = findEffect(catalogue, effect.type_id);
     if (!published) {
-      fault(
-        `${effectPath}.type_id`,
-        `this build does not publish ${effect.type_id} version ${effect.version}`,
-      );
+      fault(`${effectPath}.type_id`, `this build does not publish ${effect.type_id}`);
       continue;
     }
     for (const problem of parameterProblems(published, effect.parameters)) {

@@ -34,8 +34,14 @@ import { layersInOrder, type ShowState } from './mirror.js';
  */
 export interface EffectView {
   id: string;
+  /**
+   * The effect's type, which is the whole of its identity.
+   *
+   * The document's `version` does not travel: there is one module per type and
+   * no versions of it (owner, 2026-10-18), so nothing on the live screen has a
+   * use for the number.
+   */
   typeId: string;
-  version: number;
   /** Whether the chain runs it at all. */
   enabled: boolean;
   /** The values the show set, keyed by the manifest's own names. */
@@ -441,7 +447,6 @@ function toEffect(
   effect: {
     id: string;
     type_id: string;
-    version: number;
     enabled: boolean;
     parameters?: Record<string, ParameterValue>;
   },
@@ -450,7 +455,6 @@ function toEffect(
   return {
     id: effect.id,
     typeId: effect.type_id,
-    version: effect.version,
     enabled: effect.enabled,
     parameters: effect.parameters ?? {},
     live: live.get(effect.id) ?? {},

@@ -456,7 +456,7 @@ mod tests {
         // instance. A personality half of which bound would be patched
         // without complaint and then do half of nothing.
         let instance_id = GeneratorInstanceId::new();
-        let personality = definition("ovs.gradient", 1).expect("a generated personality");
+        let personality = definition("ovs.gradient").expect("a generated personality");
         let target = FixtureTarget::Generator {
             generator_instance_id: instance_id,
         };
@@ -480,7 +480,7 @@ mod tests {
         // The other half of the same rule: a generator personality patched
         // onto the master, or onto an effect, must bind nothing at all rather
         // than bind the channels the two happen to share.
-        let personality = definition("ovs.gradient", 1).expect("a generated personality");
+        let personality = definition("ovs.gradient").expect("a generated personality");
 
         assert!(!personality.drives(FixtureTarget::Master));
         assert!(!personality.drives(FixtureTarget::Effect {

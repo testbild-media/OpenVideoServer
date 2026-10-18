@@ -9036,11 +9036,11 @@ mod tests {
     }
 
     #[test]
-    fn version_one_of_the_glitch_is_what_it_always_was() {
+    fn a_glitch_saved_under_another_number_draws_the_same_glitch() {
         let _gpu = crate::vulkan::one_gpu_at_a_time();
-        // The rule the whole catalogue rests on. Version two added a number in
-        // a slot version one leaves at nought, which is the cheap way to add a
-        // control and the easy way to change an old show by accident.
+        // There is one TV Glitch (owner, 2026-10-18: "TV Glitch V2 ist TV
+        // Glitch"). A show saved while it was numbered two draws exactly what
+        // one numbered one does with the same settings, on the card.
         let Some(mut canvas) = backend(32, 32) else {
             return;
         };
@@ -9057,19 +9057,12 @@ mod tests {
             )
             .expect("uploads");
 
-        let one = effect_at(
-            "ovs.tv_glitch",
-            1,
-            &[("amount", ParameterValue::Float(1.0))],
-        );
-        let two = effect_at(
-            "ovs.tv_glitch",
-            2,
-            &[
-                ("amount", ParameterValue::Float(1.0)),
-                ("vertical_hold", ParameterValue::Float(0.0)),
-            ],
-        );
+        let settings = [
+            ("amount", ParameterValue::Float(1.0)),
+            ("vertical_hold", ParameterValue::Float(0.4)),
+        ];
+        let one = effect_at("ovs.tv_glitch", 1, &settings);
+        let two = effect_at("ovs.tv_glitch", 2, &settings);
 
         canvas.set_effect_time(2.5);
         let drawn_by_one = composed_frame(&mut canvas, &effected(layer, media, &one), 32);
@@ -9078,7 +9071,7 @@ mod tests {
 
         assert_eq!(
             drawn_by_one, drawn_by_two,
-            "version two with its new control at nought drew something else"
+            "the number a show carries changed the picture"
         );
     }
 

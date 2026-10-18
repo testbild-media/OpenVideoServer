@@ -13,11 +13,14 @@
 //! one: four layers and a chain each is a great many looks from four
 //! streams.
 //!
-//! # The same manifest rules as everything else
+//! # One of each
 //!
-//! Published once, never edited; a new parameter is a new version. A show
-//! stores a type id and a version, and this build either has that exact thing or
-//! says it does not. See [`crate::config::manifest`].
+//! An effect is its type: there is one Invert, one TV Glitch, and no second
+//! version of anything (owner, 2026-10-18: "Es gibt kein Invert V2..
+//! nirgendwo"). A show stores a type id, and a version number beside it that
+//! is always one and is not read. A control added later goes on the end, with a
+//! default that changes nothing, so a show saved before it still draws as it
+//! did.
 //!
 //! # No effect master
 //!
@@ -35,7 +38,8 @@ use crate::id::MediaItemId;
 pub struct EffectManifest {
     /// Stable type identifier, for example `ovs.colour_correct`.
     pub type_id: &'static str,
-    /// Version. A new parameter is a new version, never a changed one.
+    /// Always one: there is one of each (see [`PUBLISHED`]). Kept because a
+    /// show and a patch carry it.
     pub version: u32,
     /// What a client's effect list shows.
     pub name: &'static str,
@@ -53,9 +57,10 @@ pub struct EffectManifest {
 static PERSONALITIES: std::sync::OnceLock<Vec<&'static FixtureDefinition>> =
     std::sync::OnceLock::new();
 
-/// The personality a published effect describes, if it describes one.
+/// The personality a published effect describes, if it describes one: by type
+/// alone, as [`manifest`] is.
 #[must_use]
-pub fn personality(type_id: &str, version: u32) -> Option<&'static FixtureDefinition> {
+pub fn personality(type_id: &str) -> Option<&'static FixtureDefinition> {
     PERSONALITIES
         .get_or_init(|| {
             PUBLISHED
@@ -64,7 +69,7 @@ pub fn personality(type_id: &str, version: u32) -> Option<&'static FixtureDefini
                 .collect()
         })
         .iter()
-        .find(|definition| definition.type_id == type_id && definition.version == version)
+        .find(|definition| definition.type_id == type_id)
         .copied()
 }
 
@@ -151,11 +156,7 @@ impl EffectManifest {
     /// Returns every problem with a set of values.
     #[must_use]
     pub fn problems(&self, values: &ParameterMap) -> Vec<(String, String)> {
-        crate::config::manifest::problems(
-            self.parameters,
-            &format!("{} version {}", self.type_id, self.version),
-            values,
-        )
+        crate::config::manifest::problems(self.parameters, self.type_id, values)
     }
 
     /// Says why one value cannot be accepted for a key, or `None` when it can.
@@ -176,10 +177,7 @@ impl EffectManifest {
     pub fn refuse(&self, key: &str, value: &ParameterValue) -> Option<String> {
         match self.parameter(key) {
             Some(definition) => definition.refuse(value),
-            None => Some(format!(
-                "{} version {} has no such parameter",
-                self.type_id, self.version
-            )),
+            None => Some(format!("{} has no such parameter", self.type_id)),
         }
     }
 
@@ -287,61 +285,6 @@ impl<'a> EffectValues<'a> {
     }
 }
 
-/// Brightness, contrast, saturation and gamma.
-///
-/// The one effect every rig needs, because walls do not match: an LED panel run
-/// next to a projector, or two panel batches from different years, are corrected
-/// here rather than in the content. Every parameter is neutral at its default,
-/// so adding this effect and touching nothing changes nothing.
-pub const COLOUR_CORRECT_V1: EffectManifest = EffectManifest {
-    type_id: "ovs.colour_correct",
-    version: 1,
-    name: "Colour Correct",
-    description: "Brightness, contrast, saturation and gamma.",
-    parameters: &[
-        ParameterDefinition {
-            key: "brightness",
-            name: "Brightness",
-            kind: ParameterKind::Number {
-                min: 0.0,
-                max: 4.0,
-                default: 1.0,
-            },
-            dmx: Some(DmxChannel::Fine),
-        },
-        ParameterDefinition {
-            key: "contrast",
-            name: "Contrast",
-            kind: ParameterKind::Number {
-                min: 0.0,
-                max: 4.0,
-                default: 1.0,
-            },
-            dmx: Some(DmxChannel::Fine),
-        },
-        ParameterDefinition {
-            key: "saturation",
-            name: "Saturation",
-            kind: ParameterKind::Number {
-                min: 0.0,
-                max: 4.0,
-                default: 1.0,
-            },
-            dmx: Some(DmxChannel::Fine),
-        },
-        ParameterDefinition {
-            key: "gamma",
-            name: "Gamma",
-            kind: ParameterKind::Number {
-                min: 0.1,
-                max: 4.0,
-                default: 1.0,
-            },
-            dmx: Some(DmxChannel::Fine),
-        },
-    ],
-};
-
 /// Neutral daylight, in kelvin: the temperature at which this changes nothing.
 ///
 /// D65, which is what Rec. 709 is mastered against and therefore what every
@@ -352,12 +295,16 @@ pub const NEUTRAL_KELVIN: f64 = 6500.0;
 
 /// Brightness, contrast, saturation, gamma, and then the white point.
 ///
-/// **Version two adds temperature and tint, after the four that were already
-/// here** (owner, 2026-10-12: "beides passiert erst nach Saturation und
-/// Gamma"). The order is not a preference: brightness and contrast move levels
-/// and gamma bends them, and a white point applied before those would be
-/// stretched by them. Applied after, it is what an operator means by it —
-/// the picture, warmed.
+/// The one effect every rig needs, because walls do not match: an LED panel run
+/// next to a projector, or two panel batches from different years, are corrected
+/// here rather than in the content. Every parameter is neutral at its default,
+/// so adding this effect and touching nothing changes nothing.
+///
+/// **Temperature and tint come after the other four** (owner, 2026-10-12:
+/// "beides passiert erst nach Saturation und Gamma"). The order is not a
+/// preference: brightness and contrast move levels and gamma bends them, and a
+/// white point applied before those would be stretched by them. Applied after,
+/// it is what an operator means by it — the picture, warmed.
 ///
 /// **Which is also the end of the Tint effect**, and the two senses of that
 /// word are worth keeping apart. Tint here is the green–magenta axis, the one
@@ -370,9 +317,9 @@ pub const NEUTRAL_KELVIN: f64 = 6500.0;
 /// overcast sky at the other, and everything a venue actually contains in
 /// between. **The ends are mine**, picked to cover what a room does rather
 /// than measured from anything.
-pub const COLOUR_CORRECT_V2: EffectManifest = EffectManifest {
+pub const COLOUR_CORRECT_V1: EffectManifest = EffectManifest {
     type_id: "ovs.colour_correct",
-    version: 2,
+    version: 1,
     name: "Colour Correct",
     description: "Brightness, contrast, saturation, gamma, and the white point.",
     parameters: &[
@@ -535,46 +482,26 @@ pub const BLUR_V1: EffectManifest = EffectManifest {
     ],
 };
 
-/// The picture, the other way round.
+/// The picture, the other way round, steadily or at a rate.
 ///
 /// The owner, 2026-10-16: "Invert Color. mit einfachen on/off auch per dmx."
-/// One switch and nothing else — not an amount, not a per-channel version. A
-/// negative is a thing an operator either wants or does not, and the two
-/// things it is reached for are both all or nothing: a hard cut between a look
-/// and its opposite on a beat, and reading a wall that is showing something
-/// too dark to see.
+/// — and then: "Ich will einen Inverted Color haben, der selber in einer HZ
+/// Zahl wechselt, die man einstellt." A negative is a thing an operator either
+/// wants or does not, and the two things it is reached for are both all or
+/// nothing: a hard cut between a look and its opposite on a beat, and reading a
+/// wall that is showing something too dark to see.
 ///
-/// **Off is the published default**, as every effect here is neutral at its
-/// defaults: an effect dragged onto a layer and left alone changes nothing
-/// until somebody switches it on. The pass runs either way — the renderer
-/// proves an effect neutral by drawing it, and an effect that appends no pass
-/// is never asked.
+/// **`on` is the switch.** Off is off, whatever the rate says: a flashing
+/// effect somebody has switched off must go dark rather than keep flashing, and
+/// that is also what keeps the published defaults neutral. At zero hertz on
+/// means inverted and stays inverted, so the rate is something an operator adds
+/// rather than something they have to set to get a negative. The pass runs
+/// either way — the renderer proves an effect neutral by drawing it, and an
+/// effect that appends no pass is never asked.
 ///
-/// On the DMX side it is one coarse channel, which a desk gives a button: the
-/// standard reading of a channel as a switch is that anything from half up is
-/// on.
-///
-/// What it inverts is the colour and not the alpha. A layer that is half
-/// transparent is still half transparent after it; inverting the alpha as well
-/// would make the picture its own hole, which is a different effect and one
-/// nobody asked for.
-pub const INVERT_V1: EffectManifest = EffectManifest {
-    type_id: "ovs.invert",
-    version: 1,
-    name: "Invert",
-    description: "Turns every colour into its opposite.",
-    parameters: &[ParameterDefinition {
-        key: "on",
-        name: "Inverted",
-        kind: ParameterKind::Toggle { default: false },
-        dmx: Some(DmxChannel::Coarse),
-    }],
-};
-
-/// The same, able to flash on its own.
-///
-/// The owner, 2026-10-16: "Ich will einen Inverted Color haben, der selber in
-/// einer HZ Zahl wechselt, die man einstellt."
+/// On the DMX side the switch is one coarse channel, which a desk gives a
+/// button: the standard reading of a channel as a switch is that anything from
+/// half up is on.
 ///
 /// **Why this is not the strobe generator's invert mode.** That one is a
 /// *source*: it owns a layer, and its inversion is in how that layer lands —
@@ -584,23 +511,17 @@ pub const INVERT_V1: EffectManifest = EffectManifest {
 /// wanting one picture to pulse wants this one; an operator wanting the wall
 /// to pulse wants the generator.
 ///
-/// **A new version rather than a changed one.** `on` keeps its meaning and its
-/// channel, so a console programmed against v1 drives v2's switch from the same
-/// fader, and a show saved with v1 keeps a strobe rate of nothing whatever this
-/// build does.
-///
-/// **`on` is still the switch.** Off is off, whatever the rate says: a flashing
-/// effect somebody has switched off must go dark rather than keep flashing, and
-/// that is also what keeps the published defaults neutral. At zero hertz it is
-/// exactly v1 — on means inverted and stays inverted — so the rate is something
-/// an operator adds rather than something they have to set to get a negative.
-///
 /// The rate's range is the strobe generator's, for the one reason that matters:
 /// the two of them in a show must not disagree about what "ten" means. The
 /// ceiling is half of sixty because a flash needs a lit frame and a dark one.
-pub const INVERT_V2: EffectManifest = EffectManifest {
+///
+/// What it inverts is the colour and not the alpha. A layer that is half
+/// transparent is still half transparent after it; inverting the alpha as well
+/// would make the picture its own hole, which is a different effect and one
+/// nobody asked for.
+pub const INVERT_V1: EffectManifest = EffectManifest {
     type_id: "ovs.invert",
-    version: 2,
+    version: 1,
     name: "Invert",
     description: "Turns every colour into its opposite, steadily or at a rate.",
     parameters: &[
@@ -839,11 +760,13 @@ pub const CROP_V1: EffectManifest = EffectManifest {
 };
 
 /// Every effect this build publishes.
-pub const PUBLISHED: [EffectManifest; 17] = [
-    // Both versions, and the catalogue offers the newer: a show saved against
-    // version one opens with the four controls it was saved with.
+///
+/// **One of each.** The owner, 2026-10-18: "Ich habe aber in der Software keine
+/// Versionsvergabe und ist auch nicht gewünscht. TV Glitch V2 ist TV Glitch.
+/// Invert V2 ist Invert." — and again: "Es gibt kein Invert V2.. nirgendwo."
+/// Every module is version one, and [`manifest`] finds one by its type alone.
+pub const PUBLISHED: [EffectManifest; 14] = [
     COLOUR_CORRECT_V1,
-    COLOUR_CORRECT_V2,
     TINT_V1,
     PIXELATE_V1,
     BLUR_V1,
@@ -853,10 +776,8 @@ pub const PUBLISHED: [EffectManifest; 17] = [
     RGB_CORRECT_V1,
     RGB_SPLIT_V1,
     TV_GLITCH_V1,
-    TV_GLITCH_V2,
     MASK_V1,
     INVERT_V1,
-    INVERT_V2,
     EDGES_V1,
     ECHO_V1,
 ];
@@ -870,28 +791,35 @@ pub const PUBLISHED: [EffectManifest; 17] = [
 /// badly held, rather than as a cut to something else.
 pub const GLITCH_OUT_OF_SYNC: f64 = 0.2;
 
-/// A picture coming apart the way a tube did, now including vertically.
+/// A picture coming apart the way a tube did.
 ///
-/// **Version two adds the vertical hold**, which is the fault version one did
-/// not have: everything in it moves the picture sideways — lines dragged left
-/// and right, a band travelling down that pulls them with it — and a set that
-/// had lost its grip did something else entirely. It let the whole frame
-/// slide, and it jumped whole runs of lines rather than single ones.
+/// Four faults an old set had, each with its own control, under one master:
+/// lines that jump sideways now and then, snow over the picture, an error band
+/// travelling down it, and a lost vertical hold. The master is what an
+/// operator rides during a show; the four underneath are how the look is set
+/// up beforehand. The master starts at zero, so adding it changes nothing until
+/// somebody asks for it; the faults start half up, so that one control brings
+/// the whole look in at once.
 ///
-/// So one control does both, because they are one fault at two scales: bands
-/// of lines jump up and down, and the whole picture is thrown off its hold by
-/// up to [`GLITCH_OUT_OF_SYNC`] of its own height. The displacement wraps —
-/// what leaves the bottom comes back at the top, as it did on a tube — and it
-/// is held for a moment and then jumped again rather than scrolled, because a
-/// picture that scrolls smoothly is the Rolling error above and this is a
-/// picture that is simply in the wrong place.
+/// **It moves on its own.** It reads the clock a pass carries — free-running,
+/// shared by every pass in a frame, and reached by nothing in the show. A
+/// glitch is a look rather than a cue, so the transport and the master speed
+/// do not touch it, and two layers carrying it move together.
 ///
-/// Version one is still served and still looks exactly as it did: the new
-/// control travels in a slot a version one pass leaves at nought, so its
-/// passes are unchanged to the byte.
-pub const TV_GLITCH_V2: EffectManifest = EffectManifest {
+/// **Out of sync is the one fault that is not sideways.** Everything else moves
+/// the picture left and right — lines dragged, a band travelling down that
+/// pulls them with it — and a set that had lost its grip did something else
+/// entirely: it let the whole frame slide, and it jumped whole runs of lines
+/// rather than single ones. One control does both, because they are one fault
+/// at two scales: bands of lines jump up and down, and the whole picture is
+/// thrown off its hold by up to [`GLITCH_OUT_OF_SYNC`] of its own height. The
+/// displacement wraps — what leaves the bottom comes back at the top, as it
+/// did on a tube — and it is held for a moment and then jumped again rather
+/// than scrolled, because a picture that scrolls smoothly is the rolling error
+/// and this is a picture that is simply in the wrong place.
+pub const TV_GLITCH_V1: EffectManifest = EffectManifest {
     type_id: "ovs.tv_glitch",
-    version: 2,
+    version: 1,
     name: "TV Glitch",
     description: "Line jumps, snow, a rolling error and a lost vertical hold.",
     parameters: &[
@@ -1259,71 +1187,6 @@ pub const RGB_SPLIT_V1: EffectManifest = EffectManifest {
     ],
 };
 
-/// A picture coming apart the way a tube did.
-///
-/// Three faults an old set had, each with its own control, under one master:
-/// lines that jump sideways now and then, snow over the picture, and an error
-/// band travelling down it. The master is what an operator rides during a
-/// show; the three underneath are how the look is set up beforehand.
-///
-/// **The first effect here that moves on its own.** It reads the clock a pass
-/// now carries — free-running, shared by every pass in a frame, and reached by
-/// nothing in the show. A glitch is a look rather than a cue, so the transport
-/// and the master speed do not touch it, and two layers carrying it move
-/// together.
-///
-/// The master starts at zero, so adding it changes nothing until somebody asks
-/// for it; the three faults start half up, so that one control brings the
-/// whole look in at once.
-pub const TV_GLITCH_V1: EffectManifest = EffectManifest {
-    type_id: "ovs.tv_glitch",
-    version: 1,
-    name: "TV Glitch",
-    description: "Line jumps, snow and a rolling error, under one master.",
-    parameters: &[
-        ParameterDefinition {
-            key: "amount",
-            name: "Amount",
-            kind: ParameterKind::Number {
-                min: 0.0,
-                max: 1.0,
-                default: 0.0,
-            },
-            dmx: Some(DmxChannel::Fine),
-        },
-        ParameterDefinition {
-            key: "tear",
-            name: "Line jumps",
-            kind: ParameterKind::Number {
-                min: 0.0,
-                max: 1.0,
-                default: 0.5,
-            },
-            dmx: Some(DmxChannel::Fine),
-        },
-        ParameterDefinition {
-            key: "noise",
-            name: "Snow",
-            kind: ParameterKind::Number {
-                min: 0.0,
-                max: 1.0,
-                default: 0.5,
-            },
-            dmx: Some(DmxChannel::Fine),
-        },
-        ParameterDefinition {
-            key: "roll",
-            name: "Rolling error",
-            kind: ParameterKind::Number {
-                min: 0.0,
-                max: 1.0,
-                default: 0.5,
-            },
-            dmx: Some(DmxChannel::Fine),
-        },
-    ],
-};
-
 /// The types an effect list no longer offers.
 ///
 /// **Retired, not deleted**, for the reason [`crate::config::generators::RETIRED`]
@@ -1337,16 +1200,20 @@ pub const TV_GLITCH_V1: EffectManifest = EffectManifest {
 /// 2026-10-12).
 pub const RETIRED: [&str; 1] = ["ovs.tint"];
 
-/// Returns a published effect by type and version.
+/// Returns a published effect by its type.
 ///
-/// A show naming a version this build does not have is refused rather than
-/// served the nearest one: the nearest one would draw something, and nobody
-/// would know it was not what the show asked for.
+/// **By type alone**, because there is one of each (see [`PUBLISHED`]). A show
+/// saved while some modules still had a second version carries its number on
+/// the instance, and that number no longer means anything: the instance is the
+/// one module of its type. What a later version added went on the end, so the
+/// controls such an instance has keep their meaning, and what it lacks takes
+/// its default: no white-point change, no inverting rate — and for TV Glitch,
+/// out of sync at half, under the master like the other faults.
 #[must_use]
-pub fn manifest(type_id: &str, version: u32) -> Option<&'static EffectManifest> {
+pub fn manifest(type_id: &str) -> Option<&'static EffectManifest> {
     PUBLISHED
         .iter()
-        .find(|manifest| manifest.type_id == type_id && manifest.version == version)
+        .find(|manifest| manifest.type_id == type_id)
 }
 
 #[cfg(test)]
@@ -1368,23 +1235,27 @@ mod tests {
     }
 
     #[test]
-    fn a_version_this_build_does_not_have_is_refused() {
-        assert!(manifest("ovs.blur", 1).is_some());
-        assert!(manifest("ovs.blur", 2).is_none());
-        assert!(manifest("ovs.kaleidoscope", 1).is_none());
+    fn an_effect_is_found_by_its_type_alone() {
+        assert_eq!(manifest("ovs.invert").map(|found| found.version), Some(1));
+        assert!(
+            manifest("ovs.invert").is_some_and(|found| found.parameter("hz").is_some()),
+            "the one Invert is the one with a rate"
+        );
+        assert!(manifest("ovs.kaleidoscope").is_none());
     }
 
     #[test]
-    fn every_published_effect_has_a_distinct_identity() {
-        // Two manifests answering to one name is a show loading whichever
-        // came first in an array, which is not a decision anybody made.
+    fn there_is_one_of_each() {
+        // "Es gibt kein Invert V2.. nirgendwo. Es ist Invert!" (owner,
+        // 2026-10-18). Two manifests answering to one type would also be a
+        // show loading whichever came first in an array.
         for (index, manifest) in PUBLISHED.iter().enumerate() {
+            assert_eq!(manifest.version, 1, "{}", manifest.type_id);
             for other in &PUBLISHED[index + 1..] {
-                assert!(
-                    manifest.type_id != other.type_id || manifest.version != other.version,
-                    "{} version {} is published twice",
-                    manifest.type_id,
-                    manifest.version
+                assert_ne!(
+                    manifest.type_id, other.type_id,
+                    "{} is published twice",
+                    manifest.type_id
                 );
             }
         }
@@ -1394,7 +1265,6 @@ mod tests {
     fn every_published_effect_declares_what_a_client_needs_to_draw_it() {
         for manifest in &PUBLISHED {
             assert!(manifest.type_id.starts_with("ovs."), "{}", manifest.type_id);
-            assert!(manifest.version >= 1);
             assert!(!manifest.name.trim().is_empty());
             assert!(!manifest.description.trim().is_empty());
             for parameter in manifest.parameters {
@@ -1409,10 +1279,8 @@ mod tests {
         let values = ParameterMap::from([("radius_px".to_owned(), ParameterValue::Float(4.0))]);
         let problems = COLOUR_CORRECT_V1.problems(&values);
         assert_eq!(problems.len(), 1);
-        assert!(
-            problems[0].1.contains("ovs.colour_correct version 1"),
-            "{problems:?}"
-        );
+        assert!(problems[0].1.contains("ovs.colour_correct"), "{problems:?}");
+        assert!(!problems[0].1.contains("version"), "{problems:?}");
     }
 
     #[test]
@@ -1477,7 +1345,10 @@ mod tests {
         let reason = BLUR_V1
             .refuse("brightness", &ParameterValue::Float(1.0))
             .expect("a blur has no brightness");
-        assert!(reason.contains("ovs.blur version 1"), "{reason}");
+        assert!(
+            reason.contains("ovs.blur has no such parameter"),
+            "{reason}"
+        );
     }
 
     #[test]

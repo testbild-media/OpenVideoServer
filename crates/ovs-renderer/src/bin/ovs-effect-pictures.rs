@@ -87,8 +87,8 @@ fn main() -> ExitCode {
     };
 
     for manifest in &ovs_types::config::EFFECTS {
-        let named = picture_name(manifest.type_id, manifest.version);
-        let Some(picture) = picture_of(&mut canvas, manifest.type_id, manifest.version) else {
+        let named = picture_name(manifest.type_id);
+        let Some(picture) = picture_of(&mut canvas, manifest.type_id) else {
             eprintln!("{named}: published and cannot be drawn");
             return ExitCode::from(1);
         };
@@ -115,8 +115,8 @@ fn main() -> ExitCode {
 }
 
 /// What one effect's picture is called.
-fn picture_name(type_id: &str, version: u32) -> String {
-    format!("{type_id}.v{version}.png")
+fn picture_name(type_id: &str) -> String {
+    format!("{type_id}.png")
 }
 
 /// Where the client keeps them.
@@ -184,7 +184,7 @@ fn mask_picture() -> Option<DecodedImage> {
         ("width_px".to_owned(), ParameterValue::Float(1200.0)),
         ("height_px".to_owned(), ParameterValue::Float(900.0)),
     ]);
-    let mut source = GeneratorSource::new("ovs.shape", 1, &parameters, WALL)?;
+    let mut source = GeneratorSource::new("ovs.shape", &parameters, WALL)?;
     Some(source.frame(0).ok()?.image.as_ref().clone())
 }
 
@@ -203,10 +203,10 @@ const ECHO_FRAMES: u32 = 5;
 const ECHO_PICTURE: f32 = 0.7;
 
 /// One effect's tile-sized picture, at the setting that shows what it does.
-fn picture_of(canvas: &mut Canvas, type_id: &str, version: u32) -> Option<DecodedImage> {
+fn picture_of(canvas: &mut Canvas, type_id: &str) -> Option<DecodedImage> {
     let instance = EffectInstance {
-        parameters: settings(type_id, version, canvas.mask),
-        ..EffectInstance::new(type_id, version)
+        parameters: settings(type_id, canvas.mask),
+        ..EffectInstance::new(type_id, 1)
     };
 
     let mut passes = Vec::new();
@@ -267,7 +267,7 @@ fn picture_of(canvas: &mut Canvas, type_id: &str, version: u32) -> Option<Decode
 /// promise; these are the settings that make the difference visible in a
 /// picture 320 pixels wide, picked by eye and kept here so that the next
 /// person can see what was picked rather than infer it from a PNG.
-fn settings(type_id: &str, version: u32, mask: MediaItemId) -> ParameterMap {
+fn settings(type_id: &str, mask: MediaItemId) -> ParameterMap {
     let number = |key: &str, value: f64| (key.to_owned(), ParameterValue::Float(value));
     let flag = |key: &str, value: bool| (key.to_owned(), ParameterValue::Bool(value));
     let choice =
@@ -278,19 +278,13 @@ fn settings(type_id: &str, version: u32, mask: MediaItemId) -> ParameterMap {
         // grade in the same direction the test card already goes: a more
         // saturated test card looks like a test card, and the tile has to say
         // "this one changes the grade".
-        //
-        // And version two is shown by what makes it version two — its white
-        // point, hard over to the warm end. The two versions differ by that
-        // control and by nothing else, so the two tiles should differ by it
-        // too; at 2600 K against none, they do.
-        "ovs.colour_correct" if version >= 2 => ParameterMap::from([
+        // And its white point, hard over to the warm end, so the tile shows the
+        // whole of what it does.
+        "ovs.colour_correct" => ParameterMap::from([
             number("contrast", 1.6),
             number("saturation", 0.3),
             number("temperature_k", 2600.0),
         ]),
-        "ovs.colour_correct" => {
-            ParameterMap::from([number("contrast", 1.6), number("saturation", 0.3)])
-        }
         // The house orange, fully mixed, brightness kept: the tile has to show
         // a tint rather than a wash.
         "ovs.tint" => ParameterMap::from([
@@ -396,7 +390,7 @@ mod tests {
         // by name, so a published effect with no file is a tile that falls back
         // to its own name for ever without anybody noticing.
         for manifest in &ovs_types::config::EFFECTS {
-            let named = picture_name(manifest.type_id, manifest.version);
+            let named = picture_name(manifest.type_id);
             let path = pictures_directory().join(&named);
             let opened = image::open(&path)
                 .unwrap_or_else(|error| panic!("{}: {error} — {RUN_IT}", path.display()));
@@ -412,7 +406,7 @@ mod tests {
     fn nothing_is_committed_that_no_effect_asks_for() {
         let wanted: std::collections::BTreeSet<String> = ovs_types::config::EFFECTS
             .iter()
-            .map(|manifest| picture_name(manifest.type_id, manifest.version))
+            .map(|manifest| picture_name(manifest.type_id))
             .collect();
 
         let directory = pictures_directory();
@@ -426,19 +420,6 @@ mod tests {
                 "{found} is committed and nothing publishes it — delete it"
             );
         }
-    }
-
-    /// Whether two picture names are two versions of one effect.
-    ///
-    /// By the name rather than by the manifest, because the names are what the
-    /// comparison above holds: `ovs.invert.v1.png` and `ovs.invert.v2.png`
-    /// share everything up to the `.v`.
-    fn of_the_same_effect(one: &str, other: &str) -> bool {
-        let stem = |name: &str| {
-            name.rfind(".v")
-                .map_or_else(|| name.to_owned(), |at| name[..at].to_owned())
-        };
-        stem(one) == stem(other)
     }
 
     #[test]
@@ -459,8 +440,8 @@ mod tests {
 
         let mut seen: Vec<(String, Vec<u8>)> = Vec::new();
         for manifest in &ovs_types::config::EFFECTS {
-            let named = picture_name(manifest.type_id, manifest.version);
-            let drawn = picture_of(&mut canvas, manifest.type_id, manifest.version)
+            let named = picture_name(manifest.type_id);
+            let drawn = picture_of(&mut canvas, manifest.type_id)
                 .unwrap_or_else(|| panic!("{named} cannot be drawn"));
             let committed = image::open(pictures_directory().join(&named))
                 .unwrap_or_else(|error| panic!("{named}: {error} — {RUN_IT}"))
@@ -484,22 +465,10 @@ mod tests {
             seen.push((named, drawn.pixels().to_vec()));
         }
 
-        // And no two *different effects* are the same picture, which is what
-        // would happen if a setting above stopped reaching its effect.
-        //
-        // **Two versions of one effect may match, and sometimes must.** A tile
-        // says what an effect does to a picture, and a version can differ in
-        // something a still frame cannot carry: `ovs.invert` v2 is v1 plus a
-        // rate, and at a steady setting it does exactly what v1 does. The
-        // generators' tiles have always allowed this — strobe v1 and v2 are
-        // byte-identical for the same reason — and pretending otherwise would
-        // mean inventing a setting whose only purpose is to make two pictures
-        // differ.
+        // And no two effects are the same picture, which is what would happen
+        // if a setting above stopped reaching its effect.
         for (at, (named, pixels)) in seen.iter().enumerate() {
             for (other_name, other) in seen.iter().skip(at + 1) {
-                if of_the_same_effect(named, other_name) {
-                    continue;
-                }
                 assert_ne!(
                     pixels, other,
                     "{named} and {other_name} are the same picture"

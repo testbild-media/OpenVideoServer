@@ -5,12 +5,14 @@
 //! not have: the parameters an operator can set, with their types, defaults and
 //! ranges.
 //!
-//! # A manifest is published once and never changes
+//! # One of each
 //!
-//! The same rule as a fixture personality, for the same reason: a show stores
-//! a type and a version and expects the same thing back. Adding a parameter is a
-//! new version, not an edit, because a show saved last year must open looking
-//! the way it was left.
+//! A generator is its type: one Strobe, one Test Pattern, and no second version
+//! of anything (owner, 2026-10-18: "Ich habe aber in der Software keine
+//! Versionsvergabe und ist auch nicht gewünscht"). A show stores a type, and a
+//! version number beside it that is always one and is not read. A parameter
+//! added later goes on the end with a default that draws what was drawn
+//! before, so a show saved last year opens looking the way it was left.
 //!
 //! The parameter model itself is shared with effects, which declare theirs the
 //! same way: see [`crate::config::manifest`].
@@ -32,7 +34,8 @@ use crate::config::slot::{ParameterMap, ParameterValue};
 pub struct GeneratorManifest {
     /// Stable type identifier, for example `ovs.solid_colour`.
     pub type_id: &'static str,
-    /// Version. A new parameter is a new version, never a changed one.
+    /// Always one: there is one of each (see [`PUBLISHED`]). Kept because a
+    /// show and a patch carry it.
     pub version: u32,
     /// What a client's source list shows.
     pub name: &'static str,
@@ -49,9 +52,10 @@ pub struct GeneratorManifest {
 static PERSONALITIES: std::sync::OnceLock<Vec<&'static FixtureDefinition>> =
     std::sync::OnceLock::new();
 
-/// The personality a published generator describes, if it describes one.
+/// The personality a published generator describes, if it describes one: by
+/// type alone, as [`manifest`] is.
 #[must_use]
-pub fn personality(type_id: &str, version: u32) -> Option<&'static FixtureDefinition> {
+pub fn personality(type_id: &str) -> Option<&'static FixtureDefinition> {
     PERSONALITIES
         .get_or_init(|| {
             PUBLISHED
@@ -60,7 +64,7 @@ pub fn personality(type_id: &str, version: u32) -> Option<&'static FixtureDefini
                 .collect()
         })
         .iter()
-        .find(|definition| definition.type_id == type_id && definition.version == version)
+        .find(|definition| definition.type_id == type_id)
         .copied()
 }
 
@@ -89,10 +93,7 @@ impl GeneratorManifest {
     pub fn refuse(&self, key: &str, value: &ParameterValue) -> Option<String> {
         match self.parameter(key) {
             Some(definition) => definition.refuse(value),
-            None => Some(format!(
-                "{} version {} has no such parameter",
-                self.type_id, self.version
-            )),
+            None => Some(format!("{} has no such parameter", self.type_id)),
         }
     }
 
@@ -115,16 +116,11 @@ impl GeneratorManifest {
     /// Returns every problem with a set of values.
     ///
     /// A value for something this generator does not declare is a problem too:
-    /// it is nearly always a typo or a show written against another version,
-    /// and silently ignoring it means an operator setting something and seeing
-    /// nothing happen.
+    /// it is nearly always a typo, and silently ignoring it means an operator
+    /// setting something and seeing nothing happen.
     #[must_use]
     pub fn problems(&self, values: &ParameterMap) -> Vec<(String, String)> {
-        crate::config::manifest::problems(
-            self.parameters,
-            &format!("{} version {}", self.type_id, self.version),
-            values,
-        )
+        crate::config::manifest::problems(self.parameters, self.type_id, values)
     }
 }
 
@@ -150,21 +146,11 @@ pub const SOLID_COLOUR_V1: GeneratorManifest = GeneratorManifest {
 
 /// The service pattern, on a layer.
 ///
-/// **There is no version 1, and the gap is the point.** It was a grid, bars
-/// and a centre cross, drawn once and left alone — and beside it this system
-/// already had a test pattern of its own, the one an output and a composition
-/// show. Two answers to one question, and the lesser one was what a layer
-/// offered (owner, 2026-10-12: "den möchte ich da sehen und keinen
-/// Generischen"), so version 2 drew the service pattern instead. Three days
-/// later the first went (owner, 2026-10-15: "Testpattern v1 soll nicht
-/// existieren. Nur noch v2 und das wird zum normalen Testpattern").
-///
-/// **The number stays 2 although nothing is below it.** A version is what a
-/// saved show names — four slots of the show on the machine in the hall name
-/// this one — and renumbering it would be editing those shows from here. A
-/// manifest is immutable once published; removing one is a decision about what
-/// this build offers, and renumbering another is a decision about documents
-/// that are not ours.
+/// The same pattern an output and a composition show, rather than a generic
+/// one of its own (owner, 2026-10-12: "den möchte ich da sehen und keinen
+/// Generischen"; 2026-10-15: "das wird zum normalen Testpattern"). A show
+/// saved when this was numbered two finds it all the same: a generator is found
+/// by its type.
 ///
 /// What the picture is for: colour bars over a black-level ramp, a picture
 /// that drifts, a sweep every five seconds and a caption naming the surface
@@ -186,9 +172,9 @@ pub const SOLID_COLOUR_V1: GeneratorManifest = GeneratorManifest {
 /// else about the picture is the surface it is drawn for. `COMPOSITION` as
 /// published because that is this system's own word for the surface a layer
 /// fills, and it is what the caption on a composition already says.
-pub const TEST_PATTERN_V2: GeneratorManifest = GeneratorManifest {
+pub const TEST_PATTERN_V1: GeneratorManifest = GeneratorManifest {
     type_id: "ovs.test_pattern",
-    version: 2,
+    version: 1,
     name: "Test Pattern",
     description: "The service pattern: bars, a drift, a sweep and a caption.",
     parameters: &[ParameterDefinition {
@@ -235,44 +221,14 @@ pub const MAX_STROBE_HZ: f64 = 30.0;
 /// and venues often have a house limit. That is a decision for whoever is
 /// running the room, so this publishes the range and says so instead of
 /// quietly refusing part of it.
-pub const STROBE_V1: GeneratorManifest = GeneratorManifest {
-    type_id: "ovs.strobe",
-    version: 1,
-    name: "Strobe",
-    description: "Flashes one colour at a rate.",
-    parameters: &[
-        ParameterDefinition {
-            key: "colour",
-            name: "Colour",
-            kind: ParameterKind::Colour {
-                default: [1.0, 1.0, 1.0, 1.0],
-            },
-            dmx: Some(DmxChannel::Coarse),
-        },
-        ParameterDefinition {
-            key: "hz",
-            name: "Rate",
-            kind: ParameterKind::Number {
-                min: MIN_STROBE_HZ,
-                max: MAX_STROBE_HZ,
-                default: 10.0,
-            },
-            dmx: Some(DmxChannel::Coarse),
-        },
-    ],
-};
-
-/// A flash that can take the picture under it instead of covering it.
+///
+/// # Over the picture, or against it
 ///
 /// The owner, 2026-10-16: "erweitere den strobe um ein kanal. normal strobe
 /// mit weiß und einen modus für invert color strobe, wo der weiße blitz dann
-/// inverted color ist."
+/// inverted color ist." The mode is the last channel, and its default is the
+/// flash as it always was, so a show saved before it existed flashes as it did.
 ///
-/// **One more channel, and version one is untouched.** A manifest is published
-/// once; a show saved with the strobe it had keeps flashing exactly as it did,
-/// and a source list offers this.
-///
-/// # What the second mode is
 ///
 /// `colour` is the flash as it has always been: the colour, over what is
 /// under it. `invert` composites the lit frame as a *difference* instead, so
@@ -288,9 +244,9 @@ pub const STROBE_V1: GeneratorManifest = GeneratorManifest {
 /// advanced blend operations, and a device without the extension draws them
 /// as Normal — on such a machine an inverting strobe flashes its colour
 /// instead. The renderer says so once when it finds out.
-pub const STROBE_V2: GeneratorManifest = GeneratorManifest {
+pub const STROBE_V1: GeneratorManifest = GeneratorManifest {
     type_id: "ovs.strobe",
-    version: 2,
+    version: 1,
     name: "Strobe",
     description: "Flashes one colour at a rate, over the picture or against it.",
     parameters: &[
@@ -385,7 +341,7 @@ pub const GRADIENT_V1: GeneratorManifest = GeneratorManifest {
 /// Ruled lines on a background.
 ///
 /// Content rather than a diagnostic, which is what separates it from
-/// [`TEST_PATTERN_V2`]: a grid behind a band, a floor receding, a scaffold
+/// [`TEST_PATTERN_V1`]: a grid behind a band, a floor receding, a scaffold
 /// behind a key. All of those want a grid and none of them want bars, a drift
 /// and a caption drawn over it, so the two are different generators rather
 /// than one with a switch.
@@ -916,16 +872,12 @@ pub const TEXT_V1: GeneratorManifest = GeneratorManifest {
     ],
 };
 
-/// Every generator this build publishes.
-pub const PUBLISHED: [GeneratorManifest; 11] = [
+/// Every generator this build publishes: one of each, every one version one,
+/// found by its type alone.
+pub const PUBLISHED: [GeneratorManifest; 10] = [
     SOLID_COLOUR_V1,
-    // Version 2 and no version 1, which is the one place in this file where a
-    // manifest was removed rather than retired: see its own documentation.
-    TEST_PATTERN_V2,
-    // Both, and the catalogue offers the newer: a show saved against version
-    // one keeps the flash it was saved with.
+    TEST_PATTERN_V1,
     STROBE_V1,
-    STROBE_V2,
     GRADIENT_V1,
     GRID_V1,
     SHAPE_V1,
@@ -950,16 +902,17 @@ pub const PUBLISHED: [GeneratorManifest; 11] = [
 /// desk is given no fixture type for a retired generator.
 pub const RETIRED: [&str; 3] = ["ovs.clock", "ovs.countdown", "ovs.grid"];
 
-/// Returns a published generator by type and version.
+/// Returns a published generator by its type.
 ///
-/// A show naming a version this build does not have is refused rather than
-/// served the nearest one, for the same reason a fixture is: the nearest one
-/// draws something, and nobody would know it was not what the show asked for.
+/// **By type alone**, because there is one of each. A show saved while the
+/// strobe still had a second version, or while the test pattern was numbered
+/// two, carries that number on its source and it is not read: the source is
+/// the one generator of its type.
 #[must_use]
-pub fn manifest(type_id: &str, version: u32) -> Option<&'static GeneratorManifest> {
+pub fn manifest(type_id: &str) -> Option<&'static GeneratorManifest> {
     PUBLISHED
         .iter()
-        .find(|manifest| manifest.type_id == type_id && manifest.version == version)
+        .find(|manifest| manifest.type_id == type_id)
 }
 
 #[cfg(test)]
@@ -1017,10 +970,11 @@ mod tests {
     }
 
     #[test]
-    fn a_version_this_build_does_not_publish_is_not_found() {
-        assert!(manifest("ovs.solid_colour", 1).is_some());
-        assert!(manifest("ovs.solid_colour", 2).is_none());
-        assert!(manifest("something.else", 1).is_none());
+    fn a_generator_is_found_by_its_type_alone() {
+        assert!(manifest("ovs.solid_colour").is_some());
+        // The one strobe is the one with a mode.
+        assert!(manifest("ovs.strobe").is_some_and(|strobe| strobe.parameter("mode").is_some()));
+        assert!(manifest("something.else").is_none());
     }
 
     #[test]
@@ -1067,14 +1021,13 @@ mod tests {
     }
 
     #[test]
-    fn every_published_generator_is_found_by_the_type_and_version_a_show_stores() {
+    fn every_published_generator_is_found_by_the_type_a_show_stores() {
         for published in &PUBLISHED {
             assert_eq!(
-                manifest(published.type_id, published.version),
+                manifest(published.type_id),
                 Some(published),
-                "{} v{} is published but cannot be looked up",
-                published.type_id,
-                published.version
+                "{} is published but cannot be looked up",
+                published.type_id
             );
         }
     }
@@ -1099,7 +1052,7 @@ mod tests {
     fn a_grid_is_a_separate_generator_from_the_service_pattern() {
         // One is content and one is a diagnostic. A show asking for a grid
         // behind a band must not get colour bars and a caption with it.
-        assert_ne!(GRID_V1.type_id, TEST_PATTERN_V2.type_id);
+        assert_ne!(GRID_V1.type_id, TEST_PATTERN_V1.type_id);
         assert!(GRID_V1.parameter("caption").is_none());
         assert!(GRID_V1.parameter("line_colour").is_some());
     }
@@ -1179,8 +1132,8 @@ mod tests {
         assert_ne!(CLOCK_V1.type_id, COUNTDOWN_V1.type_id);
         assert!(CLOCK_V1.parameter("duration_s").is_none());
         assert!(COUNTDOWN_V1.parameter("hour_24").is_none());
-        assert!(manifest("ovs.clock", 1).is_some());
-        assert!(manifest("ovs.countdown", 1).is_some());
+        assert!(manifest("ovs.clock").is_some());
+        assert!(manifest("ovs.countdown").is_some());
     }
 
     #[test]
@@ -1263,14 +1216,16 @@ mod tests {
     }
 
     #[test]
-    fn no_two_published_generators_share_a_type_and_version() {
+    fn there_is_one_of_each() {
+        // "Es gibt kein Invert V2.. nirgendwo" (owner, 2026-10-18), and no
+        // Strobe V2 either.
         for (index, first) in PUBLISHED.iter().enumerate() {
+            assert_eq!(first.version, 1, "{}", first.type_id);
             for second in PUBLISHED.iter().skip(index + 1) {
-                assert!(
-                    first.type_id != second.type_id || first.version != second.version,
-                    "{} v{} is published twice",
-                    first.type_id,
-                    first.version
+                assert_ne!(
+                    first.type_id, second.type_id,
+                    "{} is published twice",
+                    first.type_id
                 );
             }
         }

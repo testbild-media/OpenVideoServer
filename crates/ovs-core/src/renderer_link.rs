@@ -581,9 +581,7 @@ fn live_pictures(
         let Some(instance) = crate::state::effect_instance(show, *effect_instance_id) else {
             continue;
         };
-        let Some(manifest) =
-            ovs_types::config::effects::manifest(&instance.type_id, instance.version)
-        else {
+        let Some(manifest) = ovs_types::config::effects::manifest(&instance.type_id) else {
             continue;
         };
         for parameter in manifest.parameters {

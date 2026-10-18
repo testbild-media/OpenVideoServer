@@ -1007,7 +1007,7 @@ impl Playback {
         let ours = self.drawn.get(&layer_id) == Some(&Drawn::Generator);
 
         if !built {
-            let Some(source) = GeneratorSource::new(type_id, *version, &effective, size) else {
+            let Some(source) = GeneratorSource::new(type_id, &effective, size) else {
                 // A show validated against this build cannot produce this, so
                 // reaching it means a show from somewhere else. The layer
                 // draws its placeholder and the reason is said once.

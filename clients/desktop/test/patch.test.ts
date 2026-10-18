@@ -33,6 +33,7 @@ import {
   effectPersonalities,
   effectPlaces,
   emptyFixtures,
+  fixtureName,
   generatorPersonalities,
   generatorPlaces,
   moveFixture,
@@ -166,7 +167,7 @@ function catalogueWithEffect(): FixtureCatalogue {
   return { loaded: true, fixtures: [DESK_MASTER, DESK_LAYER, DESK_EFFECT] };
 }
 
-/** One effect instance of a type and version. */
+/** One effect instance of a type, with the version number its document was saved with. */
 function effectInstance(typeId: string, version: number): EffectInstance {
   return { id: newId(), type_id: typeId, version, enabled: true };
 }
@@ -686,7 +687,7 @@ describe('what the personality decides', () => {
           layer_id: rig().layers[0]!.id,
         }, { universe: 1, startAddress: 1 }),
       ),
-    ).toBe('this server does not publish nobody.publishes.this version 2');
+    ).toBe('this server does not publish nobody.publishes.this');
   });
 
   it('refuses one that cannot drive what it is pointed at', () => {
@@ -708,8 +709,23 @@ describe('what the personality decides', () => {
     // thing during a show.
     const document = show({ fixture_patch: [entry({ footprint: 14 })] });
     expect(problemsAt(document, 'fixture_patch[0].footprint')).toEqual([
-      'third.party.layer version 2 occupies 20 channels, not 14',
+      'third.party.layer occupies 20 channels, not 14',
     ]);
+  });
+
+  it('reads an entry saved with another version number as the one personality of its type', () => {
+    // There is one module per type and no versions of it (owner, 2026-10-18).
+    // An entry saved as `version: 9` where the catalogue says 2 is that same
+    // personality: named by it and checked against its footprint, not reported
+    // as something this build does not publish.
+    expect(DESK_LAYER.version).not.toBe(9);
+    const saved = entry({ version: 9, footprint: 14 });
+    const document = show({ fixture_patch: [saved] });
+    expect(problemsAt(document, 'fixture_patch[0].type_id')).toEqual([]);
+    expect(problemsAt(document, 'fixture_patch[0].footprint')).toEqual([
+      'third.party.layer occupies 20 channels, not 14',
+    ]);
+    expect(fixtureName(saved, catalogue())).toBe(DESK_LAYER.name);
   });
 
   it('reports a personality this build does not have at all', () => {
@@ -717,7 +733,7 @@ describe('what the personality decides', () => {
       fixture_patch: [entry({ type_id: 'gone.away', version: 9, footprint: 4 })],
     });
     expect(problemsAt(document, 'fixture_patch[0].type_id')).toEqual([
-      'this build does not publish gone.away version 9',
+      'this build does not publish gone.away',
     ]);
   });
 
@@ -732,7 +748,7 @@ describe('what the personality decides', () => {
     });
     expect(patchProblems(document, emptyFixtures())).toEqual([]);
     expect(problemsAt(document, 'fixture_patch[0].type_id')).toEqual([
-      'this build does not publish gone.away version 9',
+      'this build does not publish gone.away',
     ]);
   });
 });
@@ -858,30 +874,59 @@ describe('what a console can reach on an effect', () => {
   // that, and it was only ever exercised by running the client.
 
   it('offers an effect the personality its own manifest published', () => {
-    const found = effectPersonalities(catalogueWithEffect(), 'third.party.wobble', 4);
+    const found = effectPersonalities(catalogueWithEffect(), 'third.party.wobble');
     expect(found).toEqual([DESK_EFFECT]);
+    // By its type: another effect's personality is not this one's.
+    expect(effectPersonalities(catalogueWithEffect(), 'third.party.other')).toEqual([]);
   });
 
-  it('will not drive an instance with another version of the same effect', () => {
-    // A published personality is immutable, so an instance saved at v4 keeps
-    // v4's channels. Offering v5's would silently move an operator's faders.
-    expect(effectPersonalities(catalogueWithEffect(), 'third.party.wobble', 5)).toEqual([]);
+  it('drives an instance saved with another version number with the one personality of its type', () => {
+    // There is one module per type and no versions of it: "Invert V2 ist
+    // Invert" (owner, 2026-10-18). An instance saved as `version: 5` where the
+    // personality says 4 is that effect, so it is offered that personality and
+    // a patch entry on it is checked against that footprint.
+    expect(DESK_EFFECT.version).not.toBe(5);
+    const instance = effectInstance('third.party.wobble', 5);
+    const document = show({ layers: [{ ...layerAt('Wall', 0), effects: [instance] }] });
+
+    const place = effectPlaces(document)[0]!;
+    expect(effectPersonalities(catalogueWithEffect(), place.instance.type_id)).toEqual([
+      DESK_EFFECT,
+    ]);
+
+    const patched: Show = {
+      ...document,
+      fixture_patch: [
+        entry({
+          type_id: 'third.party.wobble',
+          version: 5,
+          target: { kind: 'effect', effect_instance_id: instance.id },
+          footprint: 3,
+        }),
+      ],
+    };
+    expect(patchProblems(patched, catalogueWithEffect())).toEqual([
+      {
+        path: 'fixture_patch[0].footprint',
+        message: 'third.party.wobble occupies 2 channels, not 3',
+      },
+    ]);
   });
 
   it('never offers the master or a layer personality to an effect', () => {
     // The catalogue is one list. Without the target filter a desk's Grand
     // Master would appear as something to patch onto an effect.
-    expect(effectPersonalities(catalogue(), 'third.party.layer', 2)).toEqual([]);
-    expect(effectPersonalities(catalogue(), 'third.party.master', 3)).toEqual([]);
+    expect(effectPersonalities(catalogue(), 'third.party.layer')).toEqual([]);
+    expect(effectPersonalities(catalogue(), 'third.party.master')).toEqual([]);
   });
 
   it('has nothing to offer when the catalogue carries no module personalities', () => {
     // Which is what a server that publishes none looks like, and is a
     // different thing from the show having no effects in it.
-    expect(effectPersonalities(catalogue(), 'third.party.wobble', 4)).toEqual([]);
+    expect(effectPersonalities(catalogue(), 'third.party.wobble')).toEqual([]);
     // And a catalogue that has not been fetched at all, which is the state a
     // client is in before it has signed in.
-    expect(effectPersonalities(emptyFixtures(), 'third.party.wobble', 4)).toEqual([]);
+    expect(effectPersonalities(emptyFixtures(), 'third.party.wobble')).toEqual([]);
   });
 
   it('finds an effect whether it sits on the layer or in a slot', () => {
@@ -927,11 +972,13 @@ describe('what a console can reach on a generator in a slot', () => {
 
   it('offers a generator the personality its own manifest published', () => {
     const catalogue: FixtureCatalogue = { loaded: true, fixtures: [DESK_MASTER, WOBBLE] };
-    expect(generatorPersonalities(catalogue, 'third.party.wobble', 4)).toEqual([WOBBLE]);
-    expect(generatorPersonalities(catalogue, 'third.party.wobble', 5)).toEqual([]);
+    expect(generatorPersonalities(catalogue, 'third.party.wobble')).toEqual([WOBBLE]);
+    expect(generatorPersonalities(catalogue, 'third.party.other')).toEqual([]);
+    // The master is in the same list and is never a generator's.
+    expect(generatorPersonalities(catalogue, 'third.party.master')).toEqual([]);
   });
 
-  it('finds every generator in every slot, with its version', () => {
+  it('finds every generator in every slot', () => {
     const layer = layerAt('Wall', 0);
     layer.slots = [
       slotWith(1, { kind: 'generator', type_id: 'ovs.noise', version: 1, instance_id: 'A' }),
@@ -940,9 +987,9 @@ describe('what a console can reach on a generator in a slot', () => {
     ];
 
     const places = generatorPlaces(show({ layers: [layer] }));
-    expect(places.map((place) => [place.typeId, place.version, place.slotIndex])).toEqual([
-      ['ovs.noise', 1, 1],
-      ['ovs.strobe', 2, 2],
+    expect(places.map((place) => [place.typeId, place.instanceId, place.slotIndex])).toEqual([
+      ['ovs.noise', 'A', 1],
+      ['ovs.strobe', 'B', 2],
     ]);
     // A clip is not a module and has no personality of its own.
     expect(places).toHaveLength(2);
@@ -957,14 +1004,36 @@ describe('what a console can reach on a generator in a slot', () => {
     expect(generatorPlaces(show({ layers: [layer] }))[0]?.instanceId).toBe('');
   });
 
-  it('keeps an older version on the channels it was saved with', () => {
-    // Strobe v1 is five channels and v2 is six. A show saved with v1 must not
-    // quietly acquire the Mode channel, or every address above it moves.
-    const five: Personality = { ...WOBBLE, type_id: 'ovs.strobe', version: 1, footprint: 5 };
-    const six: Personality = { ...WOBBLE, type_id: 'ovs.strobe', version: 2, footprint: 6 };
-    const catalogue: FixtureCatalogue = { loaded: true, fixtures: [five, six] };
+  it('patches a strobe saved as version 2 with the one Strobe the catalogue publishes', () => {
+    // There is no Strobe v2 beside a Strobe v1: one module per type, and no
+    // versions of it (owner, 2026-10-18). A show saved with `version: 2` on the
+    // slot and on its patch entry is driven by the personality the catalogue
+    // publishes for `ovs.strobe`, whatever number that one carries.
+    const strobe: Personality = {
+      ...WOBBLE,
+      type_id: 'ovs.strobe',
+      version: 1,
+      name: 'Strobe',
+      footprint: 6,
+    };
+    const catalogue: FixtureCatalogue = { loaded: true, fixtures: [DESK_MASTER, strobe] };
 
-    expect(generatorPersonalities(catalogue, 'ovs.strobe', 1)).toEqual([five]);
-    expect(generatorPersonalities(catalogue, 'ovs.strobe', 2)).toEqual([six]);
+    const layer = layerAt('Wall', 0);
+    layer.slots = [
+      slotWith(1, { kind: 'generator', type_id: 'ovs.strobe', version: 2, instance_id: 'B' }),
+    ];
+    const saved = entry({
+      type_id: 'ovs.strobe',
+      version: 2,
+      target: { kind: 'generator', generator_instance_id: 'B' },
+      footprint: strobe.footprint,
+    });
+    const document = show({ layers: [layer], fixture_patch: [saved] });
+
+    const place = generatorPlaces(document)[0]!;
+    expect(generatorPersonalities(catalogue, place.typeId)).toEqual([strobe]);
+    // Found, so neither "not published" nor anything about its channels.
+    expect(patchProblems(document, catalogue)).toEqual([]);
+    expect(fixtureName(saved, catalogue)).toBe('Strobe');
   });
 });

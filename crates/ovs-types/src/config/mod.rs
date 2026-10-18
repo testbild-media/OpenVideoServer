@@ -57,10 +57,10 @@ pub struct EffectInstance {
     pub id: EffectInstanceId,
     /// Stable effect type identifier, for example `ovs.colour_correct`.
     pub type_id: String,
-    /// Manifest version this instance was configured against.
-    ///
-    /// Published manifests are immutable, so an old show keeps loading the
-    /// exact effect behaviour it was built with.
+    /// Always one, and not read: there is one effect of each type (owner,
+    /// 2026-10-18: "Es gibt kein Invert V2.. nirgendwo"). Kept because shows
+    /// carry it; [`crate::config::Show::adopt_one_of_each`] sets it to one in a
+    /// show saved while some effects had a second version.
     pub version: u32,
     /// Whether this effect contributes to the chain.
     pub enabled: bool,
@@ -102,13 +102,10 @@ impl EffectInstance {
         // source is. An effect nobody can run is a layer that will draw
         // something other than what the show says, and the moment to say so
         // is now rather than in a venue.
-        let Some(manifest) = effects::manifest(&self.type_id, self.version) else {
+        let Some(manifest) = effects::manifest(&self.type_id) else {
             out.push(ValidationError::new(
                 format!("{path}.type_id"),
-                format!(
-                    "this build does not publish {} version {}",
-                    self.type_id, self.version
-                ),
+                format!("this build does not publish {}", self.type_id),
             ));
             return;
         };

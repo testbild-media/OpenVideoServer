@@ -700,20 +700,19 @@ def colours_of(manifest, colour):
 
 # Modules that must animate with nothing driving them.
 FREE_RUNNING = {
-    ("ovs.clock", 1),
-    ("ovs.countdown", 1),
-    ("ovs.noise", 1),
-    ("ovs.test_pattern", 2),
+    "ovs.clock",
+    "ovs.countdown",
+    "ovs.noise",
+    "ovs.test_pattern",
 }
 
 # Modules whose picture must stand still until something changes it.
 STANDS_STILL = {
-    ("ovs.solid_colour", 1),
-    ("ovs.test_pattern", 1),
-    ("ovs.gradient", 1),
-    ("ovs.grid", 1),
-    ("ovs.shape", 1),
-    ("ovs.text", 1),
+    "ovs.solid_colour",
+    "ovs.gradient",
+    "ovs.grid",
+    "ovs.shape",
+    "ovs.text",
 }
 
 
@@ -1245,7 +1244,7 @@ def run_generators(report, show_id, layer_id, generators):
     report.section("GENERATORS")
     for manifest in generators:
         type_id, version = manifest["type_id"], manifest["version"]
-        report.module("%s v%d  %s" % (type_id, version, manifest["name"]))
+        report.module("%s  %s" % (type_id, manifest["name"]))
 
         # The identity is minted here, the way the client mints it when a
         # generator is dragged onto a pad (`editor.ts`). Whether the server
@@ -1276,9 +1275,9 @@ def run_generators(report, show_id, layer_id, generators):
 
         if type_id in JUDGED_ELSEWHERE:
             pass
-        elif (type_id, version) in FREE_RUNNING:
+        elif type_id in FREE_RUNNING:
             report.check("runs on its own", drawn.moving, "movement=%.2f" % drawn.movement)
-        elif (type_id, version) in STANDS_STILL:
+        elif type_id in STANDS_STILL:
             report.check("stands still", not drawn.moving, "movement=%.2f" % drawn.movement)
         else:
             report.check("movement", None, "%.2f (nothing expected either way)" % drawn.movement)
@@ -1400,7 +1399,7 @@ def run_retired(report, show_id, layer_id):
     """
     report.section("RETIRED, AND STILL SERVED")
     for type_id, version, parameters in RETIRED_GENERATORS:
-        report.module("%s v%d" % (type_id, version))
+        report.module(type_id)
         blackout(layer_id)
         complaint = refused(
             "PUT",
@@ -1423,7 +1422,7 @@ def run_retired(report, show_id, layer_id):
         report.check("still draws", not is_black(drawn.first), repr(drawn.first))
 
     for type_id, version in RETIRED_EFFECTS:
-        report.module("%s v%d" % (type_id, version))
+        report.module(type_id)
         try:
             added = call(
                 "POST",
@@ -1499,7 +1498,7 @@ def run_effects(report, show_id, layer_id, effects, width, height):
     knows = specific(width, height)
     for manifest in effects:
         type_id, version = manifest["type_id"], manifest["version"]
-        report.module("%s v%d  %s" % (type_id, version, manifest["name"]))
+        report.module("%s  %s" % (type_id, manifest["name"]))
 
         try:
             added = call(

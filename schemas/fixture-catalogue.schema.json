@@ -204,7 +204,7 @@
           "type": "string"
         },
         "version": {
-          "description": "Version. A new control is a new version, never a changed one.",
+          "description": "Always one: there is one personality of each type. A patch entry still carries the number, so it is still served.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0.0

@@ -671,13 +671,13 @@ describe('a live effect value', () => {
   it('shows a refused reset against the effect rather than against a parameter', () => {
     const pending = new PendingControls();
     pending.asked(PUT_BACK, true);
-    pending.refused(PUT_BACK, 'this server does not publish ovs.blur version 2');
+    pending.refused(PUT_BACK, 'this server does not publish ovs.blur');
 
     expect(pending.read<boolean>(PUT_BACK, null)).toEqual({
       state: 'refused',
       value: null,
       wanted: true,
-      reason: 'this server does not publish ovs.blur version 2',
+      reason: 'this server does not publish ovs.blur',
     });
     expect(pending.read<ParameterValue>(RADIUS, number(8))).toEqual({
       state: 'live',

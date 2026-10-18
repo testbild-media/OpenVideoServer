@@ -175,12 +175,12 @@ pub fn live_passes_into(
             continue;
         }
 
-        let Some(manifest) = effects::manifest(&instance.type_id, instance.version) else {
+        let Some(manifest) = effects::manifest(&instance.type_id) else {
             // Unreachable on a show that was saved by this build: validation
             // refuses an effect nobody publishes. Reachable on one that arrives
             // from somewhere else, and the answer is the layer without the
             // effect rather than a layer drawn with something else's maths.
-            warn_once(&instance.type_id, instance.version);
+            warn_once(&instance.type_id);
             continue;
         };
 
@@ -219,7 +219,7 @@ pub fn media_wanted(chain: &[EffectInstance], live: &EffectOverrides, into: &mut
         // switching a mask off and on again during a show must not wait for a
         // decode, and the list this feeds is also what keeps it from being
         // evicted. It is the same reason a faded layer keeps its clip.
-        let Some(manifest) = effects::manifest(&instance.type_id, instance.version) else {
+        let Some(manifest) = effects::manifest(&instance.type_id) else {
             continue;
         };
         let values = manifest.live_over(&instance.parameters, live.get(&instance.id));
@@ -241,15 +241,15 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
     let manifest = values.manifest();
     let number = |key: &str| values.number(key) as f32;
 
-    match (manifest.type_id, manifest.version) {
+    match manifest.type_id {
         // **Two passes, because the white point comes after.** A pass carries
-        // four numbers and version two has six, and splitting them is not a
+        // four numbers and this effect has six, and splitting them is not a
         // workaround for that: the owner put temperature and tint after
         // saturation and gamma, so they belong in a pass that runs after the
         // one which does those. Appended even at their defaults, for the same
         // reason every other effect is — the renderer proves an effect neutral
         // by rendering it.
-        ("ovs.colour_correct", 2) => {
+        "ovs.colour_correct" => {
             into.push(EffectPass {
                 kind: PassKind::ColourCorrect,
                 values: [
@@ -270,36 +270,15 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
                 history: None,
             });
         }
-        ("ovs.colour_correct", 1) => into.push(EffectPass {
-            kind: PassKind::ColourCorrect,
-            values: [
-                number("brightness"),
-                number("contrast"),
-                number("saturation"),
-                number("gamma"),
-            ],
-            colour: [0.0; 4],
-            mask: None,
-            history: None,
-        }),
-        // A switch, and the pass runs either way: an effect that appended
-        // nothing when it was off would never be drawn, and the renderer
-        // proves every published effect neutral at its defaults by drawing it.
-        ("ovs.invert", 1) => into.push(EffectPass {
-            kind: PassKind::Invert,
-            // Zero in the rate slot, which the shader reads as "do not flash".
-            // Version one has no rate and must keep behaving as it was saved.
-            values: [f32::from(u8::from(values.flag("on"))), 0.0, 0.0, 0.0],
-            colour: [0.0; 4],
-            mask: None,
-            history: None,
-        }),
-        // The same pass with a rate. The flashing is decided in the shader
+        // A switch and a rate, and the pass runs either way: an effect that
+        // appended nothing when it was off would never be drawn, and the
+        // renderer proves every published effect neutral at its defaults by
+        // drawing it. The flashing is decided in the shader
         // rather than here: the pass is built once per frame and the clock it
         // would be compared against is the one already on the card, so working
         // it out on this side would mean reading a second clock that is a
         // fraction of a frame away from the first.
-        ("ovs.invert", 2) => into.push(EffectPass {
+        "ovs.invert" => into.push(EffectPass {
             kind: PassKind::Invert,
             values: [
                 f32::from(u8::from(values.flag("on"))),
@@ -315,7 +294,7 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
         // place, reading the eight neighbours of each pixel at `width_px`
         // apart. Appended at amount nought as well, for the reason every pass
         // is — the renderer proves an effect neutral by drawing it.
-        ("ovs.edges", 1) => into.push(EffectPass {
+        "ovs.edges" => into.push(EffectPass {
             kind: PassKind::Edges,
             values: [
                 number("amount"),
@@ -332,7 +311,7 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
         // named by the caller, which is the one that knows the instance.
         // Appended at length nought as well, which the shader returns
         // untouched: the renderer proves an effect neutral by drawing it.
-        ("ovs.echo", 1) => into.push(EffectPass {
+        "ovs.echo" => into.push(EffectPass {
             kind: PassKind::Echo,
             values: [
                 number("length_s"),
@@ -346,7 +325,7 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
             mask: None,
             history: None,
         }),
-        ("ovs.tint", 1) => into.push(EffectPass {
+        "ovs.tint" => into.push(EffectPass {
             kind: PassKind::Tint,
             values: [
                 number("amount"),
@@ -358,7 +337,7 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
             mask: None,
             history: None,
         }),
-        ("ovs.pixelate", 1) => {
+        "ovs.pixelate" => {
             let block = number("block_px");
             for kind in [PassKind::PixelateAcross, PassKind::PixelateDown] {
                 into.push(EffectPass {
@@ -370,7 +349,7 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
                 });
             }
         }
-        ("ovs.blur", 1) => {
+        "ovs.blur" => {
             let radius = number("radius_px");
             let amount = number("amount");
             for kind in [PassKind::BlurAcross, PassKind::BlurDown] {
@@ -387,7 +366,7 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
         // kernel, so there is nothing to separate the way the blur and the
         // pixelate are. Appended even when nothing is cut, which is what lets
         // the renderer prove it neutral at its defaults by rendering it.
-        ("ovs.crop", 1) => into.push(EffectPass {
+        "ovs.crop" => into.push(EffectPass {
             kind: PassKind::Crop,
             values: [
                 number("left_px"),
@@ -405,7 +384,7 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
         // white is a mask that does nothing — which is also what a mask that is
         // still decoding and a mask whose picture was deleted from the library
         // get, so all three leave the layer exactly as it was.
-        ("ovs.mask", 1) => into.push(EffectPass {
+        "ovs.mask" => into.push(EffectPass {
             kind: PassKind::Mask,
             values: [
                 number("amount"),
@@ -421,7 +400,7 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
             mask: values.media("image"),
             history: None,
         }),
-        ("ovs.mirror", 1) => into.push(EffectPass {
+        "ovs.mirror" => into.push(EffectPass {
             kind: PassKind::Mirror,
             // Which half each axis keeps, as a number the shader branches on:
             // nothing, the low side, or the high side. A choice crosses as a
@@ -437,7 +416,7 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
             mask: None,
             history: None,
         }),
-        ("ovs.colorize", 1) => into.push(EffectPass {
+        "ovs.colorize" => into.push(EffectPass {
             kind: PassKind::Colorize,
             values: [number("hue"), number("saturation"), number("amount"), 0.0],
             colour: [0.0; 4],
@@ -449,14 +428,14 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
         // channel is an RGB triple in every sense that matters. The
         // alternative is a second full-screen read and write for arithmetic
         // that fits in one.
-        ("ovs.rgb_correct", 1) => into.push(EffectPass {
+        "ovs.rgb_correct" => into.push(EffectPass {
             kind: PassKind::RgbCorrect,
             values: [number("gain_r"), number("gain_g"), number("gain_b"), 0.0],
             colour: [number("lift_r"), number("lift_g"), number("lift_b"), 0.0],
             mask: None,
             history: None,
         }),
-        ("ovs.rgb_split", 1) => into.push(EffectPass {
+        "ovs.rgb_split" => into.push(EffectPass {
             kind: PassKind::RgbSplit,
             values: [number("offset_px"), number("angle_deg"), 0.0, 0.0],
             colour: [0.0; 4],
@@ -465,10 +444,8 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
         }),
         // **The fifth number travels in the colour slot, because a pass has four
         // and this effect has five.** The same thing RGB Correct does with its
-        // lift, and the reason version one is untouched by this: a version one
-        // pass leaves the slot at nought, and at nought the shader does what it
-        // always did.
-        ("ovs.tv_glitch", 2) => into.push(EffectPass {
+        // lift.
+        "ovs.tv_glitch" => into.push(EffectPass {
             kind: PassKind::TvGlitch,
             values: [
                 number("amount"),
@@ -488,23 +465,11 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
             mask: None,
             history: None,
         }),
-        ("ovs.tv_glitch", 1) => into.push(EffectPass {
-            kind: PassKind::TvGlitch,
-            values: [
-                number("amount"),
-                number("tear"),
-                number("noise"),
-                number("roll"),
-            ],
-            colour: [0.0; 4],
-            mask: None,
-            history: None,
-        }),
         // A manifest this build publishes but the renderer cannot draw. Nothing
         // is in this state today — the four published effects are the four
         // above — and the day one is, it is a layer drawn without it and a line
         // in the log rather than a guess.
-        _ => warn_once(manifest.type_id, manifest.version),
+        _ => warn_once(manifest.type_id),
     }
 }
 
@@ -528,12 +493,11 @@ fn fold(choice: &str) -> f32 {
 /// Once per process rather than once per frame: an effect the renderer cannot
 /// draw would be sixty lines a second for as long as the show runs, which is a
 /// log nobody can read for a fault that does not change.
-fn warn_once(type_id: &str, version: u32) {
+fn warn_once(type_id: &str) {
     static WARNED: AtomicBool = AtomicBool::new(false);
     if !WARNED.swap(true, Ordering::Relaxed) {
         tracing::warn!(
             type_id,
-            version,
             "this build cannot draw this effect; the layer is drawn without it"
         );
     }
@@ -788,7 +752,18 @@ mod tests {
         // Rather than something else's maths. A show cannot be saved in this
         // state; one that arrives from elsewhere draws the layer without it.
         assert!(passes(&[EffectInstance::new("ovs.kaleidoscope", 1)]).is_empty());
-        assert!(passes(&[EffectInstance::new("ovs.blur", 99)]).is_empty());
+    }
+
+    #[test]
+    fn the_number_an_instance_carries_is_not_read() {
+        // There is one blur (owner, 2026-10-18: "Es gibt kein Invert V2..
+        // nirgendwo"), so a blur saved as ninety-nine is that blur.
+        let radius = [("radius_px", ParameterValue::Float(6.0))];
+        let mut ninety_nine = instance("ovs.blur", &radius);
+        ninety_nine.version = 99;
+        let as_saved = passes(&[ninety_nine]);
+        assert!(!as_saved.is_empty());
+        assert_eq!(as_saved, passes(&[instance("ovs.blur", &radius)]));
     }
 
     #[test]
@@ -818,9 +793,7 @@ mod tests {
         // The owner's order, 2026-10-12: "beides passiert erst nach Saturation
         // und Gamma". The compositor runs a flat list and does not know which
         // pass belongs to which effect, so the order has to be right here.
-        let mut version_two = instance("ovs.colour_correct", &[]);
-        version_two.version = 2;
-        let passes = passes(&[version_two]);
+        let passes = passes(&[instance("ovs.colour_correct", &[])]);
         assert_eq!(
             passes.iter().map(|pass| pass.kind).collect::<Vec<_>>(),
             vec![PassKind::ColourCorrect, PassKind::WhiteBalance]
@@ -863,14 +836,14 @@ mod tests {
         }
     }
 
-    /// The rate reaches the pass, and version one keeps a rate of nothing.
+    /// The rate reaches the pass, whatever number the instance carries.
     ///
-    /// The owner asked for an Invert that flashes on its own
-    /// ("der selber in einer HZ Zahl wechselt"), which is version two. Version
-    /// one has no such parameter and must go on meaning exactly what it meant
-    /// when somebody saved a show with it.
+    /// The owner asked for an Invert that flashes on its own ("der selber in
+    /// einer HZ Zahl wechselt"), and there is one Invert: an instance saved
+    /// while it was numbered two, and one saved before the rate existed, are
+    /// that one, and the second simply has the published rate of nothing.
     #[test]
-    fn an_inverts_rate_reaches_the_pass_and_version_one_has_none() {
+    fn an_inverts_rate_reaches_the_pass_whatever_its_number() {
         let mut two = EffectInstance::new("ovs.invert", 2);
         two.parameters
             .insert("on".to_owned(), ParameterValue::Bool(true));
@@ -884,15 +857,16 @@ mod tests {
         assert_eq!(passes[0].values[0], 1.0, "switched on");
         assert_eq!(passes[0].values[1], 8.0, "eight hertz");
 
-        let mut one = EffectInstance::new("ovs.invert", 1);
-        one.parameters
+        let mut older = EffectInstance::new("ovs.invert", 1);
+        older
+            .parameters
             .insert("on".to_owned(), ParameterValue::Bool(true));
-        let mut older = Vec::new();
-        passes_into(std::slice::from_ref(&one), &mut older);
-        assert_eq!(older[0].values[0], 1.0);
+        let mut before_the_rate = Vec::new();
+        passes_into(std::slice::from_ref(&older), &mut before_the_rate);
+        assert_eq!(before_the_rate[0].values[0], 1.0);
         assert_eq!(
-            older[0].values[1], 0.0,
-            "version one must carry no rate at all, which the shader reads as steady"
+            before_the_rate[0].values[1], 0.0,
+            "no rate set is the published nought, which the shader reads as steady"
         );
     }
 
@@ -942,7 +916,7 @@ mod tests {
     /// carry on flashing, and it is what keeps the published defaults neutral.
     #[test]
     fn an_invert_switched_off_does_not_flash() {
-        let mut off = EffectInstance::new("ovs.invert", 2);
+        let mut off = EffectInstance::new("ovs.invert", 1);
         off.parameters
             .insert("hz".to_owned(), ParameterValue::Float(12.0));
 

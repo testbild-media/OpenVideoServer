@@ -6,7 +6,7 @@
 //! stops the two catalogues drifting apart as modules are added.
 //!
 //! This is a rendering of the manifests in `ovs-types`, not a second source of
-//! truth: manifests are immutable once published.
+//! truth.
 
 use ovs_types::config::manifest::ParameterKind;
 use serde::{Deserialize, Serialize};

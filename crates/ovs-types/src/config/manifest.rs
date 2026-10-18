@@ -10,12 +10,14 @@
 //!
 //! Not serialisable, deliberately, exactly like a fixture personality. A
 //! manifest describes what this build can actually do; a show stores a type
-//! and a version and expects the same thing back. What a client reads is the
-//! catalogue `ovs-proto` renders from these, which owns its strings.
+//! and expects the same thing back. What a client reads is the catalogue
+//! `ovs-proto` renders from these, which owns its strings.
 //!
-//! # Published once, never edited
+//! # One of each
 //!
-//! Adding a parameter is a new version, not a change to an old one. A show saved
+//! There is one manifest of each type and no versions of it (owner,
+//! 2026-10-18: "Es gibt kein Invert V2.. nirgendwo"). A parameter added later
+//! goes on the end with a default that changes nothing, because a show saved
 //! last year must open looking the way it was left.
 
 use crate::config::slot::{ParameterMap, ParameterValue};

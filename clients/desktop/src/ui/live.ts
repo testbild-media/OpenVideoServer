@@ -3206,7 +3206,7 @@ export class LivePanel {
         make(
           'p',
           'work-row-note',
-          `This server does not publish ${line.typeId} version ${line.version}, so what its ` +
+          `This server does not publish ${line.typeId}, so what its ` +
             'parameters mean cannot be read here — and a control drawn without the manifest ' +
             'that declared them would be one this client invented.',
         ),
@@ -4014,7 +4014,7 @@ export class LivePanel {
         make(
           'p',
           'work-row-note',
-          `This server does not publish ${effect.typeId} version ${effect.version}, so what its ` +
+          `This server does not publish ${effect.typeId}, so what its ` +
             'parameters mean cannot be read here — and a control drawn without the manifest that ' +
             'declared them would be one this client invented.',
         ),
@@ -4844,7 +4844,6 @@ function generatorsShape(lines: readonly GeneratorLine[], loaded: boolean): stri
       generatorKey(line),
       line.instanceId ?? 'no-instance',
       line.typeId,
-      line.version,
       line.published ? 'published' : 'unpublished',
       line.parameters.map((parameter) => parameter.key).join('+'),
     ].join(':'),
@@ -4860,7 +4859,6 @@ function effectsShape(layerId: string, chains: readonly ChainLine[], loaded: boo
         [
           effect.id,
           effect.typeId,
-          effect.version,
           effect.published ? 'published' : 'unpublished',
           effect.enabled ? 'on' : 'off',
           effect.parameters.map((parameter) => parameter.key).join('+'),
@@ -5077,7 +5075,7 @@ function paintNdiMark(target: HTMLElement): void {
  * with this client.
  *
  * **A committed picture rather than a request or a drawing.** What a gradient
- * looks like is the renderer's business, so a version drawn here in TypeScript
+ * looks like is the renderer's business, so a copy drawn here in TypeScript
  * would eventually be a picture of something the wall does not show; and
  * asking the server for one would have a show machine drawing ten
  * compositions because somebody opened a list of names. So the renderer draws
@@ -5085,23 +5083,25 @@ function paintNdiMark(target: HTMLElement): void {
  * travel with the client. A Rust test fails if one stops matching what its
  * module draws.
  *
- * By type *and version*, because a version is a different picture on purpose.
- * A server offering a module this client has no file for falls back to the
- * name on a plain field, which is the tile these had before the pictures
+ * By type alone, because there is one module per type and so one picture of
+ * it: "TV Glitch V2 ist TV Glitch" (owner, 2026-10-18). A pad saved with
+ * `version: 2` shows the same picture as that generator's tile in the browser.
+ * A server offering a module this client has no file for falls back to
+ * the name on a plain field, which is the tile these had before the pictures
  * existed; the box remembers which module that was, so a repaint does not
  * fetch the missing file again.
  */
 function paintModulePicture(
   target: HTMLElement,
   kind: 'generators' | 'effects',
-  source: { typeId: string; version: number },
+  source: { typeId: string },
   name: string,
   markClass: string,
 ): void {
   // `encodeURIComponent` because a type id is whatever the server says it is,
   // and this is about to be part of a path into the client's own bundle. A
   // published id is `ovs.noise`, which it leaves alone.
-  const src = `../assets/${kind}/${encodeURIComponent(source.typeId)}.v${source.version}.png`;
+  const src = `../assets/${kind}/${encodeURIComponent(source.typeId)}.png`;
   if (target.dataset.noPictureFor === src) {
     return;
   }

@@ -566,10 +566,12 @@ function sameSource(one: SlotSource, other: SlotSource): boolean {
     return one.mediaItemId === other.mediaItemId;
   }
   if (one.kind === 'generator' && other.kind === 'generator') {
-    // Type and version, not the instance: two slots playing the same
-    // generator are different instances by definition, and an operator
-    // dropping the same generator on the same pad means the same thing.
-    return one.typeId === other.typeId && one.version === other.version;
+    // The type, not the instance: two slots playing the same generator are
+    // different instances by definition, and an operator dropping the same
+    // generator on the same pad means the same thing. Not the version either:
+    // a module has none (owner, 2026-10-18), so a pad saved as `version: 2`
+    // already plays the generator being dropped on it.
+    return one.typeId === other.typeId;
   }
   return false;
 }
@@ -606,7 +608,6 @@ export function wireSource(source: SlotSource): SourceRef {
  */
 export interface GeneratorTile {
   typeId: string;
-  version: number;
   /** What this server calls it. Never a type id shown to an operator. */
   name: string;
   description: string;
@@ -630,13 +631,14 @@ export function generatorTiles(catalogue: Catalogue): GeneratorTile[] {
   return [...catalogue.generators]
     .map((generator) => ({
       typeId: generator.type_id,
-      version: generator.version,
       name: generator.name,
       description: generator.description,
       source: {
         kind: 'generator' as const,
         instanceId: null,
         typeId: generator.type_id,
+        // The catalogue's own number, because the document has the field. It
+        // is data and nothing more: the generator is found by its type.
         version: generator.version,
         parameters: {},
         live: {},
@@ -740,6 +742,10 @@ export function matchingGenerators(
  */
 export interface EffectTile {
   typeId: string;
+  /**
+   * The catalogue's own number, carried only because the request that adds an
+   * effect has the field. It names nothing: there is one effect per type.
+   */
   version: number;
   name: string;
   description: string;
@@ -819,10 +825,14 @@ export interface GeneratorLine {
    */
   instanceId: string | null;
   typeId: string;
-  version: number;
   /** What the catalogue calls it, or the bare type when this server publishes none. */
   name: string;
-  /** Whether this server publishes that type at that version. */
+  /**
+   * Whether this server publishes that type.
+   *
+   * The type alone, whatever `version` the slot was saved with: there is one
+   * module per type and no versions of it (owner, 2026-10-18).
+   */
   published: boolean;
   /** Whether the layer is playing this slot right now. */
   onAir: boolean;
@@ -853,14 +863,13 @@ export function generatorLines(
       if (slot.source.kind !== 'generator') {
         continue;
       }
-      const module = findGenerator(catalogue, slot.source.typeId, slot.source.version);
+      const module = findGenerator(catalogue, slot.source.typeId);
       lines.push({
         layerId: layer.id,
         layerName: layer.name,
         slotIndex: slot.index,
         instanceId: slot.source.instanceId,
         typeId: slot.source.typeId,
-        version: slot.source.version,
         name: module?.name ?? slot.source.typeId,
         published: module !== null,
         onAir: layer.activeSlot === slot.index,
@@ -916,9 +925,9 @@ export interface EffectParameter {
 export interface EffectLine {
   id: string;
   typeId: string;
-  version: number;
   /** What the catalogue calls it, or the bare type when this server publishes none. */
   name: string;
+  /** Whether this server publishes that type, by the rule [`GeneratorLine.published`] gives. */
   published: boolean;
   /** Whether the chain runs it at all. */
   enabled: boolean;
@@ -995,11 +1004,10 @@ export function effectChains(layers: readonly LayerView[], catalogue: Catalogue)
 }
 
 function effectLine(effect: EffectView, catalogue: Catalogue): EffectLine {
-  const module = findEffect(catalogue, effect.typeId, effect.version);
+  const module = findEffect(catalogue, effect.typeId);
   return {
     id: effect.id,
     typeId: effect.typeId,
-    version: effect.version,
     name: module?.name ?? effect.typeId,
     published: module !== null,
     enabled: effect.enabled,

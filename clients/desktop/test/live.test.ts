@@ -358,7 +358,7 @@ describe.skipIf(address === undefined)('against a real server', () => {
       // is exactly the kind of field that gets quietly dropped.
       for (const [position, effect] of effects.slice(0, 2).entries()) {
         const chain = position === 0 ? { layerId } : { layerId, slotIndex: 1 };
-        show = apply(addEffect(show, catalogue, chain, effect.type_id, effect.version));
+        show = apply(addEffect(show, catalogue, chain, effect.type_id));
 
         const chainNow =
           position === 0
@@ -503,8 +503,9 @@ describe.skipIf(address === undefined)('against a real server', () => {
   // parameter that changed kind or a personality that gained a channel is a
   // control drawn wrong or a fixture patched on top of the next one.
   //
-  // A generator gaining a parameter breaks this, which is the point: it is meant
-  // to be a new version, and the document is meant to say so.
+  // A generator gaining a parameter breaks this, which is the point: the
+  // document is meant to say so. Modules are compared by type alone, because
+  // there is one per type and no versions of it (owner, 2026-10-18).
   it('publishes the generators, effects and personalities the documents list', async () => {
     const live = newSession();
 
@@ -514,12 +515,12 @@ describe.skipIf(address === undefined)('against a real server', () => {
       const modules = readFileSync(repository('reference/MODULES.md'), 'utf8');
 
       // Looked up through the client's own `findGenerator` and `findEffect`,
-      // because how this client finds a published module by type and version is
-      // half of what is being checked: a module it cannot find is a control the
+      // because how this client finds a published module by its type is half
+      // of what is being checked: a module it cannot find is a control the
       // editor will not draw, however correctly the server published it.
-      const sections: [string, Module[], (typeId: string, version: number) => Module | null][] = [
-        ['Generators', catalogue.generators, (id, version) => findGenerator(catalogue, id, version)],
-        ['Effects', catalogue.effects, (id, version) => findEffect(catalogue, id, version)],
+      const sections: [string, Module[], (typeId: string) => Module | null][] = [
+        ['Generators', catalogue.generators, (id) => findGenerator(catalogue, id)],
+        ['Effects', catalogue.effects, (id) => findEffect(catalogue, id)],
       ];
 
       for (const [section, published, find] of sections) {
@@ -531,7 +532,7 @@ describe.skipIf(address === undefined)('against a real server', () => {
         expect(published.map(named).sort()).toEqual(documented.map(named).sort());
 
         for (const module of documented) {
-          const found = find(module.type_id, module.version);
+          const found = find(module.type_id);
           expect(found, `${named(module)} is documented and not published`).not.toBeNull();
           expect(found!.parameters.map((parameter) => parameter.key)).toEqual(
             module.parameters.map((parameter) => parameter.key),
@@ -557,9 +558,7 @@ describe.skipIf(address === undefined)('against a real server', () => {
       expect(personalities.map(named).sort()).toEqual(documented.map(named).sort());
 
       for (const personality of documented) {
-        const found = personalities.find(
-          (each) => each.type_id === personality.type_id && each.version === personality.version,
-        );
+        const found = personalities.find((each) => each.type_id === personality.type_id);
         expect(found, `${named(personality)} is documented and not published`).toBeDefined();
         // The footprint is what a patch entry reserves, so a console programmed
         // from the document and a patch laid out from the catalogue have to
@@ -654,21 +653,19 @@ describe.skipIf(address === undefined)('against a real server', () => {
 /** One module as the document describes it. */
 interface DocumentedModule {
   type_id: string;
-  version: number;
   parameters: ModuleParameter[];
 }
 
 /** One personality as the document describes it. */
 interface DocumentedPersonality {
   type_id: string;
-  version: number;
   footprint: number;
   controls: string[];
 }
 
-/** How a module or a personality is named in a failure. */
-function named(module: { type_id: string; version: number }): string {
-  return `${module.type_id} v${module.version}`;
+/** How a module or a personality is named in a failure: by its type, which is all it has. */
+function named(module: { type_id: string }): string {
+  return module.type_id;
 }
 
 /**
@@ -704,9 +701,12 @@ function documentedModules(markdown: string, section: string): DocumentedModule[
       continue;
     }
 
-    const heading = /^### .* — `([^`]+)` v(\d+)\s*$/.exec(line);
+    // A version after the type, where the heading prints one, is read past
+    // rather than kept: there is one module per type and the number names
+    // nothing a show could be told apart by.
+    const heading = /^### .* — `([^`]+)`(?: v\d+)?\s*$/.exec(line);
     if (heading) {
-      current = { type_id: heading[1]!, version: Number(heading[2]), parameters: [] };
+      current = { type_id: heading[1]!, parameters: [] };
       modules.push(current);
       continue;
     }
@@ -782,14 +782,10 @@ function documentedPersonalities(markdown: string): DocumentedPersonality[] {
   let inChannels = false;
 
   for (const line of markdown.split('\n')) {
-    const heading = /^## .* — `([^`]+)` v(\d+)\s*$/.exec(line);
+    // Read past a version the heading may print, as `documentedModules` does.
+    const heading = /^## .* — `([^`]+)`(?: v\d+)?\s*$/.exec(line);
     if (heading) {
-      current = {
-        type_id: heading[1]!,
-        version: Number(heading[2]),
-        footprint: 0,
-        controls: [],
-      };
+      current = { type_id: heading[1]!, footprint: 0, controls: [] };
       personalities.push(current);
       inChannels = true;
       continue;

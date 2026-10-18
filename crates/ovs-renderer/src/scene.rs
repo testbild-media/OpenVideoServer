@@ -624,8 +624,8 @@ fn asks_for_blend(slot: &ovs_types::config::Slot, state: &ShowState) -> Option<B
     let ovs_types::config::slot::SourceRef::Generator {
         instance_id,
         type_id,
-        version,
         parameters,
+        ..
     } = &slot.source
     else {
         return None;
@@ -634,7 +634,7 @@ fn asks_for_blend(slot: &ovs_types::config::Slot, state: &ShowState) -> Option<B
         return None;
     }
 
-    let manifest = ovs_types::config::generators::manifest(type_id, *version)?;
+    let manifest = ovs_types::config::generators::manifest(type_id)?;
     let live = state
         .generators
         .get(instance_id)
@@ -1018,7 +1018,8 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 crate::effects::PassKind::Tint,
-                crate::effects::PassKind::ColourCorrect
+                crate::effects::PassKind::ColourCorrect,
+                crate::effects::PassKind::WhiteBalance
             ]
         );
     }

@@ -69,17 +69,14 @@ pub struct Update {
 /// would be worse than driving nothing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PatchProblem {
-    /// The patch names a personality this build does not publish.
-    ///
-    /// Usually a version: definitions are immutable, so a console programmed
-    /// against version 2 must not be fed into version 1's channel layout.
+    /// The patch names a personality this build does not publish: a plugin
+    /// this machine does not have. Never a version — there is one of each, and
+    /// a console programmed against an older layout is caught by its footprint.
     UnknownDefinition {
         /// Which patch entry.
         fixture: FixtureInstanceId,
         /// What it asked for.
         type_id: String,
-        /// Which version it asked for.
-        version: u32,
     },
     /// The patch and the personality disagree about how many channels it takes.
     ///
@@ -225,11 +222,10 @@ impl Mapper {
         universes: &Universes,
         updates: &mut Vec<Update>,
     ) -> Result<(), Unreadable> {
-        let Some(published) = definition(&fixture.type_id, fixture.version) else {
+        let Some(published) = definition(&fixture.type_id) else {
             return Err(Unreadable::Problem(PatchProblem::UnknownDefinition {
                 fixture: fixture.id,
                 type_id: fixture.type_id.clone(),
-                version: fixture.version,
             }));
         };
 
@@ -652,11 +648,10 @@ mod tests {
 
     #[test]
     fn a_personality_this_build_does_not_publish_is_reported_once() {
-        // Definitions are immutable, so a console programmed against version 2
-        // must not be poured into version 1's channel layout: it would move the
-        // wrong things, slowly enough that nobody would connect the two.
+        // A plugin this machine does not have: there is nothing to read its
+        // channels against, and guessing would move the wrong things.
         let mut patch = vec![master_fixture(1)];
-        patch[0].version = 2;
+        patch[0].type_id = "third.party.spotlight".to_owned();
         let universes = universes_holding(&master_channels(255, 0, 0));
         let mut mapper = Mapper::new();
 
@@ -664,7 +659,7 @@ mod tests {
         assert!(first.updates.is_empty());
         assert!(matches!(
             first.problems.as_slice(),
-            [PatchProblem::UnknownDefinition { version: 2, .. }]
+            [PatchProblem::UnknownDefinition { type_id, .. }] if type_id == "third.party.spotlight"
         ));
 
         assert!(
@@ -913,17 +908,17 @@ mod tests {
     /// down.
     #[test]
     fn a_patched_generator_turns_its_channels_into_generator_parameters() {
-        use ovs_types::config::generators::STROBE_V2;
+        use ovs_types::config::generators::STROBE_V1;
         use ovs_types::id::GeneratorInstanceId;
 
         let instance = GeneratorInstanceId::new();
-        let published = ovs_types::config::definition(STROBE_V2.type_id, STROBE_V2.version)
+        let published = ovs_types::config::definition(STROBE_V1.type_id)
             .expect("the strobe publishes a personality");
 
         let patch = vec![FixtureInstance {
             id: FixtureInstanceId::new(),
-            type_id: STROBE_V2.type_id.to_owned(),
-            version: STROBE_V2.version,
+            type_id: STROBE_V1.type_id.to_owned(),
+            version: STROBE_V1.version,
             target: FixtureTarget::Generator {
                 generator_instance_id: instance,
             },
@@ -1001,9 +996,11 @@ mod tests {
         use ovs_types::id::EffectInstanceId;
 
         let instance = EffectInstanceId::new();
-        let published = ovs_types::config::definition("ovs.invert", 2)
-            .expect("invert version two publishes a personality");
+        let published =
+            ovs_types::config::definition("ovs.invert").expect("invert publishes a personality");
 
+        // Numbered two, as a patch made while Invert had a second version is:
+        // the number is not read, and the one Invert answers.
         let patch = vec![FixtureInstance {
             id: FixtureInstanceId::new(),
             type_id: "ovs.invert".to_owned(),

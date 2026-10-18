@@ -1,7 +1,7 @@
 // The DMX-over-IP patch: what a console reaches, and where.
 //
-// A fixture *definition* is a published personality — a stable type, a version,
-// a footprint and a channel layout. A fixture *instance* binds one of those to
+// A fixture *definition* is a published personality — a stable type, a
+// footprint and a channel layout. A fixture *instance* binds one of those to
 // something in this show, a universe and a start address. This
 // module is every edit an operator can make to that list of instances, as plain
 // functions with no window and no network.
@@ -94,17 +94,21 @@ export function emptyFixtures(): FixtureCatalogue {
   return { loaded: false, fixtures: [] };
 }
 
-/** Returns a published personality by type and version, or null. */
+/**
+ * Returns the published personality of a type, or null.
+ *
+ * By type alone. A personality belongs to a module, and there is one module per
+ * type with no versions: "Es gibt kein Invert V2.. nirgendwo. Es ist Invert!"
+ * (owner, 2026-10-18). A patch entry saved before that may still say
+ * `version: 2`; it is the same fixture as the one the catalogue publishes, and
+ * the number is data the document keeps rather than a second personality to
+ * look for.
+ */
 export function findPersonality(
   catalogue: FixtureCatalogue,
   typeId: string,
-  version: number,
 ): Personality | null {
-  return (
-    catalogue.fixtures.find(
-      (personality) => personality.type_id === typeId && personality.version === version,
-    ) ?? null
-  );
+  return catalogue.fixtures.find((personality) => personality.type_id === typeId) ?? null;
 }
 
 /** The personalities that can drive the show master. */
@@ -135,23 +139,17 @@ export function modulePersonalities(catalogue: FixtureCatalogue): Personality[] 
 /**
  * The personalities that can drive one effect instance.
  *
- * By type *and* version, because a personality is fixed once published: an
- * instance saved at v1 keeps v1's channels even where a v2 exists, which is the
- * whole point of versioning them.
+ * By type alone, for the reason `findPersonality` gives: an instance whose
+ * document still says `version: 2` is driven by the one personality its type
+ * publishes, because there is no other one for it to mean.
  *
  * Separate from the panel so the matching rule is a test rather than something
  * only a running client can show. It had never been tested, and an effect that
  * matched nothing was dropped from the list without a word — twice, once here
  * and once again when the tiles were drawn.
  */
-export function effectPersonalities(
-  catalogue: FixtureCatalogue,
-  typeId: string,
-  version: number,
-): Personality[] {
-  return modulePersonalities(catalogue).filter(
-    (personality) => personality.type_id === typeId && personality.version === version,
-  );
+export function effectPersonalities(catalogue: FixtureCatalogue, typeId: string): Personality[] {
+  return modulePersonalities(catalogue).filter((personality) => personality.type_id === typeId);
 }
 
 /**
@@ -394,7 +392,6 @@ export function generatorPlaces(show: Show): GeneratorPlace[] {
           // nothing a patch could point at.
           instanceId: slot.source.instance_id ?? '',
           typeId: slot.source.type_id,
-          version: slot.source.version,
         });
       }
     }
@@ -407,15 +404,15 @@ export interface GeneratorPlace {
   layer: Layer;
   slotIndex: number;
   instanceId: string;
-  typeId: string;
   /**
-   * The manifest version the slot names.
+   * The generator's type, which is all a personality is matched by.
    *
-   * Carried because a personality is matched by type *and* version, exactly as
-   * an effect's is — a strobe saved at v1 keeps v1's five channels even now
-   * that v2 publishes six.
+   * The slot's `version` is left behind on purpose. There is one module per
+   * type and it has no versions (owner, 2026-10-18), so a show that saved its
+   * strobe as `version: 2` is patched with the channels of the one Strobe the
+   * catalogue publishes.
    */
-  version: number;
+  typeId: string;
 }
 
 /**
@@ -428,18 +425,13 @@ export interface GeneratorPlace {
 export function generatorPersonalities(
   catalogue: FixtureCatalogue,
   typeId: string,
-  version: number,
 ): Personality[] {
-  return modulePersonalities(catalogue).filter(
-    (personality) => personality.type_id === typeId && personality.version === version,
-  );
+  return modulePersonalities(catalogue).filter((personality) => personality.type_id === typeId);
 }
 
 /** What a patch row calls a fixture: the personality's name, or its type. */
 export function fixtureName(fixture: FixtureInstance, catalogue: FixtureCatalogue): string {
-  return (
-    findPersonality(catalogue, fixture.type_id, fixture.version)?.name ?? fixture.type_id
-  );
+  return findPersonality(catalogue, fixture.type_id)?.name ?? fixture.type_id;
 }
 
 /**
@@ -465,9 +457,10 @@ export interface PatchAt {
  * Patches a personality to something in this show.
  *
  * Everything about the fixture comes from the personality the server published:
- * the type, the version and the footprint. Nothing about it is a number chosen
- * here, which is what lets a personality this build has never heard of be
- * patched correctly.
+ * the type, the footprint, and the `version` field the document stores, which
+ * is the catalogue's own number written down as data. Nothing about it is a
+ * number chosen here, which is what lets a personality this build has never
+ * heard of be patched correctly.
  */
 export function patchFixture(
   show: Show,
@@ -476,10 +469,8 @@ export function patchFixture(
   target: FixtureTarget,
   at: PatchAt,
 ): Edit {
-  if (!findPersonality(catalogue, personality.type_id, personality.version)) {
-    return refused(
-      `this server does not publish ${personality.type_id} version ${personality.version}`,
-    );
+  if (!findPersonality(catalogue, personality.type_id)) {
+    return refused(`this server does not publish ${personality.type_id}`);
   }
   if (!drives(personality, target)) {
     return refused(`${personality.type_id} cannot drive what this patch entry points at`);
@@ -788,22 +779,21 @@ function checkPersonality(
   if (!catalogue.loaded) {
     return;
   }
-  const published = findPersonality(catalogue, fixture.type_id, fixture.version);
+  // By type alone, so an entry saved as `version: 2` is checked against the one
+  // personality its type publishes rather than reported as unpublished.
+  const published = findPersonality(catalogue, fixture.type_id);
   if (published === null) {
     // An effect's personality comes from that effect's own manifest, so nothing
     // here can check it, and the server does not either.
     if (fixture.target.kind !== 'effect' && fixture.type_id.trim() !== '') {
-      fault(
-        `${path}.type_id`,
-        `this build does not publish ${fixture.type_id} version ${fixture.version}`,
-      );
+      fault(`${path}.type_id`, `this build does not publish ${fixture.type_id}`);
     }
     return;
   }
   if (published.footprint !== fixture.footprint) {
     fault(
       `${path}.footprint`,
-      `${fixture.type_id} version ${fixture.version} occupies ${published.footprint} channels, not ${fixture.footprint}`,
+      `${fixture.type_id} occupies ${published.footprint} channels, not ${fixture.footprint}`,
     );
   }
   if (!drives(published, fixture.target)) {

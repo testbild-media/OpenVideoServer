@@ -404,6 +404,94 @@ impl Show {
         changed
     }
 
+    /// Brings a show saved while some modules had a second version into line
+    /// with there being one of each, and says whether it changed anything.
+    ///
+    /// The owner, 2026-10-18: "Es gibt kein Invert V2.. nirgendwo. Es ist
+    /// Invert!" Every effect, generator and patch entry of a type this build
+    /// publishes is given that type's version — one — so nothing a client
+    /// shows or a document holds says otherwise. Lookups never read the number
+    /// any more; this is so the documents stop carrying it.
+    ///
+    /// **And a patch entry is given its personality's footprint**, where the
+    /// one it recorded is another — an older master's six channels, a strobe
+    /// patched before its mode existed — and the new one overlaps no other
+    /// entry. Without this, validation would refuse every later edit of the
+    /// show until somebody re-patched, with a message about channels that has
+    /// nothing to do with the edit. The desk is programmed again for the new
+    /// fixture types anyway (owner, 2026-10-18: "das Pult muss eh neu gemacht
+    /// werden"). An entry whose new footprint would overlap another is left as
+    /// it was, so validation names it rather than this moving a fixture onto
+    /// another's channels.
+    pub fn adopt_one_of_each(&mut self) -> bool {
+        let mut changed = false;
+        let mut adopt = |version: &mut u32, current: Option<u32>| {
+            if let Some(current) = current {
+                if *version != current {
+                    *version = current;
+                    changed = true;
+                }
+            }
+        };
+
+        for layer in &mut self.layers {
+            for effect in &mut layer.effects {
+                adopt(
+                    &mut effect.version,
+                    crate::config::effects::manifest(&effect.type_id).map(|found| found.version),
+                );
+            }
+            for slot in &mut layer.slots {
+                for effect in &mut slot.effects {
+                    adopt(
+                        &mut effect.version,
+                        crate::config::effects::manifest(&effect.type_id)
+                            .map(|found| found.version),
+                    );
+                }
+                if let crate::config::slot::SourceRef::Generator {
+                    type_id, version, ..
+                } = &mut slot.source
+                {
+                    adopt(
+                        version,
+                        crate::config::generators::manifest(type_id).map(|found| found.version),
+                    );
+                }
+            }
+        }
+
+        for index in 0..self.fixture_patch.len() {
+            let Some(published) =
+                crate::config::fixtures::definition(&self.fixture_patch[index].type_id)
+            else {
+                continue;
+            };
+            let fixture = &mut self.fixture_patch[index];
+            if fixture.version != published.version {
+                fixture.version = published.version;
+                changed = true;
+            }
+            if fixture.footprint == published.footprint {
+                continue;
+            }
+            let mut resized = self.fixture_patch[index].clone();
+            resized.footprint = published.footprint;
+            let fits = resized.channel_range().is_some()
+                && !self
+                    .fixture_patch
+                    .iter()
+                    .enumerate()
+                    .any(|(other, entry)| other != index && resized.collides_with(entry));
+            if fits {
+                self.fixture_patch[index] = resized;
+                changed = true;
+            }
+        }
+
+        changed
+    }
+
     /// Returns every media item this show references, deduplicated and sorted.
     ///
     /// This is what export packaging and reference-counted media deletion are
@@ -438,9 +526,7 @@ impl Show {
     /// effect added later needs nothing here.
     fn pictures_of(chain: &[crate::config::EffectInstance], into: &mut BTreeSet<MediaItemId>) {
         for instance in chain {
-            let Some(manifest) =
-                crate::config::effects::manifest(&instance.type_id, instance.version)
-            else {
+            let Some(manifest) = crate::config::effects::manifest(&instance.type_id) else {
                 // An effect this build does not publish. Its parameters are not
                 // ours to read, so nothing is claimed about what it names.
                 continue;
@@ -557,17 +643,14 @@ impl Show {
         /// after it is offset — and the first anyone would know of it is a
         /// fader doing the wrong thing during a show.
         fn check_personality(fixture: &FixtureInstance, path: &str, out: &mut ValidationErrors) {
-            match crate::config::fixtures::definition(&fixture.type_id, fixture.version) {
+            match crate::config::fixtures::definition(&fixture.type_id) {
                 Some(published) => {
                     if published.footprint != fixture.footprint {
                         out.push(ValidationError::new(
                             format!("{path}.footprint"),
                             format!(
-                                "{} version {} occupies {} channels, not {}",
-                                fixture.type_id,
-                                fixture.version,
-                                published.footprint,
-                                fixture.footprint
+                                "{} occupies {} channels, not {}",
+                                fixture.type_id, published.footprint, fixture.footprint
                             ),
                         ));
                     }
@@ -591,10 +674,7 @@ impl Show {
                 ) => {}
                 None => out.push(ValidationError::new(
                     format!("{path}.type_id"),
-                    format!(
-                        "this build does not publish {} version {}",
-                        fixture.type_id, fixture.version
-                    ),
+                    format!("this build does not publish {}", fixture.type_id),
                 )),
             }
         }
@@ -992,19 +1072,107 @@ mod tests {
 
     #[test]
     fn a_personality_this_build_does_not_publish_is_refused_at_save() {
-        // Definitions are immutable, so this is a show built
-        // against a build that is not this one. Refusing it when it is saved is
-        // the last moment where it is still somebody's editing mistake rather
-        // than a fader doing the wrong thing during a show.
+        // A show built against a build that is not this one. Refusing it when
+        // it is saved is the last moment where it is still somebody's editing
+        // mistake rather than a fader doing the wrong thing during a show.
         let mut show = show_with_two_layers();
         show.fixture_patch.push(FixtureInstance {
-            version: 99,
+            type_id: "ovs.spotlight".to_owned(),
             ..master_fixture()
         });
         let errors = show.validate().expect_err("no such personality");
         assert!(errors
             .to_string()
-            .contains("does not publish ovs.master version 99"));
+            .contains("does not publish ovs.spotlight"));
+    }
+
+    #[test]
+    fn a_version_number_is_not_read() {
+        // "Es gibt kein Invert V2.. nirgendwo" (owner, 2026-10-18): a patch
+        // entry numbered otherwise is the one master all the same.
+        let mut show = show_with_two_layers();
+        show.fixture_patch.push(FixtureInstance {
+            version: 2,
+            ..master_fixture()
+        });
+        assert_eq!(show.validate(), Ok(()));
+    }
+
+    /// A show as it was saved while modules still had second versions, and
+    /// the master six channels.
+    fn show_from_before() -> Show {
+        let mut show = show_with_two_layers();
+        show.layers[0]
+            .effects
+            .push(crate::config::EffectInstance::new("ovs.invert", 2));
+        show.layers[0].slots.push(crate::config::Slot::with_source(
+            1,
+            crate::config::slot::SourceRef::Generator {
+                instance_id: crate::id::GeneratorInstanceId::new(),
+                type_id: "ovs.strobe".to_owned(),
+                version: 2,
+                parameters: crate::config::slot::ParameterMap::new(),
+            },
+        ));
+        show.fixture_patch.push(FixtureInstance {
+            version: 2,
+            footprint: 6,
+            ..master_fixture()
+        });
+        show
+    }
+
+    #[test]
+    fn a_show_from_before_is_numbered_as_the_modules_now_are() {
+        let mut show = show_from_before();
+        assert!(show.adopt_one_of_each(), "it had something to change");
+
+        assert_eq!(show.layers[0].effects[0].version, 1);
+        let crate::config::slot::SourceRef::Generator { version, .. } =
+            &show.layers[0].slots[0].source
+        else {
+            panic!("the slot holds the strobe");
+        };
+        assert_eq!(*version, 1);
+        assert_eq!(show.fixture_patch[0].version, 1);
+
+        // And the master's six channels become its five, so the show can be
+        // saved again without anybody having to re-patch it first.
+        assert_eq!(
+            show.fixture_patch[0].footprint,
+            crate::config::MASTER_V1.footprint
+        );
+        assert_eq!(show.validate(), Ok(()));
+
+        // Done once.
+        assert!(!show.adopt_one_of_each());
+    }
+
+    #[test]
+    fn a_footprint_that_would_land_on_another_fixture_is_left_for_validation() {
+        // A layer patched straight after a master that took seven channels:
+        // shrinking the master overlaps nothing, but a footprint that grew would
+        // have, and it is left as it was so validation names it rather than
+        // this moving one fixture onto another's channels.
+        let mut show = show_with_two_layers();
+        let layer_id = show.layers[0].id;
+        let published = crate::config::LAYER_V1.footprint;
+        show.fixture_patch.push(FixtureInstance {
+            footprint: published - 2,
+            ..layer_fixture(layer_id)
+        });
+        show.fixture_patch.push(FixtureInstance {
+            start_address: 1 + published - 2,
+            ..master_fixture()
+        });
+
+        assert!(!show.adopt_one_of_each());
+        assert_eq!(show.fixture_patch[0].footprint, published - 2);
+        assert!(show
+            .validate()
+            .expect_err("still the wrong footprint")
+            .to_string()
+            .contains("occupies"));
     }
 
     #[test]

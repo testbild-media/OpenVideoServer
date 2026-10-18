@@ -560,6 +560,20 @@ describe('the effect chains', () => {
     const chains = effectChains(loaded().layers, catalogue());
     expect(chains.find((chain) => chain.where === 'slot')?.effects[0]?.enabled).toBe(false);
   });
+
+  it('finds the effect of an instance whose document carries another version number', () => {
+    // One module per type, and no versions of it: "Invert V2 ist Invert"
+    // (owner, 2026-10-18). The show says 1 and this catalogue says 4, and it
+    // is still the one Blur, with its own controls.
+    const blur = effectChains(loaded().layers, {
+      loaded: true,
+      effects: [{ ...BLUR, version: 4 }],
+      generators: [SOLID],
+    })[0]?.effects[0];
+    expect(blur?.published).toBe(true);
+    expect(blur?.name).toBe('Blur');
+    expect(blur?.parameters.map((parameter) => parameter.key)).toEqual(['radius', 'amount']);
+  });
 });
 
 // --- GENERATOR ----------------------------------------------------------------
@@ -574,6 +588,20 @@ describe('the generator slots', () => {
     const line = generatorLines(loaded().layers, { loaded: true, effects: [], generators: [] })[0];
     expect(line?.published).toBe(false);
     expect(line?.name).toBe('ovs.solid_colour');
+  });
+
+  it('finds the generator of a slot whose document carries another version number', () => {
+    // The show says 1 and this catalogue says 3. There is one generator per
+    // type (owner, 2026-10-18), so the slot plays that one and its controls
+    // are drawn from it rather than reported as unpublished.
+    const line = generatorLines(loaded().layers, {
+      loaded: true,
+      effects: [BLUR],
+      generators: [{ ...SOLID, version: 3 }],
+    })[0];
+    expect(line?.published).toBe(true);
+    expect(line?.name).toBe('Solid colour');
+    expect(line?.parameters.map((parameter) => parameter.key)).toEqual(['colour']);
   });
 });
 
@@ -650,6 +678,36 @@ describe('dragging a clip onto a pad', () => {
     expect(
       dropOnPad({ slotIndex: 5, holding: clip, dropping: clip, holdingName: 'Kaleidoskop' }),
     ).toEqual({ do: 'nothing' });
+  });
+
+  it('does nothing when the pad already plays that generator, whatever number it was saved with', () => {
+    // A pad saved as `version: 2` plays the one generator of its type, which
+    // is the one being dropped (owner, 2026-10-18), so there is nothing to ask.
+    const generator = (typeId: string, version: number): SlotSource => ({
+      kind: 'generator',
+      instanceId: null,
+      typeId,
+      version,
+      parameters: {},
+      live: {},
+    });
+    expect(
+      dropOnPad({
+        slotIndex: 5,
+        holding: generator('ovs.solid_colour', 2),
+        dropping: generator('ovs.solid_colour', 1),
+        holdingName: 'Solid colour',
+      }),
+    ).toEqual({ do: 'nothing' });
+    // And by type: another generator is still a question.
+    expect(
+      dropOnPad({
+        slotIndex: 5,
+        holding: generator('ovs.noise', 1),
+        dropping: generator('ovs.solid_colour', 1),
+        holdingName: 'Noise',
+      }),
+    ).toEqual({ do: 'ask', replacing: 'Noise' });
   });
 
   it('refuses slot 0, which is not storage', () => {

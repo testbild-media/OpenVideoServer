@@ -469,11 +469,9 @@ pub struct SaveShowResponse {
 pub struct AddEffectRequest {
     /// Stable effect type identifier, for example `ovs.blur`.
     pub type_id: String,
-    /// The manifest version to configure it against.
-    ///
-    /// Sent rather than assumed to be the newest. Published manifests are
-    /// immutable, and an effect whose version was chosen by the server would
-    /// change behaviour under a show that never asked it to.
+    /// Not read: there is one effect of each type (owner, 2026-10-18: "Es gibt
+    /// kein Invert V2.. nirgendwo"), and the instance is stored numbered as
+    /// that one. Kept because every client already in use sends it.
     pub version: u32,
 }
 

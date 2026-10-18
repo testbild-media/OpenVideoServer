@@ -830,13 +830,11 @@ impl FixtureDefinition {
 ///   by hand, and on reflection that is the layer's transform rather than
 ///   anything here.
 ///
-/// Nothing has been released, so this replaces version 1 rather than becoming
-/// version 2 — the same reasoning the owner gave for the slot transform
-/// (owner decision Q14). After the first release a channel layout is physically
-/// programmed into a desk's show file and a new control is a new version.
+/// There is one master and no versions of it. A channel layout is physically
+/// programmed into a desk's show file, so a change to it is the owner's call.
 ///
-/// Taking sync out moved the scale and the crossfader down one channel in
-/// version 1 itself, after release, on the owner's word that every desk is
+/// Taking sync out moved the scale and the crossfader down one channel, after
+/// release, on the owner's word that every desk is
 /// being programmed again for the new fixture types (2026-10-18: "Wir
 /// definieren gerade neu, was alles umschmeißt und das Pult muss eh neu
 /// gemacht werden").
@@ -1013,24 +1011,26 @@ pub const MAX_FIXTURE_SCALE: f64 = 10.0;
 /// Every definition this build publishes.
 pub const PUBLISHED: [FixtureDefinition; 2] = [MASTER_V1, LAYER_V1];
 
-/// Returns a published definition by type and version.
+/// Returns a published definition by its type.
 ///
-/// A patch naming a version this build does not have is refused rather than
-/// served the nearest one: a console sending version 1 channels into a version 2
-/// layout would move the wrong things, and slowly enough that nobody would
-/// connect the two.
+/// **By type alone**: there is one of each, personalities as much as modules
+/// (owner, 2026-10-18: "Es gibt kein Invert V2.. nirgendwo"). A patch entry
+/// carries a version number and it is not read. What still protects a desk
+/// programmed against an older layout is the footprint a patch entry records:
+/// one that disagrees with the personality is refused, so the channels after it
+/// are never read shifted.
 ///
 /// Answers for the two personalities this crate publishes and for the ones a
 /// module generates from its own parameters — one lookup, because a patch
 /// entry naming `ovs.blur` and one naming `ovs.layer` are the same kind of
 /// thing to everything that reads a patch.
 #[must_use]
-pub fn definition(type_id: &str, version: u32) -> Option<&'static FixtureDefinition> {
+pub fn definition(type_id: &str) -> Option<&'static FixtureDefinition> {
     PUBLISHED
         .iter()
-        .find(|definition| definition.type_id == type_id && definition.version == version)
-        .or_else(|| crate::config::effects::personality(type_id, version))
-        .or_else(|| crate::config::generators::personality(type_id, version))
+        .find(|definition| definition.type_id == type_id)
+        .or_else(|| crate::config::effects::personality(type_id))
+        .or_else(|| crate::config::generators::personality(type_id))
 }
 
 #[cfg(test)]
@@ -1108,13 +1108,13 @@ mod tests {
         // Written here so that changing a manifest's `dmx` shows up as a
         // changed number rather than as a quietly different patch.
         for (type_id, footprint) in [
-            ("ovs.colour_correct", 8),
+            ("ovs.colour_correct", 12),
             ("ovs.tint", 7),
             ("ovs.pixelate", 2),
             ("ovs.blur", 4),
         ] {
-            let personality = definition(type_id, 1)
-                .unwrap_or_else(|| panic!("{type_id} generates no personality"));
+            let personality =
+                definition(type_id).unwrap_or_else(|| panic!("{type_id} generates no personality"));
             assert_eq!(personality.footprint, footprint, "{type_id}");
             assert_eq!(
                 personality
@@ -1132,7 +1132,7 @@ mod tests {
     fn a_generated_personality_drives_an_effect_and_nothing_else() {
         // The same rule the published ones live under: a personality aimed at
         // the wrong kind of thing would move something nobody asked for.
-        let personality = definition("ovs.blur", 1).expect("a personality");
+        let personality = definition("ovs.blur").expect("a personality");
         let effect_instance_id = crate::id::EffectInstanceId::new();
 
         assert!(personality.drives(FixtureTarget::Effect { effect_instance_id }));
@@ -1146,7 +1146,7 @@ mod tests {
     fn a_colour_becomes_four_channels_that_say_which_part_they_are() {
         // Four faders on a desk, and each one has to carry enough to be put
         // back into the right place in the colour.
-        let personality = definition("ovs.tint", 1).expect("a personality");
+        let personality = definition("ovs.tint").expect("a personality");
         let colour: Vec<&ChannelDefinition> = personality
             .channels
             .iter()
@@ -1490,13 +1490,15 @@ mod tests {
     }
 
     #[test]
-    fn a_definition_is_found_by_type_and_version_together() {
-        assert!(definition("ovs.master", 1).is_some());
-        assert!(definition("ovs.layer", 1).is_some());
-        // A version this build does not have is refused rather than served the
-        // nearest one, which would move the wrong things.
-        assert!(definition("ovs.layer", 2).is_none());
-        assert!(definition("ovs.spotlight", 1).is_none());
+    fn a_definition_is_found_by_its_type_alone() {
+        assert!(definition("ovs.master").is_some());
+        assert!(definition("ovs.layer").is_some());
+        // The one Invert's personality is the one with the rate.
+        assert_eq!(
+            definition("ovs.invert").map(|found| found.footprint),
+            Some(2)
+        );
+        assert!(definition("ovs.spotlight").is_none());
     }
 
     #[test]

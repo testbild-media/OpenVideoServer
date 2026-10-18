@@ -34,9 +34,12 @@ the desk lists them under `testbild.media`.
 | `OVS FX …` | one effect | one effect instance in a chain |
 | `OVS Gen …` | one generator | one generator instance in a slot |
 
-**One of each, and no version in any name.** The owner, 2026-10-18: "Ich habe
+**One of each, and no version anywhere.** The owner, 2026-10-18: "Ich habe
 aber in der Software keine Versionsvergabe und ist auch nicht gewünscht. TV
-Glitch V2 ist TV Glitch." Each file is the module as a client adds it today.
+Glitch V2 ist TV Glitch", and later "Es gibt kein Invert V2.. nirgendwo". The
+server publishes one module of each type, so each file is simply that module.
+(`_VERSION ORIGINAL` in the header is the desk's own field for the file, not
+ours.)
 Retired modules (Tint, Clock, Countdown, Grid) have no file, and neither has
 Noise, which has no DMX: it is set up in the client and faded with its layer.
 

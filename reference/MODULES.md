@@ -4,12 +4,8 @@ Generated from the published manifests by `cargo run -p ovs-proto --bin ovs-modu
 Do not edit by hand: a printed list that disagrees with the machine is worse than none,
 because it is believed.
 
-A manifest is published once and never edited. Adding a parameter is a new version, so a
-show saved last year opens looking the way it was left.
-
-Every published version is listed here, which is not what a slot offers: a source list
-shows the newest of each type, and an older one is kept so that a show naming it still
-opens. Two entries with the same name are that, rather than a mistake.
+There is one of each. A control added later goes on the end with a default that changes
+nothing, so a show saved last year opens looking the way it was left.
 
 ## Generators
 
@@ -17,7 +13,7 @@ A generator makes a picture without a file. It implements the same source contra
 does, so a layer plays one exactly as it plays a clip and nothing above it knows the
 difference.
 
-### Solid Colour — `ovs.solid_colour` v1
+### Solid Colour — `ovs.solid_colour`
 
 Fills the layer with one colour.
 
@@ -25,7 +21,7 @@ Fills the layer with one colour.
 |---|---|---|---|
 | Colour | `colour` | a colour, linear RGBA | 1.00, 1.00, 1.00, 1.00 |
 
-### Test Pattern — `ovs.test_pattern` v2
+### Test Pattern — `ovs.test_pattern`
 
 The service pattern: bars, a drift, a sweep and a caption.
 
@@ -33,16 +29,7 @@ The service pattern: bars, a drift, a sweep and a caption.
 |---|---|---|---|
 | Caption | `caption` | text, up to 32 characters | `COMPOSITION` |
 
-### Strobe — `ovs.strobe` v1
-
-Flashes one colour at a rate.
-
-| Parameter | Key | Takes | Default |
-|---|---|---|---|
-| Colour | `colour` | a colour, linear RGBA | 1.00, 1.00, 1.00, 1.00 |
-| Rate | `hz` | a number from 0.5 to 30 | 10 |
-
-### Strobe — `ovs.strobe` v2
+### Strobe — `ovs.strobe`
 
 Flashes one colour at a rate, over the picture or against it.
 
@@ -52,7 +39,7 @@ Flashes one colour at a rate, over the picture or against it.
 | Rate | `hz` | a number from 0.5 to 30 | 10 |
 | Mode | `mode` | one of `colour` (Colour), `invert` (Invert) | `colour` |
 
-### Gradient — `ovs.gradient` v1
+### Gradient — `ovs.gradient`
 
 A linear gradient between two colours, at an angle.
 
@@ -62,7 +49,7 @@ A linear gradient between two colours, at an angle.
 | To | `colour_b` | a colour, linear RGBA | 0.00, 0.00, 0.00, 1.00 |
 | Angle | `angle_deg` | a number from 0 to 360 | 90 |
 
-### Grid — `ovs.grid` v1
+### Grid — `ovs.grid`
 
 Lines at a spacing, in one colour on another.
 
@@ -76,7 +63,7 @@ Lines at a spacing, in one colour on another.
 | Line colour | `line_colour` | a colour, linear RGBA | 1.00, 1.00, 1.00, 1.00 |
 | Background | `background_colour` | a colour, linear RGBA | 0.00, 0.00, 0.00, 1.00 |
 
-### Shape — `ovs.shape` v1
+### Shape — `ovs.shape`
 
 One shape, centred, in a colour on a background.
 
@@ -89,7 +76,7 @@ One shape, centred, in a colour on a background.
 | Colour | `colour` | a colour, linear RGBA | 1.00, 1.00, 1.00, 1.00 |
 | Background | `background_colour` | a colour, linear RGBA | 0.00, 0.00, 0.00, 0.00 |
 
-### Noise — `ovs.noise` v1
+### Noise — `ovs.noise`
 
 Value noise at a scale, monochrome or coloured.
 
@@ -99,7 +86,7 @@ Value noise at a scale, monochrome or coloured.
 | Coloured | `coloured` | on or off | off |
 | Amount | `amount` | a number from 0 to 1 | 1 |
 
-### Clock — `ovs.clock` v1
+### Clock — `ovs.clock`
 
 The time of day, drawn large.
 
@@ -114,7 +101,7 @@ The time of day, drawn large.
 | Background | `background_colour` | a colour, linear RGBA | 0.00, 0.00, 0.00, 1.00 |
 | UTC offset | `utc_offset_minutes` | a number from -720 to 840 | 0 |
 
-### Countdown — `ovs.countdown` v1
+### Countdown — `ovs.countdown`
 
 Time remaining, counting down to zero.
 
@@ -129,7 +116,7 @@ Time remaining, counting down to zero.
 | Text | `text_colour` | a colour, linear RGBA | 1.00, 1.00, 1.00, 1.00 |
 | Background | `background_colour` | a colour, linear RGBA | 0.00, 0.00, 0.00, 1.00 |
 
-### Text — `ovs.text` v1
+### Text — `ovs.text`
 
 Words, set large and centred.
 
@@ -155,18 +142,7 @@ effect put there is saved and does nothing.
 Every effect is neutral at its published defaults: adding one to a chain and touching
 nothing cannot alter a show that was already right.
 
-### Colour Correct — `ovs.colour_correct` v1
-
-Brightness, contrast, saturation and gamma.
-
-| Parameter | Key | Takes | Default |
-|---|---|---|---|
-| Brightness | `brightness` | a number from 0 to 4 | 1 |
-| Contrast | `contrast` | a number from 0 to 4 | 1 |
-| Saturation | `saturation` | a number from 0 to 4 | 1 |
-| Gamma | `gamma` | a number from 0.1 to 4 | 1 |
-
-### Colour Correct — `ovs.colour_correct` v2
+### Colour Correct — `ovs.colour_correct`
 
 Brightness, contrast, saturation, gamma, and the white point.
 
@@ -179,7 +155,7 @@ Brightness, contrast, saturation, gamma, and the white point.
 | Temperature | `temperature_k` | a number from 2000 to 10000 | 6500 |
 | Tint | `tint` | a number from -1 to 1 | 0 |
 
-### Tint — `ovs.tint` v1
+### Tint — `ovs.tint`
 
 Mixes the picture towards one colour.
 
@@ -192,7 +168,7 @@ Mixes the picture towards one colour.
 | Amount | `amount` | a number from 0 to 1 | 0 |
 | Keep brightness | `preserve_luma` | on or off | on |
 
-### Pixelate — `ovs.pixelate` v1
+### Pixelate — `ovs.pixelate`
 
 Averages the picture into square blocks.
 
@@ -200,7 +176,7 @@ Averages the picture into square blocks.
 |---|---|---|---|
 | Block size | `block_px` | a number from 1 to 256 | 1 |
 
-### Blur — `ovs.blur` v1
+### Blur — `ovs.blur`
 
 Softens the picture, horizontally and vertically.
 
@@ -209,7 +185,7 @@ Softens the picture, horizontally and vertically.
 | Radius | `radius_px` | a number from 0 to 64 | 0 |
 | Amount | `amount` | a number from 0 to 1 | 1 |
 
-### Crop — `ovs.crop` v1
+### Crop — `ovs.crop`
 
 Cuts a number of pixels off each edge.
 
@@ -220,7 +196,7 @@ Cuts a number of pixels off each edge.
 | Top | `top_px` | a number from 0 to 8192 | 0 |
 | Bottom | `bottom_px` | a number from 0 to 8192 | 0 |
 
-### Mirror — `ovs.mirror` v1
+### Mirror — `ovs.mirror`
 
 Folds one half of the picture onto the other.
 
@@ -229,7 +205,7 @@ Folds one half of the picture onto the other.
 | Horizontal | `horizontal` | one of `off` (Off), `left` (Keep left), `right` (Keep right) | `off` |
 | Vertical | `vertical` | one of `off` (Off), `top` (Keep top), `bottom` (Keep bottom) | `off` |
 
-### Colorize — `ovs.colorize` v1
+### Colorize — `ovs.colorize`
 
 Keeps the brightness and paints one colour over it.
 
@@ -239,7 +215,7 @@ Keeps the brightness and paints one colour over it.
 | Saturation | `saturation` | a number from 0 to 1 | 1 |
 | Amount | `amount` | a number from 0 to 1 | 0 |
 
-### RGB Correct — `ovs.rgb_correct` v1
+### RGB Correct — `ovs.rgb_correct`
 
 A black level and a white level for each channel.
 
@@ -252,7 +228,7 @@ A black level and a white level for each channel.
 | Green white | `gain_g` | a number from 0 to 4 | 1 |
 | Blue white | `gain_b` | a number from 0 to 4 | 1 |
 
-### RGB Split — `ovs.rgb_split` v1
+### RGB Split — `ovs.rgb_split`
 
 Offsets the red and blue channels in opposite directions.
 
@@ -261,18 +237,7 @@ Offsets the red and blue channels in opposite directions.
 | Offset | `offset_px` | a number from 0 to 256 | 0 |
 | Angle | `angle_deg` | a number from 0 to 360 | 0 |
 
-### TV Glitch — `ovs.tv_glitch` v1
-
-Line jumps, snow and a rolling error, under one master.
-
-| Parameter | Key | Takes | Default |
-|---|---|---|---|
-| Amount | `amount` | a number from 0 to 1 | 0 |
-| Line jumps | `tear` | a number from 0 to 1 | 0.5 |
-| Snow | `noise` | a number from 0 to 1 | 0.5 |
-| Rolling error | `roll` | a number from 0 to 1 | 0.5 |
-
-### TV Glitch — `ovs.tv_glitch` v2
+### TV Glitch — `ovs.tv_glitch`
 
 Line jumps, snow, a rolling error and a lost vertical hold.
 
@@ -284,7 +249,7 @@ Line jumps, snow, a rolling error and a lost vertical hold.
 | Rolling error | `roll` | a number from 0 to 1 | 0.5 |
 | Out of sync | `vertical_hold` | a number from 0 to 1 | 0.5 |
 
-### Mask — `ovs.mask` v1
+### Mask — `ovs.mask`
 
 A picture from the library, multiplied in or cut out.
 
@@ -295,15 +260,7 @@ A picture from the library, multiplied in or cut out.
 | Invert | `invert` | on or off | off |
 | Amount | `amount` | a number from 0 to 1 | 1 |
 
-### Invert — `ovs.invert` v1
-
-Turns every colour into its opposite.
-
-| Parameter | Key | Takes | Default |
-|---|---|---|---|
-| Inverted | `on` | on or off | off |
-
-### Invert — `ovs.invert` v2
+### Invert — `ovs.invert`
 
 Turns every colour into its opposite, steadily or at a rate.
 
@@ -312,7 +269,7 @@ Turns every colour into its opposite, steadily or at a rate.
 | Inverted | `on` | on or off | off |
 | Rate | `hz` | a number from 0 to 30 | 0 |
 
-### Edges — `ovs.edges` v1
+### Edges — `ovs.edges`
 
 Keeps only the outlines of the picture, in one colour.
 
@@ -323,7 +280,7 @@ Keeps only the outlines of the picture, in one colour.
 | Line width | `width_px` | a number from 1 to 12 | 2 |
 | Colour | `colour` | a colour, linear RGBA | 1.00, 1.00, 1.00, 1.00 |
 
-### Echo — `ovs.echo` v1
+### Echo — `ovs.echo`
 
 Leaves a fading trail of what the picture just was.
 

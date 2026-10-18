@@ -3405,11 +3405,6 @@ h2 {
   font-weight: 600;
 }
 
-.effect-version {
-  color: var(--dim);
-  font-size: 11px;
-}
-
 .add-effect {
   display: flex;
   gap: 6px;

@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import type { Effect, Generator, Layer, Show } from '@ovs/schema';
+import type { Effect, Generator, Layer, ParameterValue, Show } from '@ovs/schema';
 
 import {
   addEffect,
@@ -336,9 +336,23 @@ describe('an effect chain', () => {
   it('takes only effects this server publishes', () => {
     const document = must(addLayer(show()));
     const layer = document.layers[0]!;
-    const refused = addEffect(document, catalogue(), { layerId: layer.id }, 'ovs.nothing', 1);
+    const refused = addEffect(document, catalogue(), { layerId: layer.id }, 'ovs.nothing');
     expect(refused.ok).toBe(false);
-    expect(refused.ok === false && refused.reason).toContain('does not publish');
+    expect(refused.ok === false && refused.reason).toBe('this server does not publish ovs.nothing');
+  });
+
+  it('writes the catalogue’s own version number into the instance it adds', () => {
+    // The document has the field, so something has to go in it, and the only
+    // number that is not invented here is the one the catalogue carries. It is
+    // data: the effect is found by its type.
+    const document = must(addLayer(show()));
+    const layer = document.layers[0]!;
+    const withEffect = must(
+      addEffect(document, catalogue(), { layerId: layer.id }, KALEIDOSCOPE.type_id),
+    );
+    const effect = withEffect.layers[0]!.effects[0]!;
+    expect(effect.type_id).toBe(KALEIDOSCOPE.type_id);
+    expect(effect.version).toBe(KALEIDOSCOPE.version);
   });
 
   it('adds an effect with no parameter values, so adding one changes nothing', () => {
@@ -348,7 +362,7 @@ describe('an effect chain', () => {
     const document = must(addLayer(show()));
     const layer = document.layers[0]!;
     const withEffect = must(
-      addEffect(document, catalogue(), { layerId: layer.id }, KALEIDOSCOPE.type_id, 2),
+      addEffect(document, catalogue(), { layerId: layer.id }, KALEIDOSCOPE.type_id),
     );
     const effect = withEffect.layers[0]!.effects[0]!;
     expect(effect.enabled).toBe(true);
@@ -360,8 +374,8 @@ describe('an effect chain', () => {
     let document = must(addLayer(show()));
     const layer = document.layers[0]!;
     const chain = { layerId: layer.id };
-    document = must(addEffect(document, catalogue(), chain, KALEIDOSCOPE.type_id, 2));
-    document = must(addEffect(document, catalogue(), chain, KALEIDOSCOPE.type_id, 2));
+    document = must(addEffect(document, catalogue(), chain, KALEIDOSCOPE.type_id));
+    document = must(addEffect(document, catalogue(), chain, KALEIDOSCOPE.type_id));
     const [first, second] = document.layers[0]!.effects;
 
     const moved = must(moveEffect(document, chain, second!.id, 'earlier'));
@@ -374,13 +388,7 @@ describe('an effect chain', () => {
     const layer = document.layers[0]!;
     document = must(assignSlot(document, layer.id, 4, { kind: 'media', media_item_id: newId() }));
     document = must(
-      addEffect(
-        document,
-        catalogue(),
-        { layerId: layer.id, slotIndex: 4 },
-        KALEIDOSCOPE.type_id,
-        2,
-      ),
+      addEffect(document, catalogue(), { layerId: layer.id, slotIndex: 4 }, KALEIDOSCOPE.type_id),
     );
     expect(document.layers[0]!.slots[0]!.effects).toHaveLength(1);
     expect(document.layers[0]!.effects).toHaveLength(0);
@@ -392,7 +400,7 @@ describe('an effect parameter', () => {
     let document = must(addLayer(show()));
     const layer = document.layers[0]!;
     const chain = { layerId: layer.id };
-    document = must(addEffect(document, catalogue(), chain, KALEIDOSCOPE.type_id, 2));
+    document = must(addEffect(document, catalogue(), chain, KALEIDOSCOPE.type_id));
     return { document, chain, effectId: document.layers[0]!.effects[0]!.id };
   }
 
@@ -479,6 +487,94 @@ describe('an effect parameter', () => {
     // otherwise report its own ignorance as a fault in the operator's document.
     const { document } = chainWithEffect();
     expect(validate(document, emptyCatalogue())).toEqual([]);
+  });
+});
+
+describe('a module saved with another version number', () => {
+  // There is one module per type and it has no versions: "TV Glitch V2 ist TV
+  // Glitch. Invert V2 ist Invert" (owner, 2026-10-18). A show saved before that
+  // can still say `version: 7` where the catalogue says 2, and it is the same
+  // module. Every number below is one the catalogue does not carry, so a lookup
+  // that still compared versions would find nothing and fail each of these.
+
+  function withVersions(effectVersion: number, generatorVersion: number): Show {
+    let document = must(addLayer(show()));
+    const layer = document.layers[0]!;
+    document = must(
+      assignSlot(document, layer.id, 1, {
+        kind: 'generator',
+        type_id: STARFIELD.type_id,
+        version: generatorVersion,
+        parameters: {},
+      }),
+    );
+    document = must(addEffect(document, catalogue(), { layerId: layer.id }, KALEIDOSCOPE.type_id));
+    const added = document.layers[0]!;
+    return {
+      ...document,
+      layers: [
+        { ...added, effects: [{ ...added.effects[0]!, version: effectVersion }] },
+      ],
+    };
+  }
+
+  it('is the module the catalogue publishes, and the document is valid', () => {
+    expect(KALEIDOSCOPE.version).not.toBe(7);
+    expect(STARFIELD.version).not.toBe(9);
+    expect(validate(withVersions(7, 9), catalogue())).toEqual([]);
+  });
+
+  it('takes its parameters from that module, effect and generator alike', () => {
+    const document = withVersions(7, 9);
+    const layer = document.layers[0]!;
+
+    const six: ParameterValue = { type: 'float', value: 6 };
+    const effect = must(
+      setEffectParameter(
+        document,
+        catalogue(),
+        { layerId: layer.id },
+        layer.effects[0]!.id,
+        'turns',
+        six,
+      ),
+    );
+    expect(effect.layers[0]!.effects[0]!.parameters).toEqual({ turns: six });
+    // The number the document arrived with is its own, and an edit leaves it.
+    expect(effect.layers[0]!.effects[0]!.version).toBe(7);
+
+    const generator = must(
+      setGeneratorParameter(document, catalogue(), layer.id, 1, 'density', {
+        type: 'float',
+        value: 0.5,
+      }),
+    );
+    const source = generator.layers[0]!.slots[0]!.source;
+    expect(source.kind === 'generator' && source.parameters).toEqual({
+      density: { type: 'float', value: 0.5 },
+    });
+  });
+
+  it('is checked against that module, in words that name no version', () => {
+    const document = withVersions(7, 9);
+    const layer = document.layers[0]!;
+    const broken: Show = {
+      ...document,
+      layers: [
+        {
+          ...layer,
+          effects: [
+            { ...layer.effects[0]!, parameters: { radius_px: { type: 'float', value: 1 } } },
+          ],
+        },
+      ],
+    };
+    expect(validate(broken, catalogue())).toEqual([
+      {
+        path: 'layers[0].effects[0].parameters.radius_px',
+        message: 'third.party.kaleidoscope has no such parameter',
+      },
+    ]);
   });
 });
 

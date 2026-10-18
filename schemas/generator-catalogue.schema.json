@@ -47,7 +47,7 @@
           "type": "string"
         },
         "version": {
-          "description": "Version. A new parameter is a new version, never a changed one.",
+          "description": "Always one: there is one generator of each type. Still served because a show carries the number.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0.0

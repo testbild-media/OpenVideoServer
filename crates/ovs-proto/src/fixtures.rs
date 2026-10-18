@@ -9,9 +9,8 @@
 //! The same catalogue serves the patch editor in the client, which needs the
 //! footprint and the channel list to lay a patch out.
 //!
-//! Published definitions never change, so this is a rendering of
-//! them rather than a second source: a personality with the same type and
-//! version says the same thing on every build that has it at all.
+//! This is a rendering of the definitions rather than a second source: there
+//! is one personality of each type, and this says what it is.
 
 use ovs_types::config::fixtures::{
     ChannelEncoding, ParameterSlot, MASTER_SCALE_STEPS, MAX_ADDRESSABLE_SLOT, PUBLISHED,
@@ -115,7 +114,8 @@ pub struct PersonalityChannel {
 pub struct Personality {
     /// Stable type identifier, for example `ovs.master`.
     pub type_id: String,
-    /// Version. A new control is a new version, never a changed one.
+    /// Always one: there is one personality of each type. A patch entry
+    /// still carries the number, so it is still served.
     pub version: u32,
     /// What a console's personality list shows.
     pub name: String,
@@ -204,10 +204,10 @@ pub fn markdown() -> String {
          Generated from the personalities this build publishes. Do not edit by hand:\n\
          run `cargo run -p ovs-proto --bin ovs-fixture-doc` and commit the result.\n\
          \n\
-         A published personality never changes. A console has the channel layout\n\
-         physically programmed into its show file, so a new control is a new version\n\
-         rather than a changed one, and a server refuses a patch naming a version it\n\
-         does not have rather than serving the nearest one.\n\
+         There is one personality of each type. A console has the channel layout\n\
+         physically programmed into its show file, so a patch entry records how many\n\
+         channels it was patched with, and a server refuses one that disagrees with\n\
+         the personality rather than reading the channels after it shifted.\n\
          \n\
          The server receives only. It answers no ArtPoll, appears in no console's node\n\
          list, and transmits nothing.\n\
@@ -241,8 +241,8 @@ pub fn markdown() -> String {
 
     for personality in catalogue().fixtures {
         out.push_str(&format!(
-            "## {} — `{}` v{}\n\n",
-            personality.name, personality.type_id, personality.version
+            "## {} — `{}`\n\n",
+            personality.name, personality.type_id
         ));
         out.push_str(&format!(
             "Footprint: **{} channels**. Patch to: **{}**.\n\n",
@@ -432,10 +432,10 @@ fn choices_for(
         ParameterSlot::Effect(parameter) | ParameterSlot::Generator(parameter) => parameter.key,
         _ => return Vec::new(),
     };
-    let parameters = ovs_types::config::effects::manifest(personality.type_id, personality.version)
+    let parameters = ovs_types::config::effects::manifest(personality.type_id)
         .map(|manifest| manifest.parameters)
         .or_else(|| {
-            ovs_types::config::generators::manifest(personality.type_id, personality.version)
+            ovs_types::config::generators::manifest(personality.type_id)
                 .map(|manifest| manifest.parameters)
         });
     let Some(parameters) = parameters else {
@@ -618,7 +618,7 @@ mod tests {
         assert!(catalogue.fixtures.len() > PUBLISHED.len());
 
         for personality in &catalogue.fixtures {
-            let published = definition(&personality.type_id, personality.version)
+            let published = definition(&personality.type_id)
                 .expect("the catalogue only describes what this build has");
             assert_eq!(personality.footprint, published.footprint);
             assert_eq!(personality.channels.len(), published.channels.len());
@@ -778,12 +778,7 @@ mod tests {
                 PersonalityTarget::Master
             } else if personality.type_id == LAYER_V1.type_id {
                 PersonalityTarget::Layer
-            } else if ovs_types::config::effects::manifest(
-                &personality.type_id,
-                personality.version,
-            )
-            .is_some()
-            {
+            } else if ovs_types::config::effects::manifest(&personality.type_id).is_some() {
                 PersonalityTarget::Effect
             } else {
                 PersonalityTarget::Generator

@@ -1173,7 +1173,7 @@ async fn a_live_value_for_a_parameter_the_effect_never_declared_is_refused() {
         body["message"]
             .as_str()
             .expect("a message")
-            .contains("ovs.blur version 1"),
+            .contains("ovs.blur has no such parameter"),
         "the answer says which effect was asked: {body}"
     );
 }

@@ -43,15 +43,12 @@
 //! Which frame comes from [`GeneratorSource::tick_worth_a_picture`], which
 //! explains itself.
 //!
-//! # One file a published manifest
+//! # One file a published generator
 //!
-//! `ovs.noise.v1.png`: the type and the version, because a version is a
-//! different picture on purpose. Test pattern version one draws a grid with
-//! bars and version two draws the service pattern — a show saved with the
-//! first still plays the first, and a pad showing it the second's picture
-//! would be a pad lying about what pressing it does.
+//! `ovs.noise.png`: the type and nothing else, because there is one of each
+//! (owner, 2026-10-18: "Es gibt kein Invert V2.. nirgendwo").
 //!
-//! That is also why the retired types are here. A source list offers neither
+//! The retired types are here too. A source list offers neither
 //! the clock nor the countdown (the owner, 2026-10-12: "Was sowieso dann weg
 //! kann und mir keinen Mehrwert bringt: Generator Countdown, Generator
 //! Clock"), and a show saved before that still has them on a pad, where they
@@ -110,8 +107,8 @@ fn main() -> ExitCode {
     }
 
     for manifest in &ovs_types::config::generators::PUBLISHED {
-        let named = picture_name(manifest.type_id, manifest.version);
-        let Some(picture) = picture_of(manifest.type_id, manifest.version) else {
+        let named = picture_name(manifest.type_id);
+        let Some(picture) = picture_of(manifest.type_id) else {
             eprintln!("{named}: published and cannot be drawn");
             return ExitCode::from(1);
         };
@@ -139,8 +136,8 @@ fn main() -> ExitCode {
 }
 
 /// What one generator's picture is called.
-fn picture_name(type_id: &str, version: u32) -> String {
-    format!("{type_id}.v{version}.png")
+fn picture_name(type_id: &str) -> String {
+    format!("{type_id}.png")
 }
 
 /// Where the client keeps them.
@@ -153,16 +150,14 @@ fn pictures_directory() -> PathBuf {
 
 /// One generator's tile-sized picture, from its published defaults.
 ///
-/// `None` for a type this build does not publish, which is also the answer for
-/// a version it has retired.
+/// `None` for a type this build does not publish.
 ///
 /// Two of them are a mark instead of their own output: see [`mark_of`].
-fn picture_of(type_id: &str, version: u32) -> Option<DecodedImage> {
+fn picture_of(type_id: &str) -> Option<DecodedImage> {
     if let Some(mark) = mark_of(type_id) {
         return shrunk(&mark);
     }
-    let mut source =
-        GeneratorSource::new(type_id, version, &ParameterMap::new(), WALL)?.with_seed(SEED);
+    let mut source = GeneratorSource::new(type_id, &ParameterMap::new(), WALL)?.with_seed(SEED);
     let frame = source.frame(source.tick_worth_a_picture()).ok()?;
     shrunk(&frame.image)
 }
@@ -394,9 +389,9 @@ mod tests {
         // no picture at all, is caught here rather than by an operator dragging
         // a tile onto a pad and getting something else.
         for manifest in &ovs_types::config::generators::PUBLISHED {
-            let named = picture_name(manifest.type_id, manifest.version);
-            let drawn = picture_of(manifest.type_id, manifest.version)
-                .unwrap_or_else(|| panic!("{named} cannot be drawn"));
+            let named = picture_name(manifest.type_id);
+            let drawn =
+                picture_of(manifest.type_id).unwrap_or_else(|| panic!("{named} cannot be drawn"));
             assert_eq!(drawn.size(), TILE, "{named}");
 
             let committed = committed(&named);
@@ -433,7 +428,7 @@ mod tests {
         // longer exists.
         let wanted: std::collections::BTreeSet<String> = ovs_types::config::generators::PUBLISHED
             .iter()
-            .map(|manifest| picture_name(manifest.type_id, manifest.version))
+            .map(|manifest| picture_name(manifest.type_id))
             .collect();
 
         let directory = pictures_directory();
@@ -456,7 +451,7 @@ mod tests {
         // default is a white field, and so is a strobe's lit frame, so the two
         // tiles were the same picture. Every one of them carries something now.
         for manifest in &ovs_types::config::generators::PUBLISHED {
-            let picture = picture_of(manifest.type_id, manifest.version)
+            let picture = picture_of(manifest.type_id)
                 .unwrap_or_else(|| panic!("{} cannot be drawn", manifest.type_id));
 
             let colours: std::collections::BTreeSet<[u8; 4]> = picture
@@ -505,8 +500,8 @@ mod tests {
         // The whole reason they are marks (owner, 2026-10-16). Whatever else
         // happens to them, these two must not go back to being the same white
         // field: the fields differ, and each carries ink over it.
-        let solid = picture_of("ovs.solid_colour", 1).expect("drawn");
-        let strobe = picture_of("ovs.strobe", 1).expect("drawn");
+        let solid = picture_of("ovs.solid_colour").expect("drawn");
+        let strobe = picture_of("ovs.strobe").expect("drawn");
 
         assert_eq!(solid.pixel(2, 2), [224, 48, 48, 255], "a red field");
         assert_eq!(strobe.pixel(2, 2), [255, 255, 255, 255], "and a white one");

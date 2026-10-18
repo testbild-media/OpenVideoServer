@@ -473,22 +473,16 @@ impl GeneratorSource {
     /// which is the same answer a show validated against this build should
     /// never be able to produce — and the honest one when it does.
     #[must_use]
-    pub fn new(
-        type_id: &str,
-        version: u32,
-        parameters: &ParameterMap,
-        size: SizePx,
-    ) -> Option<Self> {
-        let manifest = manifest(type_id, version)?;
+    pub fn new(type_id: &str, parameters: &ParameterMap, size: SizePx) -> Option<Self> {
+        let manifest = manifest(type_id)?;
         let kind = match manifest.type_id {
             "ovs.solid_colour" => Kind::SolidColour {
                 colour: colour_of(manifest, parameters, "colour"),
             },
-            // Version 2 and no version 1: the grid-and-bars pattern this once
-            // had is gone, and the one a layer gets is the service pattern
-            // (owner, 2026-10-15: "Nur noch v2 und das wird zum normalen
-            // Testpattern"). A show naming version one is refused, as a show
-            // naming any version this build does not publish is.
+            // The grid-and-bars pattern this once had is gone, and the one a
+            // layer gets is the service pattern (owner, 2026-10-15: "Nur noch
+            // v2 und das wird zum normalen Testpattern"). A show that named the
+            // old one by its number gets this one, as every show now does.
             "ovs.test_pattern" => Kind::ServicePattern {
                 caption: text_of(manifest, parameters, "caption"),
             },
@@ -2245,7 +2239,7 @@ mod tests {
             ParameterValue::Color([1.0, 0.0, 0.5, 1.0]),
         )]);
         let mut source =
-            GeneratorSource::new("ovs.solid_colour", 1, &parameters, size()).expect("published");
+            GeneratorSource::new("ovs.solid_colour", &parameters, size()).expect("published");
 
         let frame = source.frame(0).expect("draws");
         assert_eq!(pixel(&frame.image, 10, 10), [255, 0, 128, 255]);
@@ -2256,7 +2250,7 @@ mod tests {
     fn a_generator_with_no_parameters_set_draws_its_defaults() {
         // A show that adds a generator and sets nothing is a show that
         // wants what the generator was published with.
-        let mut source = GeneratorSource::new("ovs.solid_colour", 1, &ParameterMap::new(), size())
+        let mut source = GeneratorSource::new("ovs.solid_colour", &ParameterMap::new(), size())
             .expect("published");
         let frame = source.frame(0).expect("draws");
         assert_eq!(pixel(&frame.image, 1, 1), [255, 255, 255, 255]);
@@ -2276,7 +2270,7 @@ mod tests {
         // not, and has not been since it was made to move every frame.
         for type_id in STILLS {
             let source =
-                GeneratorSource::new(type_id, 1, &ParameterMap::new(), size()).expect("published");
+                GeneratorSource::new(type_id, &ParameterMap::new(), size()).expect("published");
             assert_eq!(source.length().frame_count, 1, "{type_id}");
             assert_eq!(source.length().duration_ms, 0, "{type_id}");
             assert!(!source.changes_over_time(), "{type_id}");
@@ -2289,7 +2283,7 @@ mod tests {
         // slot changes is enough for a still and is not enough for a clock.
         for type_id in TIMEPIECES {
             let source =
-                GeneratorSource::new(type_id, 1, &ParameterMap::new(), size()).expect("published");
+                GeneratorSource::new(type_id, &ParameterMap::new(), size()).expect("published");
             assert!(source.changes_over_time(), "{type_id}");
             assert!(source.length().frame_count > 1, "{type_id}");
             assert!(source.length().duration_ms > 0, "{type_id}");
@@ -2317,7 +2311,6 @@ mod tests {
     fn strobe(hz: f64) -> GeneratorSource {
         GeneratorSource::new(
             "ovs.strobe",
-            1,
             &ParameterMap::from([
                 (
                     "colour".to_owned(),
@@ -2407,7 +2400,7 @@ mod tests {
     }
 
     fn noise() -> GeneratorSource {
-        GeneratorSource::new("ovs.noise", 1, &ParameterMap::new(), size()).expect("published")
+        GeneratorSource::new("ovs.noise", &ParameterMap::new(), size()).expect("published")
     }
 
     #[test]
@@ -2471,7 +2464,6 @@ mod tests {
     fn service_pattern() -> GeneratorSource {
         GeneratorSource::new(
             "ovs.test_pattern",
-            2,
             &ParameterMap::new(),
             SizePx::new(192, 108),
         )
@@ -2484,7 +2476,7 @@ mod tests {
     /// be at: three million is a fortnight at sixty a second, and a test that
     /// starts at frame zero passes whatever the arithmetic does.
     fn one_second_of(rate: FrameRate, size: SizePx) -> Vec<crate::pattern::PatternMoment> {
-        let mut source = GeneratorSource::new("ovs.test_pattern", 2, &ParameterMap::new(), size)
+        let mut source = GeneratorSource::new("ovs.test_pattern", &ParameterMap::new(), size)
             .expect("published");
         let start = 3_000_000_u32;
         let frames = rate.as_f64().round() as u32;
@@ -2532,7 +2524,6 @@ mod tests {
         let at = |rate: FrameRate, frame: u32| {
             let mut source = GeneratorSource::new(
                 "ovs.test_pattern",
-                2,
                 &ParameterMap::new(),
                 SizePx::new(1920, 1080),
             )
@@ -2559,16 +2550,14 @@ mod tests {
     fn the_test_pattern_a_slot_offers_now_is_the_service_pattern() {
         // The owner, 2026-10-12: "den möchte ich da sehen und keinen
         // Generischen", and 2026-10-15: "Testpattern v1 soll nicht
-        // existieren." The grid-and-bars pattern that was version one is gone,
-        // which is a thing a build can say: a show naming it is refused rather
-        // than shown the nearest picture.
-        assert!(
-            GeneratorSource::new("ovs.test_pattern", 1, &ParameterMap::new(), size()).is_none(),
-            "version one is published again"
-        );
+        // existieren." The grid-and-bars pattern is gone, and there is one
+        // test pattern: the one that moves.
+        let offered = GeneratorSource::new("ovs.test_pattern", &ParameterMap::new(), size())
+            .expect("published");
+        assert!(offered.changes_over_time(), "the grid and bars stood still");
 
         let service = service_pattern();
-        assert!(service.changes_over_time(), "version two moves");
+        assert!(service.changes_over_time());
         assert!(service.length().frame_count > 1);
         assert!(service.length().duration_ms > 0);
     }
@@ -2663,7 +2652,7 @@ mod tests {
         // length, and a frame per index, where the index is the second of the
         // day.
         let source =
-            GeneratorSource::new("ovs.clock", 1, &ParameterMap::new(), size()).expect("published");
+            GeneratorSource::new("ovs.clock", &ParameterMap::new(), size()).expect("published");
 
         assert_eq!(source.length().frame_count, 86_400);
         assert_eq!(source.length().duration_ms, 86_400_000);
@@ -2675,7 +2664,7 @@ mod tests {
         // long is twelve o'clock, so the clock on a tile reads a time a crew
         // would read off a wall — and not the midnight its first frame is.
         let source =
-            GeneratorSource::new("ovs.clock", 1, &ParameterMap::new(), size()).expect("published");
+            GeneratorSource::new("ovs.clock", &ParameterMap::new(), size()).expect("published");
 
         assert_eq!(source.tick_worth_a_picture(), 43_200);
         assert_eq!(
@@ -2740,7 +2729,7 @@ mod tests {
         // for a result identical to the last one.
         let parameters =
             ParameterMap::from([("show_seconds".to_owned(), ParameterValue::Bool(false))]);
-        let source = GeneratorSource::new("ovs.clock", 1, &parameters, size()).expect("published");
+        let source = GeneratorSource::new("ovs.clock", &parameters, size()).expect("published");
 
         assert_eq!(source.length().frame_count, 1_440);
         assert_eq!(source.length().duration_ms, 86_400_000, "still a day long");
@@ -2752,7 +2741,7 @@ mod tests {
         // clock whose picture did not move would be a photograph of a clock,
         // which on a backstage monitor is worse than nothing.
         let mut source =
-            GeneratorSource::new("ovs.clock", 1, &ParameterMap::new(), SizePx::new(256, 128))
+            GeneratorSource::new("ovs.clock", &ParameterMap::new(), SizePx::new(256, 128))
                 .expect("published");
 
         let noon = source.frame(43_200).expect("draws").image.pixels().to_vec();
@@ -2766,7 +2755,7 @@ mod tests {
         // else, which is what makes a clock testable at all.
         let draw = || {
             let mut source =
-                GeneratorSource::new("ovs.clock", 1, &ParameterMap::new(), SizePx::new(128, 64))
+                GeneratorSource::new("ovs.clock", &ParameterMap::new(), SizePx::new(128, 64))
                     .expect("published");
             source.frame(45_296).expect("draws").image.pixels().to_vec()
         };
@@ -2783,8 +2772,7 @@ mod tests {
                 "utc_offset_minutes".to_owned(),
                 ParameterValue::Float(offset),
             )]);
-            let source =
-                GeneratorSource::new("ovs.clock", 1, &parameters, size()).expect("published");
+            let source = GeneratorSource::new("ovs.clock", &parameters, size()).expect("published");
             source
                 .tick_at(Moment {
                     wall: UNIX_EPOCH + Duration::from_secs(45_296),
@@ -2807,7 +2795,7 @@ mod tests {
             "utc_offset_minutes".to_owned(),
             ParameterValue::Float(-300.0),
         )]);
-        let source = GeneratorSource::new("ovs.clock", 1, &parameters, size()).expect("published");
+        let source = GeneratorSource::new("ovs.clock", &parameters, size()).expect("published");
 
         let tick = source
             .tick_at(Moment {
@@ -2827,7 +2815,7 @@ mod tests {
         // wrong clock is visible and recoverable; a black layer during a show
         // is neither.
         let source =
-            GeneratorSource::new("ovs.clock", 1, &ParameterMap::new(), size()).expect("published");
+            GeneratorSource::new("ovs.clock", &ParameterMap::new(), size()).expect("published");
 
         let tick = source
             .tick_at(Moment {
@@ -2862,8 +2850,8 @@ mod tests {
     #[test]
     fn a_countdown_counts_down_from_its_duration_and_reaches_zero() {
         // Ten minutes, the published default: the number a chair is watching.
-        let mut source = GeneratorSource::new("ovs.countdown", 1, &ParameterMap::new(), size())
-            .expect("published");
+        let mut source =
+            GeneratorSource::new("ovs.countdown", &ParameterMap::new(), size()).expect("published");
 
         assert_eq!(countdown_text(600, false, 0).as_bytes(), b" 10:00");
         assert_eq!(countdown_text(600, false, 1).as_bytes(), b" 09:59");
@@ -2886,8 +2874,7 @@ mod tests {
         // over", which is what a chair needs in order to act.
         let parameters =
             ParameterMap::from([("count_past_zero".to_owned(), ParameterValue::Bool(true))]);
-        let source =
-            GeneratorSource::new("ovs.countdown", 1, &parameters, size()).expect("published");
+        let source = GeneratorSource::new("ovs.countdown", &parameters, size()).expect("published");
 
         assert_eq!(countdown_text(600, true, 600).as_bytes(), b" 00:00");
         assert_eq!(countdown_text(600, true, 660).as_bytes(), b"-01:00");
@@ -2904,14 +2891,12 @@ mod tests {
         // then hold their last frame like everything else in this renderer.
         let holding = GeneratorSource::new(
             "ovs.countdown",
-            1,
             &ParameterMap::from([("count_past_zero".to_owned(), ParameterValue::Bool(false))]),
             size(),
         )
         .expect("published");
         let running_on = GeneratorSource::new(
             "ovs.countdown",
-            1,
             &ParameterMap::from([("count_past_zero".to_owned(), ParameterValue::Bool(true))]),
             size(),
         )
@@ -2943,7 +2928,7 @@ mod tests {
         let parameters =
             ParameterMap::from([("duration_s".to_owned(), ParameterValue::Float(200_000.0))]);
         let mut source =
-            GeneratorSource::new("ovs.countdown", 1, &parameters, size()).expect("published");
+            GeneratorSource::new("ovs.countdown", &parameters, size()).expect("published");
 
         assert_eq!(source.length().frame_count, 86_400, "a day, and no more");
         assert_eq!(countdown_text(200_000, false, 0).as_bytes(), b" 23:59:59");
@@ -2955,8 +2940,7 @@ mod tests {
         // Nothing above this can divide by a run of no length.
         let parameters =
             ParameterMap::from([("duration_s".to_owned(), ParameterValue::Float(0.0))]);
-        let source =
-            GeneratorSource::new("ovs.countdown", 1, &parameters, size()).expect("published");
+        let source = GeneratorSource::new("ovs.countdown", &parameters, size()).expect("published");
 
         assert!(source.length().frame_count >= 2);
         assert_eq!(countdown_text(0, false, 0).as_bytes(), b" 00:01");
@@ -2972,7 +2956,7 @@ mod tests {
                 "from_trigger".to_owned(),
                 ParameterValue::Bool(from_trigger),
             )]);
-            GeneratorSource::new("ovs.countdown", 1, &parameters, size())
+            GeneratorSource::new("ovs.countdown", &parameters, size())
                 .expect("published")
                 .restarts_on_trigger()
         };
@@ -2983,15 +2967,15 @@ mod tests {
         // Nothing else here is anchored to anything a trigger could move.
         for type_id in STILLS.into_iter().chain(["ovs.clock"]) {
             let source =
-                GeneratorSource::new(type_id, 1, &ParameterMap::new(), size()).expect("published");
+                GeneratorSource::new(type_id, &ParameterMap::new(), size()).expect("published");
             assert!(!source.restarts_on_trigger(), "{type_id}");
         }
     }
 
     #[test]
     fn a_countdown_is_at_the_second_of_its_run_the_slot_has_been_up() {
-        let source = GeneratorSource::new("ovs.countdown", 1, &ParameterMap::new(), size())
-            .expect("published");
+        let source =
+            GeneratorSource::new("ovs.countdown", &ParameterMap::new(), size()).expect("published");
         let at = |seconds| {
             source
                 .tick_at(Moment {
@@ -3012,7 +2996,7 @@ mod tests {
         // What stops a clock costing a composition sixty times a second: a pass
         // in which nothing has changed is a comparison and no upload.
         let mut source =
-            GeneratorSource::new("ovs.clock", 1, &ParameterMap::new(), SizePx::new(128, 64))
+            GeneratorSource::new("ovs.clock", &ParameterMap::new(), SizePx::new(128, 64))
                 .expect("published");
 
         assert!(
@@ -3040,7 +3024,7 @@ mod tests {
         // Up to two hundred megabytes at the sizes this will draw. A still is
         // uploaded once and never asked again, so holding one would be memory
         // kept for nothing.
-        let mut solid = GeneratorSource::new("ovs.solid_colour", 1, &ParameterMap::new(), size())
+        let mut solid = GeneratorSource::new("ovs.solid_colour", &ParameterMap::new(), size())
             .expect("published");
         assert!(solid
             .redraw_at(0, FrameRate::FPS_60, FrameRate::FPS_60)
@@ -3052,13 +3036,9 @@ mod tests {
         // Two ways to the same drawing — one that allocates and one that does
         // not — and a wall that differed between them would be a bug nobody
         // could see coming.
-        let mut source = GeneratorSource::new(
-            "ovs.countdown",
-            1,
-            &ParameterMap::new(),
-            SizePx::new(96, 48),
-        )
-        .expect("published");
+        let mut source =
+            GeneratorSource::new("ovs.countdown", &ParameterMap::new(), SizePx::new(96, 48))
+                .expect("published");
 
         let allocated = source.frame(123).expect("draws").image.pixels().to_vec();
         let in_place = source
@@ -3083,7 +3063,7 @@ mod tests {
                 ParameterValue::Color([0.0, 0.0, 0.25, 1.0]),
             ),
         ]);
-        let mut source = GeneratorSource::new("ovs.clock", 1, &parameters, SizePx::new(256, 128))
+        let mut source = GeneratorSource::new("ovs.clock", &parameters, SizePx::new(256, 128))
             .expect("published");
         let frame = source.frame(45_296).expect("draws");
 
@@ -3111,13 +3091,8 @@ mod tests {
         // offers, a show saves and the wall refuses — a fault in this build
         // rather than in anybody's show.
         for manifest in &ovs_types::config::generators::PUBLISHED {
-            let mut source = GeneratorSource::new(
-                manifest.type_id,
-                manifest.version,
-                &ParameterMap::new(),
-                size(),
-            )
-            .unwrap_or_else(|| panic!("{} is published but not drawn", manifest.type_id));
+            let mut source = GeneratorSource::new(manifest.type_id, &ParameterMap::new(), size())
+                .unwrap_or_else(|| panic!("{} is published but not drawn", manifest.type_id));
             let frame = source.frame(0).expect("draws");
             assert_eq!(
                 frame.image.pixels().len(),
@@ -3146,7 +3121,7 @@ mod tests {
             // smaller than that object would be a flat field for a reason that
             // has nothing to do with the defaults being wrong.
             let mut source =
-                GeneratorSource::new(type_id, 1, &ParameterMap::new(), SizePx::new(512, 512))
+                GeneratorSource::new(type_id, &ParameterMap::new(), SizePx::new(512, 512))
                     .expect("published");
             let frame = source.frame(0).expect("draws");
 
@@ -3181,7 +3156,7 @@ mod tests {
             ),
             ("angle_deg".to_owned(), ParameterValue::Float(90.0)),
         ]);
-        let mut source = GeneratorSource::new("ovs.gradient", 1, &parameters, SizePx::new(64, 64))
+        let mut source = GeneratorSource::new("ovs.gradient", &parameters, SizePx::new(64, 64))
             .expect("published");
         let frame = source.frame(0).expect("draws");
 
@@ -3205,9 +3180,8 @@ mod tests {
                 ),
                 ("angle_deg".to_owned(), ParameterValue::Float(angle)),
             ]);
-            let mut source =
-                GeneratorSource::new("ovs.gradient", 1, &parameters, SizePx::new(64, 64))
-                    .expect("published");
+            let mut source = GeneratorSource::new("ovs.gradient", &parameters, SizePx::new(64, 64))
+                .expect("published");
             let frame = source.frame(0).expect("draws");
             (
                 pixel(&frame.image, 0, 32)[0],
@@ -3233,7 +3207,6 @@ mod tests {
         let colour = ParameterValue::Color([0.25, 0.5, 0.75, 1.0]);
         let mut gradient = GeneratorSource::new(
             "ovs.gradient",
-            1,
             &ParameterMap::from([
                 ("colour_a".to_owned(), colour.clone()),
                 ("colour_b".to_owned(), colour.clone()),
@@ -3243,7 +3216,6 @@ mod tests {
         .expect("published");
         let mut solid = GeneratorSource::new(
             "ovs.solid_colour",
-            1,
             &ParameterMap::from([("colour".to_owned(), colour)]),
             size(),
         )
@@ -3269,8 +3241,8 @@ mod tests {
                 ParameterValue::Color([0.0, 0.0, 1.0, 1.0]),
             ),
         ]);
-        let mut source = GeneratorSource::new("ovs.grid", 1, &parameters, SizePx::new(64, 64))
-            .expect("published");
+        let mut source =
+            GeneratorSource::new("ovs.grid", &parameters, SizePx::new(64, 64)).expect("published");
         let frame = source.frame(0).expect("draws");
 
         assert_eq!(pixel(&frame.image, 16, 8), [255, 0, 0, 255], "a line");
@@ -3296,8 +3268,8 @@ mod tests {
                 ParameterValue::Color([0.0, 0.0, 0.0, 1.0]),
             ),
         ]);
-        let mut source = GeneratorSource::new("ovs.grid", 1, &parameters, SizePx::new(64, 64))
-            .expect("published");
+        let mut source =
+            GeneratorSource::new("ovs.grid", &parameters, SizePx::new(64, 64)).expect("published");
         let frame = source.frame(0).expect("draws");
 
         let colours: std::collections::BTreeSet<[u8; 4]> = frame
@@ -3375,7 +3347,7 @@ mod tests {
         for (key, value) in over {
             parameters.insert((*key).to_owned(), value.clone());
         }
-        let mut source = GeneratorSource::new("ovs.text", 1, &parameters, SizePx::new(256, 128))
+        let mut source = GeneratorSource::new("ovs.text", &parameters, SizePx::new(256, 128))
             .expect("published");
         source.frame(0).expect("draws").image
     }
@@ -3487,7 +3459,7 @@ mod tests {
         // A still: one frame, nothing to run along, and nothing that would make
         // the renderer redraw it sixty times a second.
         let source =
-            GeneratorSource::new("ovs.text", 1, &ParameterMap::new(), size()).expect("published");
+            GeneratorSource::new("ovs.text", &ParameterMap::new(), size()).expect("published");
 
         assert!(!source.changes_over_time());
         assert_eq!(source.length().frame_count, 1);
@@ -3501,7 +3473,7 @@ mod tests {
         // somebody means by "put a circle up", over whatever the layer below is
         // playing — not over a black bed they then have to turn off.
         let mut source =
-            GeneratorSource::new("ovs.shape", 1, &ParameterMap::new(), SizePx::new(512, 512))
+            GeneratorSource::new("ovs.shape", &ParameterMap::new(), SizePx::new(512, 512))
                 .expect("published");
         let frame = source.frame(0).expect("draws");
 
@@ -3532,8 +3504,8 @@ mod tests {
         // Centred, and the size it was given: a band forty pixels across and
         // eight down, on a canvas of sixty-four.
         let parameters = shape(RECTANGLE, (40.0, 8.0), 0.0, RED, BLUE);
-        let mut source = GeneratorSource::new("ovs.shape", 1, &parameters, SizePx::new(64, 64))
-            .expect("published");
+        let mut source =
+            GeneratorSource::new("ovs.shape", &parameters, SizePx::new(64, 64)).expect("published");
         let frame = source.frame(0).expect("draws");
 
         assert_eq!(pixel(&frame.image, 32, 32), RED_BYTES, "the middle");
@@ -3549,7 +3521,7 @@ mod tests {
         // degrees expects a column, and gets one.
         let upright = shape(RECTANGLE, (40.0, 8.0), 90.0, RED, BLUE);
         let mut source =
-            GeneratorSource::new("ovs.shape", 1, &upright, SizePx::new(64, 64)).expect("published");
+            GeneratorSource::new("ovs.shape", &upright, SizePx::new(64, 64)).expect("published");
         let frame = source.frame(0).expect("draws");
 
         assert_eq!(
@@ -3572,7 +3544,7 @@ mod tests {
         // thing to happen is most of what a triangle is for.
         let corners = |rotation: f64| {
             let parameters = shape(TRIANGLE, (48.0, 48.0), rotation, RED, BLUE);
-            let mut source = GeneratorSource::new("ovs.shape", 1, &parameters, SizePx::new(64, 64))
+            let mut source = GeneratorSource::new("ovs.shape", &parameters, SizePx::new(64, 64))
                 .expect("published");
             let frame = source.frame(0).expect("draws");
             (pixel(&frame.image, 12, 12), pixel(&frame.image, 12, 52))
@@ -3597,11 +3569,11 @@ mod tests {
         // staircase an audience can count the steps of. Softening it costs a
         // subtraction per pixel.
         let parameters = shape(TRIANGLE, (40.0, 40.0), 0.0, RED, BLUE);
-        let mut triangle = GeneratorSource::new("ovs.shape", 1, &parameters, SizePx::new(64, 64))
-            .expect("published");
+        let mut triangle =
+            GeneratorSource::new("ovs.shape", &parameters, SizePx::new(64, 64)).expect("published");
         let parameters = shape(ELLIPSE, (40.0, 40.0), 0.0, RED, BLUE);
-        let mut disc = GeneratorSource::new("ovs.shape", 1, &parameters, SizePx::new(64, 64))
-            .expect("published");
+        let mut disc =
+            GeneratorSource::new("ovs.shape", &parameters, SizePx::new(64, 64)).expect("published");
 
         for (what, frame) in [
             ("a disc", disc.frame(0).expect("draws")),
@@ -3630,8 +3602,8 @@ mod tests {
         // again and put a dark rim around everything the operator floated over
         // the picture below.
         let parameters = shape(ELLIPSE, (40.0, 40.0), 0.0, RED, [0.0, 0.0, 0.0, 0.0]);
-        let mut source = GeneratorSource::new("ovs.shape", 1, &parameters, SizePx::new(64, 64))
-            .expect("published");
+        let mut source =
+            GeneratorSource::new("ovs.shape", &parameters, SizePx::new(64, 64)).expect("published");
         let frame = source.frame(0).expect("draws");
 
         assert_eq!(pixel(&frame.image, 32, 32), RED_BYTES, "the shape is solid");
@@ -3668,7 +3640,7 @@ mod tests {
         // a boundary it does not have.
         for extent in [(0.0, 40.0), (40.0, 0.0), (0.0, 0.0)] {
             let parameters = shape(ELLIPSE, extent, 30.0, RED, BLUE);
-            let mut source = GeneratorSource::new("ovs.shape", 1, &parameters, SizePx::new(64, 64))
+            let mut source = GeneratorSource::new("ovs.shape", &parameters, SizePx::new(64, 64))
                 .expect("published");
             let frame = source.frame(0).expect("draws");
 
@@ -3688,7 +3660,7 @@ mod tests {
         // was asked for; a size that is not a number is not a size.
         let fill = |width: f64| {
             let parameters = shape(RECTANGLE, (width, 8192.0), 0.0, RED, BLUE);
-            let mut source = GeneratorSource::new("ovs.shape", 1, &parameters, SizePx::new(64, 64))
+            let mut source = GeneratorSource::new("ovs.shape", &parameters, SizePx::new(64, 64))
                 .expect("published");
             let frame = source.frame(0).expect("draws");
             (
@@ -3711,7 +3683,7 @@ mod tests {
         let parameters = shape(RECTANGLE, (32.0, 32.0), 0.0, RED, BLUE);
         let on = |side: u32| {
             let mut source =
-                GeneratorSource::new("ovs.shape", 1, &parameters, SizePx::new(side, side))
+                GeneratorSource::new("ovs.shape", &parameters, SizePx::new(side, side))
                     .expect("published");
             count(&source.frame(0).expect("draws").image, RED_BYTES)
         };
@@ -3730,7 +3702,7 @@ mod tests {
         // half of it, an ellipse about four fifths, a rectangle all of it.
         let area = |figure: &str| {
             let parameters = shape(figure, (48.0, 48.0), 0.0, RED, BLUE);
-            let mut source = GeneratorSource::new("ovs.shape", 1, &parameters, SizePx::new(64, 64))
+            let mut source = GeneratorSource::new("ovs.shape", &parameters, SizePx::new(64, 64))
                 .expect("published");
             count(&source.frame(0).expect("draws").image, RED_BYTES)
         };
@@ -3750,8 +3722,8 @@ mod tests {
         // that turned by itself would need a rate nothing has asked for, and it
         // would be a new manifest rather than this one.
         let parameters = shape(TRIANGLE, (40.0, 24.0), 20.0, RED, BLUE);
-        let mut source = GeneratorSource::new("ovs.shape", 1, &parameters, SizePx::new(64, 64))
-            .expect("published");
+        let mut source =
+            GeneratorSource::new("ovs.shape", &parameters, SizePx::new(64, 64)).expect("published");
 
         let first = source.frame(0).expect("draws").image.pixels().to_vec();
         assert_eq!(
@@ -3774,7 +3746,7 @@ mod tests {
         // the buffer comparison in `redraw_at` meaningless and put a different
         // field on two outputs showing the same composition.
         let mut source =
-            GeneratorSource::new("ovs.noise", 1, &ParameterMap::new(), size()).expect("published");
+            GeneratorSource::new("ovs.noise", &ParameterMap::new(), size()).expect("published");
 
         assert_eq!(
             source.frame(42).expect("draws").image.pixels().to_vec(),
@@ -3792,8 +3764,7 @@ mod tests {
         // Turning the texture down fades towards grey, not towards black, so a
         // bed under a key does not get darker as the grain comes out of it.
         let parameters = ParameterMap::from([("amount".to_owned(), ParameterValue::Float(0.0))]);
-        let mut source =
-            GeneratorSource::new("ovs.noise", 1, &parameters, size()).expect("published");
+        let mut source = GeneratorSource::new("ovs.noise", &parameters, size()).expect("published");
         let frame = source.frame(0).expect("draws");
 
         for pixel in frame.image.pixels().as_chunks::<4>().0 {
@@ -3807,7 +3778,7 @@ mod tests {
             let parameters =
                 ParameterMap::from([("coloured".to_owned(), ParameterValue::Bool(coloured))]);
             let mut source =
-                GeneratorSource::new("ovs.noise", 1, &parameters, size()).expect("published");
+                GeneratorSource::new("ovs.noise", &parameters, size()).expect("published");
             source.frame(0).expect("draws")
         };
 
@@ -3838,7 +3809,7 @@ mod tests {
         let neighbours_that_differ = |scale: f64| {
             let parameters =
                 ParameterMap::from([("scale_px".to_owned(), ParameterValue::Float(scale))]);
-            let mut source = GeneratorSource::new("ovs.noise", 1, &parameters, SizePx::new(256, 1))
+            let mut source = GeneratorSource::new("ovs.noise", &parameters, SizePx::new(256, 1))
                 .expect("published");
             let frame = source.frame(0).expect("draws");
             let row: Vec<u8> = frame
@@ -3871,10 +3842,9 @@ mod tests {
         // of it differ by design and could not answer this.
         let parameters = ParameterMap::from([("colour".to_owned(), ParameterValue::Float(3.0))]);
         let mut wrong =
-            GeneratorSource::new("ovs.solid_colour", 1, &parameters, size()).expect("published");
-        let mut published =
-            GeneratorSource::new("ovs.solid_colour", 1, &ParameterMap::new(), size())
-                .expect("published");
+            GeneratorSource::new("ovs.solid_colour", &parameters, size()).expect("published");
+        let mut published = GeneratorSource::new("ovs.solid_colour", &ParameterMap::new(), size())
+            .expect("published");
 
         assert_eq!(
             wrong.frame(0).expect("draws").image.pixels(),
@@ -3886,12 +3856,7 @@ mod tests {
     fn a_generator_this_build_does_not_publish_is_not_drawn() {
         // The same answer a fixture gives: better nothing than something that
         // looks deliberate.
-        assert!(
-            GeneratorSource::new("ovs.solid_colour", 99, &ParameterMap::new(), size()).is_none()
-        );
-        assert!(
-            GeneratorSource::new("third.party.plasma", 1, &ParameterMap::new(), size()).is_none()
-        );
+        assert!(GeneratorSource::new("third.party.plasma", &ParameterMap::new(), size()).is_none());
     }
 
     #[test]
@@ -3900,7 +3865,6 @@ mod tests {
         // cost is bounded whatever a show asks for.
         let source = GeneratorSource::new(
             "ovs.solid_colour",
-            1,
             &ParameterMap::new(),
             SizePx::new(0, 100_000),
         )
@@ -3987,7 +3951,7 @@ mod preview {
                 ]),
             ),
         ] {
-            let mut source = GeneratorSource::new(type_id, 1, &parameters, SizePx::new(1280, 720))
+            let mut source = GeneratorSource::new(type_id, &parameters, SizePx::new(1280, 720))
                 .expect("published");
             let frame = source.frame(tick).expect("draws");
             image::save_buffer(

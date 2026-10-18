@@ -44,25 +44,22 @@ export function emptyCatalogue(): Catalogue {
   return { loaded: false, effects: [], generators: [] };
 }
 
-/** Returns a published effect by type and version, or null. */
-export function findEffect(catalogue: Catalogue, typeId: string, version: number): Effect | null {
-  return (
-    catalogue.effects.find((effect) => effect.type_id === typeId && effect.version === version) ??
-    null
-  );
+/**
+ * Returns the published effect of a type, or null.
+ *
+ * By type alone, because there is one module per type and it has no versions:
+ * "TV Glitch V2 ist TV Glitch. Invert V2 ist Invert" (owner, 2026-10-18). A
+ * show saved before that can still carry `version: 2` on an instance, and that
+ * instance is the same effect as the one the catalogue publishes — the number
+ * is data the document keeps, never a second module to look for.
+ */
+export function findEffect(catalogue: Catalogue, typeId: string): Effect | null {
+  return catalogue.effects.find((effect) => effect.type_id === typeId) ?? null;
 }
 
-/** Returns a published generator by type and version, or null. */
-export function findGenerator(
-  catalogue: Catalogue,
-  typeId: string,
-  version: number,
-): Generator | null {
-  return (
-    catalogue.generators.find(
-      (generator) => generator.type_id === typeId && generator.version === version,
-    ) ?? null
-  );
+/** Returns the published generator of a type, or null, by the rule `findEffect` gives. */
+export function findGenerator(catalogue: Catalogue, typeId: string): Generator | null {
+  return catalogue.generators.find((generator) => generator.type_id === typeId) ?? null;
 }
 
 /**
@@ -223,7 +220,7 @@ export interface ParameterProblem {
  *
  * Mirrors `config::manifest::problems`. A value for something the module never
  * declared is a problem too: it is nearly always a typo or a show written
- * against another version, and ignoring it means an operator setting a control
+ * against another build, and ignoring it means an operator setting a control
  * and seeing nothing happen.
  */
 export function parameterProblems(
@@ -236,7 +233,7 @@ export function parameterProblems(
     if (!declared) {
       problems.push({
         key,
-        reason: `${module.type_id} version ${module.version} has no such parameter`,
+        reason: `${module.type_id} has no such parameter`,
       });
       continue;
     }

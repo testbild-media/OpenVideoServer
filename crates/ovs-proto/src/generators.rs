@@ -4,8 +4,8 @@
 //! client cannot read a Rust constant, and an operator picking a generator needs
 //! its parameters, their types, their ranges and where they start.
 //!
-//! Manifests are immutable once published, so this is a rendering of them rather
-//! than a second source of truth.
+//! A rendering of the manifests rather than a second source of truth, and one
+//! entry a type: there is one of each.
 
 use ovs_types::config::generators::{PUBLISHED, RETIRED};
 use serde::{Deserialize, Serialize};
@@ -19,7 +19,8 @@ pub use crate::parameters::ParameterType;
 pub struct Generator {
     /// Stable type identifier, for example `ovs.solid_colour`.
     pub type_id: String,
-    /// Version. A new parameter is a new version, never a changed one.
+    /// Always one: there is one generator of each type. Still served because
+    /// a show carries the number.
     pub version: u32,
     /// What a source list shows.
     pub name: String,
@@ -36,19 +37,6 @@ pub struct GeneratorCatalogueResponse {
     pub generators: Vec<Generator>,
 }
 
-/// Whether this is the newest published version of its type.
-///
-/// A retired type is left out before this is asked; see `RETIRED`.
-///
-/// What a catalogue answers is "what can I put in a slot now", and the answer
-/// is one entry a type. An older version, where one is published, is still
-/// served to a show that names it: that is `manifest(type_id, version)`.
-fn is_newest(type_id: &str, version: u32) -> bool {
-    !PUBLISHED
-        .iter()
-        .any(|other| other.type_id == type_id && other.version > version)
-}
-
 /// Returns the catalogue for this build.
 #[must_use]
 pub fn catalogue() -> GeneratorCatalogueResponse {
@@ -56,7 +44,6 @@ pub fn catalogue() -> GeneratorCatalogueResponse {
         generators: PUBLISHED
             .iter()
             .filter(|manifest| !RETIRED.contains(&manifest.type_id))
-            .filter(|manifest| is_newest(manifest.type_id, manifest.version))
             .map(|manifest| Generator {
                 type_id: manifest.type_id.to_owned(),
                 version: manifest.version,
@@ -78,30 +65,22 @@ mod tests {
     use ovs_types::config::generators::manifest;
 
     #[test]
-    fn the_catalogue_offers_the_newest_of_every_published_type() {
+    fn the_catalogue_offers_one_of_every_published_type() {
         let catalogue = catalogue();
 
-        // One entry a type that is still offered: the newest version of it,
-        // and nothing that has been retired.
-        let mut types: Vec<&str> = PUBLISHED
+        // One entry a type that is still offered, and nothing that has been
+        // retired. There is only one of each to offer.
+        let types: Vec<&str> = PUBLISHED
             .iter()
             .map(|manifest| manifest.type_id)
             .filter(|type_id| !RETIRED.contains(type_id))
             .collect();
-        types.sort_unstable();
-        types.dedup();
         assert_eq!(catalogue.generators.len(), types.len());
 
         for rendered in &catalogue.generators {
-            let newest = PUBLISHED
-                .iter()
-                .filter(|manifest| manifest.type_id == rendered.type_id)
-                .map(|manifest| manifest.version)
-                .max()
-                .expect("a version of a type that is in the catalogue");
-            assert_eq!(rendered.version, newest, "{}", rendered.type_id);
+            assert_eq!(rendered.version, 1, "{}", rendered.type_id);
 
-            let manifest = manifest(&rendered.type_id, rendered.version).expect("published");
+            let manifest = manifest(&rendered.type_id).expect("published");
             assert_eq!(rendered.parameters.len(), manifest.parameters.len());
         }
     }
@@ -113,7 +92,7 @@ mod tests {
         // nobody finds a hole where a layer used to be.
         for type_id in RETIRED {
             assert!(
-                manifest(type_id, 1).is_some(),
+                manifest(type_id).is_some(),
                 "{type_id} is retired, which is not the same as gone"
             );
             assert!(
@@ -127,21 +106,14 @@ mod tests {
     }
 
     #[test]
-    fn the_test_pattern_is_published_at_version_two_with_nothing_below_it() {
-        // The one hole in the version numbers, and a deliberate one. Version
-        // one drew a grid, bars and a centre cross and is gone (owner,
-        // 2026-10-15: "Testpattern v1 soll nicht existieren. Nur noch v2 und
-        // das wird zum normalen Testpattern"); the number stays where it is
-        // because saved shows name it.
-        assert!(
-            manifest("ovs.test_pattern", 1).is_none(),
-            "version one is published again"
-        );
-        assert!(manifest("ovs.test_pattern", 2).is_some());
+    fn the_test_pattern_is_one_generator_like_every_other() {
+        // It was numbered two once, with nothing below it. There is one
+        // of each now, so it is one, and a show naming two finds it.
+        assert!(manifest("ovs.test_pattern").is_some());
         assert!(catalogue()
             .generators
             .iter()
-            .any(|generator| generator.type_id == "ovs.test_pattern" && generator.version == 2));
+            .any(|generator| generator.type_id == "ovs.test_pattern" && generator.version == 1));
     }
 
     #[test]

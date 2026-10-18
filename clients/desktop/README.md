@@ -762,12 +762,9 @@ library itself listed with each item's picture, name, state and what the server
 measured, what shows use each one, and delete — refused, with the shows
 named, while one does.
 
-One thing in the patch page waits on the server rather than on this client:
-**an effect or generator fixture**. `FixtureTarget::Effect` takes an
-`EffectInstanceId`, the panel offers any effect instance in the document whose
-type and version a published personality matches, and no module publishes one —
-`PersonalityTarget` has `master` and `layer` and nothing else. So the control is
-there, reads the catalogue for what to offer, and finds nothing; it says so
-rather than leaving a gap. A generator in a slot cannot be patched at all,
-because a `SourceRef::Generator` carries a type and a version and no instance
-identifier for a patch entry to point at.
+**Effect and generator fixtures** are patched the same way: the panel offers
+every effect instance in the document, and every generator sitting in a slot,
+whose type has a published personality. A personality is found by its type
+alone — there is one of each and no versions of it (owner, 2026-10-18: "Es gibt
+kein Invert V2.. nirgendwo") — so an instance saved while its module was
+numbered two is offered and driven like any other.

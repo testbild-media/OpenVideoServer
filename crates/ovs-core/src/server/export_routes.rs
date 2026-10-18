@@ -143,6 +143,10 @@ pub async fn import(
         .map_err(|error| ApiFailure::conflict("unsupported_schema", error.to_string()))?;
 
     let mut show = package.show;
+    // Before it is checked: a package exported while a module still had a
+    // second version names that number, and a patch entry the footprint
+    // it had then.
+    show.adopt_one_of_each();
     show.validate().map_err(ApiFailure::invalid)?;
 
     let mut relinked = Vec::new();
@@ -230,9 +234,7 @@ fn relink_chain(
     to: MediaItemId,
 ) {
     for instance in chain {
-        let Some(manifest) =
-            ovs_types::config::effects::manifest(&instance.type_id, instance.version)
-        else {
+        let Some(manifest) = ovs_types::config::effects::manifest(&instance.type_id) else {
             // An effect this build does not publish keeps whatever it was
             // saved with: its parameters are not ours to read, and rewriting
             // one by guessing which of them names a picture would be worse

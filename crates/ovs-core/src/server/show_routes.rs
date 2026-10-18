@@ -258,6 +258,9 @@ pub async fn save(
     // this that can go back and rewrite what is already on disk.
     let mut show = request.show;
     show.assign_missing_ids();
+    // A client's copy of a show opened before there was one of each can
+    // still carry the old numbers; it is stored as the modules now are.
+    show.adopt_one_of_each();
 
     // **A show that is not loaded cannot be edited** (owner, 2026-09-24: "man
     // kann keine fremde show bearbeiten wenn eine andere show geladen ist").
@@ -342,6 +345,7 @@ pub async fn capture(
             )
         })?;
     show.assign_missing_ids();
+    show.adopt_one_of_each();
 
     let updated_at = state.with_database(|database| database.save_show(&show))?;
 

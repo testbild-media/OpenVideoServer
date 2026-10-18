@@ -22,13 +22,12 @@ export type { BlendMode, PlaybackDirection, PlaybackMode, Route, SlotSync, Trans
 /**
  * What a slot plays, reduced to what a pad has to label.
  *
- * A generator carries its manifest version and the parameters the show set,
- * because the work area's GENERATOR tab reads them: a value is only meaningful
- * beside the manifest that declared it, and a manifest is only findable by type
- * *and* version (published manifests are immutable). They are carried
- * to be read. Nothing on the live screen writes one back — there is no endpoint
- * that would, which is what that tab says. An *effect* instance is a different
- * case now, and `set_effect` below is why.
+ * A generator carries the parameters the show set, because the work area's
+ * GENERATOR tab reads them: a value is only meaningful beside the manifest that
+ * declared it, and that manifest is found by the generator's type alone. They
+ * are carried to be read. Nothing on the live screen writes one back — there is
+ * no endpoint that would, which is what that tab says. An *effect* instance is a
+ * different case now, and `set_effect` below is why.
  */
 export type SlotSource =
   | { kind: 'media'; mediaItemId: string }
@@ -60,6 +59,15 @@ export type SlotSource =
        */
       instanceId: string | null;
       typeId: string;
+      /**
+       * The number the document stores beside the type.
+       *
+       * Carried only because a `SourceRef` has the field, so a generator
+       * dropped from the browser goes onto the wire with the catalogue's own
+       * number in it. It names nothing: there is one module per type and no
+       * versions of it (owner, 2026-10-18), so a generator is never looked up
+       * or shown by this.
+       */
       version: number;
       /** The values the show set, keyed by the manifest's own names. */
       parameters: Record<string, ParameterValue>;

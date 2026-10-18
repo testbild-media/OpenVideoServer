@@ -145,6 +145,7 @@ fn store(
     // before it sends — which is why it sat here unnoticed.
     let mut show = show;
     show.assign_missing_ids();
+    show.adopt_one_of_each();
 
     let show_id = show.id;
     let updated_at = state.with_database(|database| database.save_show(&show))?;
@@ -308,7 +309,7 @@ pub async fn set_banks(
 /// # Errors
 ///
 /// Returns [`ApiFailure`] when the show or layer is not there, or when this
-/// build does not publish that effect at that version.
+/// build does not publish that effect.
 pub async fn add_layer_effect(
     State(state): State<AppState>,
     headers: HeaderMap,

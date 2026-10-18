@@ -64,12 +64,10 @@ pub enum StateError {
     /// a build that has an effect this one does not. Nothing can be
     /// validated against a manifest that is not here, so the value is refused
     /// rather than applied unchecked.
-    #[error("{type_id} version {version} is not published by this build")]
+    #[error("{type_id} is not published by this build")]
     UnpublishedEffect {
         /// The effect type the instance names.
         type_id: String,
-        /// The manifest version it names.
-        version: u32,
     },
 
     /// The show has no generator instance with that identity.
@@ -83,12 +81,10 @@ pub enum StateError {
     ///
     /// The same as [`UnpublishedEffect`](Self::UnpublishedEffect) for the other
     /// kind of module: a show from a build with a plugin this one lacks.
-    #[error("this build does not publish generator {type_id} version {version}")]
+    #[error("this build does not publish generator {type_id}")]
     UnpublishedGenerator {
         /// The generator type the slot names.
         type_id: String,
-        /// The manifest version it names.
-        version: u32,
     },
 
     /// A live value does not match what the effect declares for that parameter.
@@ -261,6 +257,9 @@ impl AuthoritativeState {
         // that everything downstream — a patch, a live value, the renderer —
         // sees one identity for the whole time the show is open.
         show.assign_missing_ids();
+        // And one of each: a show saved while a module still had a second
+        // version opens numbered as the module now is.
+        show.adopt_one_of_each();
         self.master = MasterLive::on_restart(&show.master, snapshot);
         self.layers = show
             .layers
@@ -396,6 +395,7 @@ impl AuthoritativeState {
     /// field-level diff is more machinery than this deserves.
     pub fn replace_show(&mut self, mut show: Show) -> SequencedChange {
         show.assign_missing_ids();
+        show.adopt_one_of_each();
 
         let mut layers = BTreeMap::new();
         for layer in &show.layers {
@@ -647,8 +647,8 @@ impl AuthoritativeState {
         }
 
         let show = self.show.as_ref()?;
-        let (type_id, version, parameters) = generator_instance(show, generator_instance_id)?;
-        let manifest = generators::manifest(type_id, version)?;
+        let (type_id, parameters) = generator_instance(show, generator_instance_id)?;
+        let manifest = generators::manifest(type_id)?;
         manifest.value(parameters, key)
     }
 
@@ -665,7 +665,7 @@ impl AuthoritativeState {
     ) -> Option<&'static [Choice]> {
         let show = self.show.as_ref()?;
         let instance = effect_instance(show, effect_instance_id)?;
-        let manifest = effects::manifest(&instance.type_id, instance.version)?;
+        let manifest = effects::manifest(&instance.type_id)?;
         choices_of(manifest.parameter(key)?)
     }
 
@@ -677,8 +677,8 @@ impl AuthoritativeState {
         key: &str,
     ) -> Option<&'static [Choice]> {
         let show = self.show.as_ref()?;
-        let (type_id, version, _) = generator_instance(show, generator_instance_id)?;
-        let manifest = generators::manifest(type_id, version)?;
+        let (type_id, _) = generator_instance(show, generator_instance_id)?;
+        let manifest = generators::manifest(type_id)?;
         choices_of(manifest.parameter(key)?)
     }
 
@@ -703,17 +703,15 @@ impl AuthoritativeState {
         reset: bool,
     ) -> Result<Option<SequencedChange>, StateError> {
         let show = self.show.as_ref().ok_or(StateError::NoShow)?;
-        let (type_id, version, _) = generator_instance(show, generator_instance_id).ok_or(
+        let (type_id, _) = generator_instance(show, generator_instance_id).ok_or(
             StateError::UnknownGenerator {
                 generator_instance_id,
             },
         )?;
-        let manifest = generators::manifest(type_id, version).ok_or_else(|| {
-            StateError::UnpublishedGenerator {
+        let manifest =
+            generators::manifest(type_id).ok_or_else(|| StateError::UnpublishedGenerator {
                 type_id: type_id.to_owned(),
-                version,
-            }
-        })?;
+            })?;
 
         for (key, value) in overrides {
             if let Some(reason) = manifest.refuse(key, value) {
@@ -790,7 +788,7 @@ impl AuthoritativeState {
 
         let show = self.show.as_ref()?;
         let instance = effect_instance(show, effect_instance_id)?;
-        let manifest = effects::manifest(&instance.type_id, instance.version)?;
+        let manifest = effects::manifest(&instance.type_id)?;
         manifest.value(&instance.parameters, key)
     }
 
@@ -825,12 +823,10 @@ impl AuthoritativeState {
         let show = self.show.as_ref().ok_or(StateError::NoShow)?;
         let instance = effect_instance(show, effect_instance_id)
             .ok_or(StateError::UnknownEffect { effect_instance_id })?;
-        let manifest = effects::manifest(&instance.type_id, instance.version).ok_or_else(|| {
-            StateError::UnpublishedEffect {
+        let manifest =
+            effects::manifest(&instance.type_id).ok_or_else(|| StateError::UnpublishedEffect {
                 type_id: instance.type_id.clone(),
-                version: instance.version,
-            }
-        })?;
+            })?;
 
         // Everything is checked before anything is applied. A request naming
         // three parameters, one of them wrong, must not leave an effect halfway
@@ -936,13 +932,13 @@ fn choices_of(
 
 /// Finds one generator instance in a show, wherever its slot is.
 ///
-/// Returns what a caller needs to check a value against: the type, the version
-/// and what the slot configured. A generator is a source rather than a chain
+/// Returns what a caller needs to check a value against: the type and what the
+/// slot configured. A generator is a source rather than a chain
 /// entry, so there is one per slot and the identity is the slot's own.
 fn generator_instance(
     show: &Show,
     generator_instance_id: GeneratorInstanceId,
-) -> Option<(&str, u32, &ParameterMap)> {
+) -> Option<(&str, &ParameterMap)> {
     show.layers
         .iter()
         .flat_map(|layer| layer.slots.iter())
@@ -950,11 +946,9 @@ fn generator_instance(
             ovs_types::config::SourceRef::Generator {
                 instance_id,
                 type_id,
-                version,
                 parameters,
-            } if *instance_id == generator_instance_id => {
-                Some((type_id.as_str(), *version, parameters))
-            }
+                ..
+            } if *instance_id == generator_instance_id => Some((type_id.as_str(), parameters)),
             _ => None,
         })
 }
@@ -1830,7 +1824,7 @@ mod tests {
 
     #[test]
     fn a_live_value_for_a_parameter_the_effect_never_declared_is_refused() {
-        // Nearly always a typo or a client written against another version.
+        // Nearly always a typo.
         // Accepting it silently means an operator moving a control and seeing
         // nothing happen.
         let mut state = AuthoritativeState::new();
@@ -1844,7 +1838,10 @@ mod tests {
         let error = state
             .set_effect_parameters(blur, &values, false)
             .expect_err("a blur has no brightness");
-        assert!(error.to_string().contains("ovs.blur version 1"), "{error}");
+        assert!(
+            error.to_string().contains("ovs.blur has no such parameter"),
+            "{error}"
+        );
     }
 
     #[test]
