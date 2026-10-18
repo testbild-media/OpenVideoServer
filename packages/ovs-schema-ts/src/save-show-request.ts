@@ -362,9 +362,7 @@ export interface FixtureInstance {
    */
   universe: number;
   /**
-   * Definition version this patch was created against.
-   *
-   * Published fixture definitions are immutable, because a console has the channel layout physically programmed into its show file.
+   * Always one, and not read: there is one personality of each type. What keeps a console's programmed layout and the server's in step is the footprint below, which validation holds to the personality's.
    */
   version: number;
 }
@@ -487,9 +485,7 @@ export interface EffectInstance {
    */
   type_id: string;
   /**
-   * Manifest version this instance was configured against.
-   *
-   * Published manifests are immutable, so an old show keeps loading the exact effect behaviour it was built with.
+   * Always one, and not read: there is one effect of each type (owner, 2026-10-18: "Es gibt kein Invert V2.. nirgendwo"). Kept because shows carry it; [`crate::config::Show::adopt_one_of_each`] sets it to one in a show saved while some effects had a second version.
    */
   version: number;
 }

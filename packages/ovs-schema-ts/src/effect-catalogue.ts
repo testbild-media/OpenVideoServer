@@ -92,7 +92,7 @@ export interface Effect {
    */
   type_id: string;
   /**
-   * Version. A new parameter is a new version, never a changed one.
+   * Always one: there is one effect of each type. Still served because a show carries the number.
    */
   version: number;
 }

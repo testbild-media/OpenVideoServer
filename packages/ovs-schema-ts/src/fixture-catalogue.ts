@@ -82,7 +82,7 @@ export interface Personality {
    */
   type_id: string;
   /**
-   * Version. A new control is a new version, never a changed one.
+   * Always one: there is one personality of each type. A patch entry still carries the number, so it is still served.
    */
   version: number;
 }
