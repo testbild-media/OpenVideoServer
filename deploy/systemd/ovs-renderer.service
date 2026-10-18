@@ -3,6 +3,13 @@ Description=OpenVideoServer renderer (owns the GPU and the show outputs)
 Documentation=https://github.com/testbild-media/OpenVideoServer
 After=network-online.target
 
+# The NVIDIA compute device, made as root before this starts. Wanted rather
+# than required: on a machine with no NVIDIA card that unit is skipped, and the
+# renderer must start regardless. Why it is a unit of its own and not a line
+# here is in `ovs-nvidia-uvm.service`.
+Wants=ovs-nvidia-uvm.service
+After=ovs-nvidia-uvm.service
+
 # Deliberately not ordered against ovsd. The renderer listens and the core
 # connects to it, so that ovsd stopping, crashing or being upgraded is a caller
 # going away rather than a server going down. Either may start first;
@@ -20,19 +27,10 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=exec
-# **Before anything: make sure the card's compute node exists.**
-#
-# NVDEC is reached through CUDA, and CUDA needs `/dev/nvidia-uvm`. Nothing
-# creates it at boot — the module loads on demand and the node is made by
-# `nvidia-modprobe`, which is setuid root for exactly this. Until something
-# asks, it is not there, and `cuInit` fails with `CUDA_ERROR_UNKNOWN`: every
-# clip then decodes on the processor, with one line about "an error in an
-# external library" to explain it. The card is fine; nobody asked it anything.
-#
-# Found after a reboot on 2026-09-26. Idempotent, a few milliseconds, and the
-# leading `-` means a machine without the tool — an AMD or Intel one — starts
-# exactly as before.
-ExecStartPre=-/usr/bin/nvidia-modprobe -u -c 0
+# The card's compute node is made before this starts, by
+# `ovs-nvidia-uvm.service` (see `Wants=` above). It used to be an
+# `ExecStartPre=` here, which this unit's own sandbox stopped from doing
+# anything.
 
 ExecStart=/usr/bin/ovs-renderer
 Environment=OVS_RENDERER_BIND=127.0.0.1:7421
