@@ -687,6 +687,67 @@ pub const ECHO_V1: EffectManifest = EffectManifest {
     ],
 };
 
+/// The picture thrown about at random, zoomed in so that it never leaves the
+/// frame.
+///
+/// The owner, 2026-10-18: "Der Effekt sollte halt in allen richtungen zufällig
+/// shaken.. allerdings sollte beim Shaken ja leicht reingezoomt werden, damit
+/// man nicht außerhalb des Bildbereichs geht", and on the channels: "Shake
+/// reicht 8 Bit. für Amount. Müssen nicht mehr Kanäle Nutzen als wir brauchen".
+///
+/// **`amount` is how far it goes**, up to [`SHAKE_REACH`] of the picture's
+/// shorter side in every direction, and how far it zooms in to cover that: at
+/// nought it neither moves nor zooms, which is the published default and the
+/// picture untouched. It is the module's dimmer on a desk, so a group master
+/// pulled down stills every shake at once.
+///
+/// **`hz` is how often it heads somewhere new**, a second. Between two places
+/// it eases rather than jumps, so a fast shake is a shake and not a flicker.
+/// Where it goes is the same on every output and every layer at one moment,
+/// as every effect that reads the clock is.
+///
+/// No rotation: asked about and left out, because turning as well would need a
+/// deeper zoom for the same shake.
+pub const SHAKE_V1: EffectManifest = EffectManifest {
+    type_id: "ovs.shake",
+    version: 1,
+    name: "Shake",
+    description: "Shakes the picture about at random, zoomed in so it never leaves the frame.",
+    parameters: &[
+        ParameterDefinition {
+            key: "amount",
+            name: "Amount",
+            kind: ParameterKind::Number {
+                min: 0.0,
+                max: 1.0,
+                default: 0.0,
+            },
+            dmx: Some(DmxChannel::Coarse),
+        },
+        ParameterDefinition {
+            key: "hz",
+            name: "Speed",
+            kind: ParameterKind::Number {
+                // **Mine**, offered to the owner and taken: from a slow sway
+                // at half a place a second to a rattle at twenty, with eight
+                // as the shake somebody means when they say shake.
+                min: 0.5,
+                max: 20.0,
+                default: 8.0,
+            },
+            dmx: Some(DmxChannel::Coarse),
+        },
+    ],
+};
+
+/// How far a shake at full goes, as a fraction of the picture's shorter side.
+///
+/// **Mine**, offered to the owner on 2026-10-18 and taken: a tenth, which
+/// needs the picture zoomed to one and a quarter to keep its edges out of
+/// sight. Measured against the shorter side so the shake goes as far across as
+/// up and down, in pixels, whatever shape the picture is.
+pub const SHAKE_REACH: f64 = 0.1;
+
 /// Four edges off the picture.
 ///
 /// What somebody reaches for when a camera feed has a letterbox in it, when a
@@ -765,7 +826,7 @@ pub const CROP_V1: EffectManifest = EffectManifest {
 /// Versionsvergabe und ist auch nicht gewünscht. TV Glitch V2 ist TV Glitch.
 /// Invert V2 ist Invert." — and again: "Es gibt kein Invert V2.. nirgendwo."
 /// Every module is version one, and [`manifest`] finds one by its type alone.
-pub const PUBLISHED: [EffectManifest; 14] = [
+pub const PUBLISHED: [EffectManifest; 15] = [
     COLOUR_CORRECT_V1,
     TINT_V1,
     PIXELATE_V1,
@@ -780,6 +841,7 @@ pub const PUBLISHED: [EffectManifest; 14] = [
     INVERT_V1,
     EDGES_V1,
     ECHO_V1,
+    SHAKE_V1,
 ];
 
 /// How far out of vertical hold the picture can be thrown, as a fraction of

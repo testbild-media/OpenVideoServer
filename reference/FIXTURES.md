@@ -468,6 +468,22 @@ Footprint: **3 channels**. Patch to: **one effect instance in a chain**.
 | 0–127 | `behind` |
 | 128–255 | `lighten` |
 
+## Shake — `ovs.shake`
+
+Footprint: **2 channels**. Patch to: **one effect instance in a chain**.
+
+| Channel | Name | Control | Values | Home |
+|---|---|---|---|---|
+| 1 | Amount | `amount` | 0 at 0, 1 at 255 | 0 |
+| 2 | Speed | `hz` | 0.5 at 0, 20 at 255 | 98 |
+
+### Where the values sit
+
+| Channel | Name | Bottom | Middle | Top | Home |
+|---|---|---|---|---|---|
+| 1 | Amount | `0` → 0 | `128` → 0.502 | `255` → 1 | `0` → 0 |
+| 2 | Speed | `0` → 0.5 | `128` → 10.288 | `255` → 20 | `98` → 7.994 |
+
 ## Solid Colour — `ovs.solid_colour`
 
 Footprint: **4 channels**. Patch to: **one generator instance in a slot**.

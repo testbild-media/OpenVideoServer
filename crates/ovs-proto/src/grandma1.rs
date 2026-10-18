@@ -722,7 +722,7 @@ fn attribute_of(
 /// thresholds and amounts, widths of lines, the choices. Nor Crop, whose
 /// edges would be the shutter's blades, which side being which blade being
 /// something neither the library nor the owner could say.
-const VISUALISED: [(&str, &str, &str, Option<&str>); 22] = [
+const VISUALISED: [(&str, &str, &str, Option<&str>); 23] = [
     // Nothing on the desk is a gamma. The owner: "Gamma würde ich etwas
     // nehmen wo man auch 1.0-3.0 oder ähnlich nehmen kann" — and Brightness
     // is one he has seen take 0.0 to 4.0.
@@ -794,6 +794,9 @@ const VISUALISED: [(&str, &str, &str, Option<&str>); 22] = [
     // Flashes a second, as MA's own strobes are.
     ("ovs.strobe", "hz", "STROBE", None),
     ("ovs.invert", "hz", "STROBE", None),
+    // Not a flash: how often a shake heads somewhere new, which is the
+    // desk's Speed (offered to the owner as such, 2026-10-18).
+    ("ovs.shake", "hz", "VIDEO_SPEED", None),
 ];
 
 /// A hue's colours, in degrees. The owner, 2026-10-18: "Bei Hue kannst du noch
@@ -1213,6 +1216,7 @@ mod tests {
             "OVS FX Blur",
             "OVS FX Echo",
             "OVS FX Invert",
+            "OVS FX Shake",
             "OVS FX TV Glitch",
             "OVS FX Colour Correct",
             "OVS Gen Solid Colour",
@@ -1573,6 +1577,7 @@ mod tests {
             "OVS FX RGB Split",
             "OVS FX Echo",
             "OVS FX Invert",
+            "OVS FX Shake",
         ] {
             assert!(named(name).contains("_ATTRIBUT \"DIM\""), "{name}");
         }
@@ -1764,6 +1769,20 @@ mod tests {
         }
         assert!(named("OVS Gen Strobe")
             .contains("{ _NAME \"Rate\" _RANGE [ 0,255] _EFF STROBE _PHYS [ 0.50, 30.00]"));
+        // Two eight-bit channels and no more: "Shake reicht 8 Bit. für
+        // Amount. Müssen nicht mehr Kanäle Nutzen als wir brauchen".
+        let shake = named("OVS FX Shake");
+        assert!(shake.contains("ovs.shake, 2 channels"), "{shake}");
+        assert!(
+            shake.contains("{ _NAME \"Amount\" _RANGE [ 0,255] _EFF DIMMER"),
+            "{shake}"
+        );
+        assert!(
+            shake.contains(
+                "{ _NAME \"Speed\" _RANGE [ 0,255] _EFF VIDEO_SPEED _PHYS [ 0.50, 20.00]"
+            ),
+            "{shake}"
+        );
         // "Gamma würde ich etwas nehmen wo man auch 1.0-3.0 oder ähnlich
         // nehmen kann"; "RGB Correct ist angenommen"; "Tint wäre % okay".
         assert!(correct.contains(

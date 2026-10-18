@@ -85,6 +85,9 @@ pub enum PassKind {
     /// The picture over what it was a moment ago, fading. The one pass that
     /// remembers, through the picture its instance keeps.
     Echo,
+    /// The picture thrown about at random and zoomed in to cover it. Reads the
+    /// clock, like the glitch.
+    Shake,
 }
 
 impl PassKind {
@@ -109,6 +112,7 @@ impl PassKind {
             Self::Invert => 14,
             Self::Edges => 15,
             Self::Echo => 16,
+            Self::Shake => 17,
         }
     }
 }
@@ -318,6 +322,22 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
                 // Which way the newest frame meets the trail, as a code: the
                 // newest in front, or whichever is brighter.
                 f32::from(u8::from(values.choice("mode") == "lighten")),
+                0.0,
+                0.0,
+            ],
+            colour: [0.0; 4],
+            mask: None,
+            history: None,
+        }),
+        // How far it may go crosses as a fraction of the shorter side, already
+        // scaled by the amount: the reach at full is a number of ours and
+        // lives beside the manifest, as the glitch's does. Appended at amount
+        // nought as well, which the shader returns untouched.
+        "ovs.shake" => into.push(EffectPass {
+            kind: PassKind::Shake,
+            values: [
+                number("amount") * effects::SHAKE_REACH as f32,
+                number("hz"),
                 0.0,
                 0.0,
             ],

@@ -22,7 +22,7 @@
 //! Every published effect is neutral at its published defaults: that is the
 //! promise the effect list makes, and the renderer proves it by drawing each
 //! one and comparing. A tile drawn at the defaults would therefore be the
-//! reference picture, fourteen times over.
+//! reference picture, once for every effect.
 //!
 //! Each one is drawn at a setting that shows what it does instead. Those
 //! settings are **mine, and they are for the tile alone** — nothing a show ever
@@ -56,8 +56,8 @@ const TILE: SizePx = SizePx::new(320, 180);
 /// What the reference pattern's caption calls itself.
 ///
 /// Not `COMPOSITION`, which is what a real surface says: this picture is not a
-/// surface and a tile claiming to be one would be a small lie repeated
-/// fourteen times.
+/// surface and a tile claiming to be one would be a small lie repeated on
+/// every tile.
 const REFERENCE: &str = "EFFECT";
 
 /// How far into the pattern's own run the reference is taken.
@@ -202,21 +202,51 @@ const ECHO_FRAMES: u32 = 5;
 /// own coordinates, where the wall is two across.
 const ECHO_PICTURE: f32 = 0.7;
 
+/// How many places the shake's tile shows the picture thrown to.
+///
+/// **Mine, for the tile alone.** A shake is a movement, and one still of it is
+/// only a crop. So its tile throws the picture to five places in turn, one
+/// step of the published speed apart, with an echo after it — the device the
+/// echo's own tile uses — so the newest place is in front and the ones before
+/// it fade behind. The picture is drawn smaller than the wall, as the echo's
+/// is, because a trail behind a full-frame picture has nowhere to be seen.
+const SHAKE_FRAMES: u32 = 5;
+
+/// When the shake's tile starts, on the clock the passes read.
+///
+/// **Mine**: any whole number of the shake's steps would do, and this one
+/// throws the picture to five places that are far enough apart to read.
+const SHAKE_FROM_SECONDS: f32 = 3.0;
+
 /// One effect's tile-sized picture, at the setting that shows what it does.
 fn picture_of(canvas: &mut Canvas, type_id: &str) -> Option<DecodedImage> {
-    let instance = EffectInstance {
+    let mut chain = vec![EffectInstance {
         parameters: settings(type_id, canvas.mask),
         ..EffectInstance::new(type_id, 1)
+    }];
+
+    // Every effect but two is a function of the frame it is handed, and is
+    // drawn once over the whole wall. The echo is drawn as a move, ending on
+    // the right, so the tile is the picture with what it just was behind it;
+    // the shake is drawn as five places, with an echo behind them.
+    let moves = type_id == "ovs.echo";
+    let shakes = type_id == "ovs.shake";
+    if shakes {
+        chain.push(EffectInstance {
+            parameters: settings("ovs.echo", canvas.mask),
+            ..EffectInstance::new("ovs.echo", 1)
+        });
+    }
+    let frames = if moves {
+        ECHO_FRAMES
+    } else if shakes {
+        SHAKE_FRAMES
+    } else {
+        1
     };
 
     let mut passes = Vec::new();
-    ovs_renderer::effects::passes_into(std::slice::from_ref(&instance), &mut passes);
-
-    // Every effect but one is a function of the frame it is handed, and is
-    // drawn once over the whole wall. The echo is drawn as a move, ending on
-    // the right, so the tile is the picture with what it just was behind it.
-    let moves = type_id == "ovs.echo";
-    let frames = if moves { ECHO_FRAMES } else { 1 };
+    ovs_renderer::effects::passes_into(&chain, &mut passes);
 
     let layer = LayerId::new();
     for step in 0..frames {
@@ -225,9 +255,18 @@ fn picture_of(canvas: &mut Canvas, type_id: &str) -> Option<DecodedImage> {
             let centre = -0.6 + 1.2 * travelled;
             let half = ECHO_PICTURE / 2.0;
             (centre - half, centre + half, -half, half)
+        } else if shakes {
+            let half = ECHO_PICTURE / 2.0;
+            (-half, half, -half, half)
         } else {
             (-1.0, 1.0, -1.0, 1.0)
         };
+        if shakes {
+            let hz = ovs_types::config::effects::SHAKE_V1.number(&chain[0].parameters, "hz") as f32;
+            canvas
+                .backend
+                .set_effect_time(SHAKE_FROM_SECONDS + step as f32 / hz);
+        }
 
         let mut scene = Scene::new();
         scene.set_effects(layer, &passes);
@@ -251,6 +290,11 @@ fn picture_of(canvas: &mut Canvas, type_id: &str) -> Option<DecodedImage> {
             .backend
             .compose(FrameRequest { index: 0 }, &scene)
             .ok()?;
+    }
+    if shakes {
+        // Back to the moment every other tile is drawn at, whichever comes
+        // next.
+        canvas.backend.set_effect_time(0.0);
     }
 
     // Scaled by the card on the way back rather than averaged here: this is
@@ -323,6 +367,9 @@ fn settings(type_id: &str, mask: MediaItemId) -> ParameterMap {
         // thing the eye reads. Longer and they are all nearly as bright as the
         // newest, which says "copies" and not "fading".
         "ovs.echo" => ParameterMap::from([number("length_s", 0.2), choice("mode", "behind")]),
+        // All the way, at the published speed: see `SHAKE_FRAMES` for how a
+        // movement is drawn as a still.
+        "ovs.shake" => ParameterMap::from([number("amount", 1.0)]),
         // A wide frame off the sides and a narrow one off the top, so the tile
         // shows both that it cuts and that the cut is transparent.
         "ovs.crop" => ParameterMap::from([

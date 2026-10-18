@@ -104,6 +104,7 @@ const KIND_MASK: u32 = 13u;
 const KIND_INVERT: u32 = 14u;
 const KIND_EDGES: u32 = 15u;
 const KIND_ECHO: u32 = 16u;
+const KIND_SHAKE: u32 = 17u;
 
 /// How far a frame of an echo has to fade before it counts as gone, in halvings.
 ///
@@ -862,6 +863,79 @@ fn echo(uv: vec2<f32>, pixel: vec2<f32>, source: vec4<f32>) -> vec4<f32> {
     return vec4<f32>(rgb, alpha);
 }
 
+/// A number from minus one up to one, from thirty-two well-mixed bits.
+fn signed_unit(word: u32) -> f32 {
+    // Twenty-four bits, which an `f32` holds exactly.
+    return f32(word >> 8u) / 8388608.0 - 1.0;
+}
+
+/// Where a shake is along one axis at `steps`, from minus one to one.
+///
+/// A new place at random at every whole step, and an eased glide from one to
+/// the next: still at each place for an instant and quickest between them, so
+/// it reads as being thrown about rather than as a flicker. The places are
+/// mixed from the step's number and the axis, so the two axes wander apart.
+fn wander(steps: f32, axis: u32) -> f32 {
+    let whole = floor(steps);
+    let index = u32(max(whole, 0.0));
+    let here = signed_unit(mixed(index * 2u + axis));
+    let next = signed_unit(mixed((index + 1u) * 2u + axis));
+    return mix(here, next, smoothstep(0.0, 1.0, steps - whole));
+}
+
+/// One straight-alpha pixel from between four, weighted by how near each is.
+///
+/// An effect pass samples nearest, which is right for every pass that reads
+/// the pixel it is drawing or one a whole number of pixels away. A shake reads
+/// from between pixels, and moves by less than one from frame to frame: read
+/// nearest, its edges would crawl. So it blends the four itself, through
+/// premultiplied colour, so that a clear pixel beside a coloured one lends it
+/// coverage and not its black.
+fn read_between(uv: vec2<f32>) -> vec4<f32> {
+    let at = uv / effect.texel - 0.5;
+    let corner = floor(at);
+    let towards = at - corner;
+    let texel = effect.texel;
+    let a = read((corner + vec2<f32>(0.5, 0.5)) * texel);
+    let b = read((corner + vec2<f32>(1.5, 0.5)) * texel);
+    let c = read((corner + vec2<f32>(0.5, 1.5)) * texel);
+    let d = read((corner + vec2<f32>(1.5, 1.5)) * texel);
+    let top = mix(vec4<f32>(a.rgb * a.a, a.a), vec4<f32>(b.rgb * b.a, b.a), towards.x);
+    let bottom = mix(vec4<f32>(c.rgb * c.a, c.a), vec4<f32>(d.rgb * d.a, d.a), towards.x);
+    let blended = mix(top, bottom, towards.y);
+    if blended.a <= 0.0 {
+        return vec4<f32>(0.0);
+    }
+    return vec4<f32>(blended.rgb / blended.a, blended.a);
+}
+
+/// The picture thrown about at random, zoomed in so that it never leaves the
+/// frame.
+///
+/// `values` is how far it may go, as a fraction of the shorter side with the
+/// amount already in it, and how many new places a second. The zoom is the
+/// least that keeps the picture over the frame wherever it is thrown: the
+/// shake reaches as far in pixels across as up and down, so on a wide picture
+/// it is the height that runs out first, and one zoom for both axes keeps the
+/// picture its own shape.
+fn shake(uv: vec2<f32>, source: vec4<f32>) -> vec4<f32> {
+    let reach_of_shorter = max(effect.values.x, 0.0);
+    // Nought is the picture untouched, to the bit: the published default, and
+    // what the renderer proves every effect is at its defaults.
+    if reach_of_shorter <= 0.0 {
+        return source;
+    }
+    let size = 1.0 / effect.texel;
+    let reach = reach_of_shorter * min(size.x, size.y) * effect.texel;
+    let zoom = 1.0 - 2.0 * max(reach.x, reach.y);
+
+    // The clock every pass in a frame shares, so every output shakes alike.
+    let steps = effect.seconds * max(effect.values.y, 0.0);
+    let thrown = vec2<f32>(wander(steps, 0u), wander(steps, 1u)) * reach;
+
+    return read_between((uv - 0.5) * zoom + 0.5 + thrown);
+}
+
 @fragment
 fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // Straight alpha throughout, never premultiplied. What comes out of the
@@ -921,6 +995,9 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         }
         case KIND_ECHO: {
             return echo(input.uv, input.position.xy, source);
+        }
+        case KIND_SHAKE: {
+            return shake(input.uv, source);
         }
         // Unreachable: the renderer only ever writes a kind it has a branch
         // for. Returning the picture untouched is the one answer that cannot

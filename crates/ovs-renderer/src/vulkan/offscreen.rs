@@ -8946,6 +8946,94 @@ mod tests {
     }
 
     #[test]
+    fn a_shake_moves_the_picture_and_never_past_its_edge() {
+        let _gpu = crate::vulkan::one_gpu_at_a_time();
+        // The owner, 2026-10-18: "allerdings sollte beim Shaken ja leicht
+        // reingezoomt werden, damit man nicht außerhalb des Bildbereichs geht."
+        //
+        // A picture that is a ramp both ways, so every pixel says where in the
+        // picture it was read from. Read from inside, each row and column
+        // climbs end to end. Read from past an edge, the edge pixel is
+        // repeated, and two neighbours come back the same.
+        const SIDE: u32 = 64;
+        let Some(mut canvas) = backend(SIDE, SIDE) else {
+            return;
+        };
+        let media = MediaItemId::new();
+        let layer = LayerId::new();
+        canvas
+            .set_media_texture(
+                media,
+                &rgba(
+                    &pattern(SIDE, |x, y| [(x * 4) as u8, (y * 4) as u8, 90, 255]),
+                    SIDE,
+                    SIDE,
+                ),
+            )
+            .expect("uploads");
+
+        let passes = effect_at(
+            "ovs.shake",
+            1,
+            &[
+                ("amount", ParameterValue::Float(1.0)),
+                ("hz", ParameterValue::Float(8.0)),
+            ],
+        );
+        let scene = effected(layer, media, &passes);
+        let at = |frame: &[u8], x: u32, y: u32, channel: usize| {
+            frame[((y * SIDE + x) * 4) as usize + channel]
+        };
+
+        let mut seen: Vec<Vec<u8>> = Vec::new();
+        for moment in 0..40 {
+            let seconds = 3.0 + moment as f32 * 0.173;
+            canvas.set_effect_time(seconds);
+            let frame = composed_frame(&mut canvas, &scene, SIDE);
+
+            for line in 0..SIDE {
+                for step in 1..SIDE {
+                    assert!(
+                        at(&frame, step, line, 0) > at(&frame, step - 1, line, 0),
+                        "at {seconds} s the picture was read from past its side, row {line}"
+                    );
+                    assert!(
+                        at(&frame, line, step, 1) > at(&frame, line, step - 1, 1),
+                        "at {seconds} s the picture was read from past its top or \
+                         bottom, column {line}"
+                    );
+                }
+            }
+
+            // Zoomed in: a row spans less of the ramp than the picture has,
+            // by the quarter that a shake at full needs.
+            let span = at(&frame, SIDE - 1, SIDE / 2, 0) - at(&frame, 0, SIDE / 2, 0);
+            assert!(
+                (180..=215).contains(&span),
+                "a row spans {span} of 252 at {seconds} s"
+            );
+
+            // The same moment is the same picture: where it goes is a
+            // function of the clock, so every output shakes alike.
+            canvas.set_effect_time(seconds);
+            assert_eq!(
+                composed_frame(&mut canvas, &scene, SIDE),
+                frame,
+                "the same moment drew another place"
+            );
+            seen.push(frame);
+        }
+
+        seen.sort();
+        seen.dedup();
+        assert!(
+            seen.len() > 30,
+            "forty moments and only {} places",
+            seen.len()
+        );
+    }
+
+    #[test]
     fn losing_the_vertical_hold_moves_the_picture_up_and_down_and_nowhere_else() {
         let _gpu = crate::vulkan::one_gpu_at_a_time();
         // **Vertically, and only vertically** (owner, 2026-10-13: "ein

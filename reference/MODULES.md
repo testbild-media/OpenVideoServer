@@ -289,3 +289,12 @@ Leaves a fading trail of what the picture just was.
 | Length | `length_s` | a number from 0 to 10 | 0 |
 | Mode | `mode` | one of `behind` (Behind), `lighten` (Lighten) | `behind` |
 
+### Shake — `ovs.shake`
+
+Shakes the picture about at random, zoomed in so it never leaves the frame.
+
+| Parameter | Key | Takes | Default |
+|---|---|---|---|
+| Amount | `amount` | a number from 0 to 1 | 0 |
+| Speed | `hz` | a number from 0.5 to 20 | 8 |
+

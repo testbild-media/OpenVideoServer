@@ -94,6 +94,7 @@ here to it.
   | Shape width and height, Text cap height | Scale, X, Y and All | pixels |
   | Blur radius | Frost | 0 to 64 pixels |
   | Strobe and Invert rate | Strobe | hertz |
+  | Shake speed | Speed | 0.5 to 20 new places a second |
 
   Colorize's hue also has the colours as named values: Red 0, Orange 30,
   Yellow 60, Green 120, Cyan 180, Blue 240, Magenta 300. Gamma has no kind
@@ -131,6 +132,7 @@ changes nothing.
 | FX Pixelate | Block size | — | — |
 | FX RGB Correct | — | Red black, Green black, Blue black, Red white, Green white, Blue white | — |
 | FX RGB Split | Offset | Angle | — |
+| FX Shake | Amount | Speed | — |
 | FX TV Glitch | Amount | Line jumps, Snow, Rolling error, Out of sync | — |
 | Gen Gradient | — | Angle | from (foreground), to (background) |
 | Gen Shape | — | Shape, Width, Height, Rotation | foreground, background |
@@ -146,6 +148,7 @@ nothing at all at nought:
 | Module | Its dimmer | At nought |
 |---|---|---|
 | Blur, Colorize, Edges, Mask, TV Glitch | Amount | none of it |
+| Shake | Amount | still, and not zoomed |
 | Pixelate | Block size | blocks of one pixel |
 | RGB Split | Offset | no split |
 | Echo | Length | no trail |

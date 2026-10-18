@@ -1528,6 +1528,8 @@ def run_effects(report, show_id, layer_id, effects, width, height):
             full = sweep(report, route, manifest, with_effect)
             if type_id == "ovs.tv_glitch" and full is not None:
                 report.check("keeps disturbing", full.moving, "movement=%.2f" % full.movement)
+            if type_id == "ovs.shake" and full is not None:
+                report.check("keeps shaking", full.moving, "movement=%.2f" % full.movement)
 
             for label, overrides, predicate in knows.get(type_id, []):
                 complaint = refused("PUT", route, {"reset": True, "overrides": overrides})
