@@ -832,7 +832,7 @@ export class MappingPanel {
       return;
     }
 
-    const { size, render_rate: rate } = show.composition;
+    const { size } = show.composition;
     const width = this.#number(size.width, MIN_DIMENSION_PX);
     const height = this.#number(size.height, MIN_DIMENSION_PX);
     const commitSize = (): void => {
@@ -845,19 +845,8 @@ export class MappingPanel {
     width.addEventListener('change', commitSize);
     height.addEventListener('change', commitSize);
 
-    // Only the rates the model names. A composition rendered at a rate this
-    // client made up would be a number nothing measured, and the exact
-    // rational form is what keeps 60000/1001 from drifting.
-    const rates = FRAME_RATES.map((named) => ({
-      value: `${named.rate.numerator}/${named.rate.denominator}`,
-      label: `${named.label} fps`,
-    }));
-    const current = `${rate.numerator}/${rate.denominator}`;
-    if (!rates.some((option) => option.value === current)) {
-      // A document written elsewhere may carry a rate that is not one of these.
-      // It is shown as what it is and kept, never replaced.
-      rates.push({ value: current, label: `${rateText(rate)} fps (${current})` });
-    }
+    // The model's rates and every wall's own; see `compositionRateChoices`.
+    const { choices: rates, selected: current } = compositionRateChoices(show);
     const chooser = this.#select(rates, current, (value) => {
       const [numerator, denominator] = value.split('/').map(Number);
       this.#edit(
@@ -2471,6 +2460,65 @@ function grippedCorner(bounds: RectPx, grip: Grip): { x: number; y: number } {
     x: grip.includes('e') ? bounds.x + bounds.width : bounds.x,
     y: grip.includes('s') ? bounds.y + bounds.height : bounds.y,
   };
+}
+
+/**
+ * The rates a composition may be set to, and which of them it is set to now.
+ *
+ * The four the model names first, exact and rational so 60000/1001 does not
+ * drift. **Then the rate of every wall in this show that is none of them.** A
+ * wall's rate is not a number this client made up: it is the mode its
+ * connector reported, which is the panel's own, and a composition that matches
+ * it loses no frame to the difference. Without it the location server's
+ * NovaStar MCTRL300, which reports 59.998 Hz, could only be fed 60.000 or
+ * 59.94 (owner, 2026-10-18: "59,998 kann ich nicht auswählen").
+ *
+ * And the composition's own rate last, when it is none of those: a document
+ * written elsewhere is shown as what it is and kept, never replaced.
+ *
+ * `selected` is the key of the choice that *is* the current rate, compared as
+ * a value rather than as text, so 59998/1000 and 29999/500 are one choice.
+ */
+export function compositionRateChoices(show: Show): {
+  choices: Array<{ value: string; label: string }>;
+  selected: string;
+} {
+  const key = (rate: Show['composition']['render_rate']): string =>
+    `${rate.numerator}/${rate.denominator}`;
+  const same = (
+    one: Show['composition']['render_rate'],
+    other: Show['composition']['render_rate'],
+  ): boolean => one.numerator * other.denominator === other.numerator * one.denominator;
+
+  const choices = FRAME_RATES.map((named) => ({
+    value: key(named.rate),
+    label: `${named.label} fps`,
+    rate: named.rate,
+  }));
+
+  for (const output of show.outputs) {
+    const refresh = output.mode.refresh;
+    if (refresh.numerator === 0 || refresh.denominator === 0) {
+      continue;
+    }
+    if (choices.some((choice) => same(choice.rate, refresh))) {
+      continue;
+    }
+    choices.push({
+      value: key(refresh),
+      label: `${rateText(refresh)} fps — ${output.name}`,
+      rate: refresh,
+    });
+  }
+
+  const current = show.composition.render_rate;
+  let selected = choices.find((choice) => same(choice.rate, current))?.value;
+  if (selected === undefined) {
+    selected = key(current);
+    choices.push({ value: selected, label: `${rateText(current)} fps (${selected})`, rate: current });
+  }
+
+  return { choices: choices.map(({ value, label }) => ({ value, label })), selected };
 }
 
 /**

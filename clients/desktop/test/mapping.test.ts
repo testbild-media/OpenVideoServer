@@ -30,7 +30,7 @@ import {
   setPieceSource,
   validate,
 } from '../src/shared/editor.js';
-import { stageOutput } from '../src/ui/mapping.js';
+import { compositionRateChoices, stageOutput } from '../src/ui/mapping.js';
 import {
   DEFAULT_BEATS_PER_BAR,
   DEFAULT_BPM,
@@ -297,6 +297,72 @@ describe('resizing the composition', () => {
     const fresh = show();
     expect(fresh.composition.size).toEqual(DEFAULT_COMPOSITION_SIZE);
     expect(fresh.composition.render_rate).toEqual(DEFAULT_RENDER_RATE);
+  });
+
+  it("offers each wall's own rate, so a composition can match a wall at 59.998", () => {
+    // The owner, 2026-10-18, with a NovaStar MCTRL300 reporting 59.998 Hz:
+    // "59,998 kann ich nicht auswählen" — the chooser held the four rates the
+    // model names and nothing else, so the composition ran at 60.000 into it.
+    const mctrl: ConnectorInfo = {
+      gpu_pci_address: '0000:01:00.0',
+      connector: 'DP-3',
+      connected: true,
+      model: 'NOV MARS DISPLAY',
+      role: 'MEDIA_OUTPUT',
+      modes: [{ size: { width: 1280, height: 720 }, refresh_millihertz: 59_998 }],
+    };
+    const document = must(addOutput(show(), mctrl, mctrl.modes![0]!, 'Wand'));
+
+    const before = compositionRateChoices(document);
+    expect(before.choices.map((choice) => choice.label)).toContain('59.998 fps — Wand');
+    expect(before.selected).toBe('60/1');
+
+    const wall = before.choices.find((choice) => choice.label.startsWith('59.998'))!;
+    const [numerator, denominator] = wall.value.split('/').map(Number);
+    const matched = must(
+      setComposition(document, {
+        render_rate: { numerator: numerator!, denominator: denominator! },
+      }),
+    );
+    expect(validate(matched, emptyCatalogue())).toEqual([]);
+    expect(millihertzOf(matched.composition.render_rate)).toBe(59_998);
+    expect(compositionRateChoices(matched).selected).toBe(wall.value);
+  });
+
+  it('adds nothing for a wall already running at a rate the model names', () => {
+    // One choice per rate: a wall at 59.94 is the 59.94 that is already there,
+    // not a second line saying the same thing with a name on it.
+    const document = must(addOutput(show(), CONNECTORS[0]!, CONNECTORS[0]!.modes![1]!, 'Wall'));
+    const { choices } = compositionRateChoices(document);
+    expect(choices).toHaveLength(4);
+    expect(choices.filter((choice) => choice.label.startsWith('59.94'))).toHaveLength(1);
+  });
+
+  it('keeps a rate written elsewhere, matched by value rather than spelling', () => {
+    // 59998/1000 and 29999/500 are one rate. A document carrying the first must
+    // select the wall's choice, not grow a second entry for the same number.
+    const mctrl: ConnectorInfo = {
+      gpu_pci_address: '0000:01:00.0',
+      connector: 'DP-3',
+      connected: true,
+      model: null,
+      role: 'MEDIA_OUTPUT',
+      modes: [{ size: { width: 1280, height: 720 }, refresh_millihertz: 59_998 }],
+    };
+    const document = must(addOutput(show(), mctrl, mctrl.modes![0]!, 'Wand'));
+    const spelled = must(
+      setComposition(document, { render_rate: { numerator: 59_998, denominator: 1000 } }),
+    );
+    const { choices, selected } = compositionRateChoices(spelled);
+    expect(choices).toHaveLength(5);
+    expect(choices.find((choice) => choice.value === selected)!.label).toBe('59.998 fps — Wand');
+
+    const foreign = must(
+      setComposition(document, { render_rate: { numerator: 24_000, denominator: 1001 } }),
+    );
+    const kept = compositionRateChoices(foreign);
+    expect(kept.selected).toBe('24000/1001');
+    expect(kept.choices).toHaveLength(6);
   });
 });
 
