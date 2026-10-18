@@ -99,7 +99,7 @@ export function defaultValue(parameter: ModuleParameter): ParameterValue {
  * Twenty-six characters of Crockford base32, the first of them low enough that
  * the whole thing fits in a hundred and twenty-eight bits. Whether the library
  * still holds it is a different question, asked where there is a library to
- * ask â€” exactly as on the server, where the type model has none either.
+ * ask — exactly as on the server, where the type model has none either.
  */
 const IDENTIFIER = /^[0-7][0-9ABCDEFGHJKMNPQRSTVWXYZ]{25}$/;
 

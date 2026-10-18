@@ -1978,7 +1978,7 @@ export class EditorPanel {
           // A picture the library no longer has is still what the show says.
           // Dropping it from the menu would quietly empty the parameter the
           // next time anybody touched this screen.
-          select.append(option(chosen, `${chosen} â€” not in the library`));
+          select.append(option(chosen, `${chosen} — not in the library`));
         }
         select.value = chosen;
         select.addEventListener('change', () => onSet({ type: 'text', value: select.value }));
