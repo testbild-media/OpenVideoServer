@@ -9228,6 +9228,56 @@ mod tests {
     }
 
     #[test]
+    fn a_split_leaves_the_outline_of_a_picture_with_transparency() {
+        let _gpu = crate::vulkan::one_gpu_at_a_time();
+        // The owner, 2026-10-18: with graphics or clips that have alpha "werden
+        // die RGB Kanäle nicht korrekt geteilt, weil Alpha ja als Maske alles
+        // rausstanzt". Nothing on the left, white on the right: the red that
+        // crosses the edge has to show where the picture itself is clear.
+        let Some(mut canvas) = backend(32, 32) else {
+            return;
+        };
+        let media = MediaItemId::new();
+        let layer = LayerId::new();
+        canvas
+            .set_media_texture(
+                media,
+                &rgba(
+                    &pattern(32, |x, _| {
+                        if x < 16 {
+                            [0, 0, 0, 0]
+                        } else {
+                            [255, 255, 255, 255]
+                        }
+                    }),
+                    32,
+                    32,
+                ),
+            )
+            .expect("uploads");
+
+        let passes = effect_at(
+            "ovs.rgb_split",
+            1,
+            &[("offset_px", ParameterValue::Float(4.0))],
+        );
+        let frame = composed_frame(&mut canvas, &effected(layer, media, &passes), 32);
+        // Two pixels left of the edge, where the picture is clear: red reads
+        // from across the edge, green and blue from the clear side. Over the
+        // canvas's black that is red and nothing else.
+        let outside = (16 * 32 + 14) * 4;
+        close_to(frame[outside], 255, "red has left the outline");
+        close_to(frame[outside + 1], 0, "green has not");
+        close_to(frame[outside + 2], 0, "nor blue");
+        // Two pixels inside the edge: blue reads from the clear side, so the
+        // white loses its blue and nothing else.
+        let inside = (16 * 32 + 18) * 4;
+        close_to(frame[inside], 255, "red is there inside");
+        close_to(frame[inside + 1], 255, "and green");
+        close_to(frame[inside + 2], 0, "and blue has gone");
+    }
+
+    #[test]
     fn switching_invert_on_turns_every_colour_into_its_opposite() {
         let _gpu = crate::vulkan::one_gpu_at_a_time();
         // The owner, 2026-10-16: "Invert Color. mit einfachen on/off auch per

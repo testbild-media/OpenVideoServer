@@ -537,9 +537,18 @@ fn rgb_correct(source: vec4<f32>) -> vec4<f32> {
 /// composition pixels, so a look set up on one composition is the same look
 /// after the pieces are mapped onto a wall of another size.
 ///
-/// The alpha is the middle sample's: the coverage belongs to the layer, and
-/// three different coverages would put a fringe on the edge of every shape
-/// that the channels themselves do not have.
+/// **Each channel brings its own coverage**, and the pixel is as covered as
+/// the most covered of the three. That fringe on the edge of every shape is the
+/// effect: on a picture with transparency — a logo, a keyed clip — the red and
+/// the blue have to be able to leave the outline. With the middle sample's
+/// alpha, as it was, the outline cut them off and there was nothing to see
+/// (owner, 2026-10-18: "weil Alpha ja als Maske alles rausstanzt, also ist der
+/// Effekt nicht mehr gegeben").
+///
+/// Worked out premultiplied and handed on straight, as the chain is: a red
+/// that crossed from a white pixel onto a clear one is full red at that
+/// coverage, not a red darkened by the clear pixel's alpha. On a picture with
+/// no transparency every alpha is one and this is the split it always was.
 fn rgb_split(uv: vec2<f32>) -> vec4<f32> {
     let offset = max(effect.values.x, 0.0);
     let angle = radians(effect.values.y);
@@ -549,7 +558,12 @@ fn rgb_split(uv: vec2<f32>) -> vec4<f32> {
     let green = read(uv);
     let blue = read(uv - step);
 
-    return vec4<f32>(red.r, green.g, blue.b, green.a);
+    let alpha = max(max(red.a, green.a), blue.a);
+    if (alpha <= 0.0) {
+        return vec4<f32>(0.0);
+    }
+    let carried = vec3<f32>(red.r * red.a, green.g * green.a, blue.b * blue.a);
+    return vec4<f32>(carried / alpha, alpha);
 }
 
 /// A repeatable number in `0.0..1.0` from a point.
