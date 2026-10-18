@@ -177,6 +177,15 @@ export interface LayerView {
   blendMode: BlendMode;
   opacity: number;
   /**
+   * Whether a slot may be chosen here at all.
+   *
+   * False on a layer the show hands to a console (owner, 2026-10-16). The
+   * matrix then shows the slots and refuses to switch them, rather than
+   * sending a selection the server will turn down: a picture that is easy to
+   * press by accident is the reason the setting exists.
+   */
+  mayChooseSlot: boolean;
+  /**
    * Where the layer's picture sits.
    *
    * Live, and usually driven by the Layer Fixture. The show's own value is
@@ -324,6 +333,10 @@ export function toView(state: ShowState): ShowView {
       // The live one. A server older than this sends none, and what it was
       // doing then is what the document says.
       blendMode: live.blend_mode ?? layer.blend_mode,
+      // Absent on a document written before the setting existed, and on one
+      // from a server older than it — both of which let the client choose, as
+      // they always did.
+      mayChooseSlot: (layer.slot_control ?? 'either') !== 'desk_only',
       activeSlot: live.active_slot,
       trigger: live.trigger,
       defaults: {

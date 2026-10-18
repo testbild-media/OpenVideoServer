@@ -661,6 +661,8 @@ export interface LayerChange {
   blend_mode?: Layer['blend_mode'];
   default_opacity?: number;
   default_transform?: Transform2D;
+  /** Who may choose this layer's slot: the client, a console, or either. */
+  slot_control?: Layer['slot_control'];
 }
 
 /**

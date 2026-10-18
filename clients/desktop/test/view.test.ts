@@ -214,3 +214,35 @@ describe('the view', () => {
     expect(toView(state).layers.map((layer) => layer.id)).toEqual(['lower', 'upper']);
   });
 });
+
+describe("who may choose a layer's slot", () => {
+  // The owner, 2026-10-16: "Layer Slotauswahl, pro Layer von DMX oder GUI
+  // abschaltbar, also das nur eins schalten kann." The client half of that is
+  // one flag on the view, and the matrix refuses a press when it is false.
+
+  it('lets the client choose when the show says nothing', () => {
+    // Which is every show written before the setting existed. Adding it must
+    // not take a slot button away from anybody.
+    const view = toView(loaded());
+    for (const layer of view.layers) {
+      expect(layer.mayChooseSlot).toBe(true);
+    }
+  });
+
+  it('lets the client choose when the show says either or client only', () => {
+    for (const control of ['either', 'client_only'] as const) {
+      const state = loaded();
+      state.show!.layers[0]!.slot_control = control;
+      expect(toView(state).layers.find((each) => each.id === 'upper')?.mayChooseSlot).toBe(true);
+    }
+  });
+
+  it("does not when the layer is a console's", () => {
+    const state = loaded();
+    state.show!.layers[0]!.slot_control = 'desk_only';
+    const view = toView(state);
+    expect(view.layers.find((each) => each.id === 'upper')?.mayChooseSlot).toBe(false);
+    // And only that layer: the setting is per layer, which is the whole point.
+    expect(view.layers.find((each) => each.id === 'lower')?.mayChooseSlot).toBe(true);
+  });
+});

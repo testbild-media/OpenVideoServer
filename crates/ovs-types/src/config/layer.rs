@@ -107,6 +107,54 @@ pub enum BlendMode {
     Difference,
 }
 
+/// Who may choose which slot a layer plays.
+///
+/// The owner, 2026-10-16: "Layer Slotauswahl, pro Layer von DMX oder GUI
+/// abschaltbar, also das nur eins schalten kann. Ich habe layer die ich gerne
+/// transformieren möchte, aber keinen Slot auswählen möchte per DMX."
+///
+/// **It exists because the two fight.** On his rig the FX layer is driven
+/// entirely from the desk, slots included, while layers 1 to 6 have their slots
+/// picked in the client — people who are not lighting operators simply press
+/// the picture they want, which turned out to be the practical thing in the
+/// room. A console holding its slot channel at a value re-sends it forty-four
+/// times a second, so without this the desk wins every time and the button
+/// somebody just pressed comes undone under their hand.
+///
+/// This is only about *choosing a slot*. Everything else a console does to such
+/// a layer — the dimmer, the transform, the effects — is untouched, which is
+/// the whole point: he wants to transform these layers from the desk and only
+/// not to select on them.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum SlotControl {
+    /// Both may. What every show written before this field did, and so the
+    /// default: adding the setting must not change a single existing show.
+    #[default]
+    Either,
+    /// The client only. A console's slot channel is read and ignored here.
+    ClientOnly,
+    /// A console only. The client's slot buttons are refused on this layer, so
+    /// nobody takes a desk-driven layer off its cue by pressing a picture.
+    DeskOnly,
+}
+
+impl SlotControl {
+    /// Whether a console may select a slot on a layer set this way.
+    #[must_use]
+    pub const fn desk_may_select(self) -> bool {
+        matches!(self, Self::Either | Self::DeskOnly)
+    }
+
+    /// Whether a client may select a slot on a layer set this way.
+    #[must_use]
+    pub const fn client_may_select(self) -> bool {
+        matches!(self, Self::Either | Self::ClientOnly)
+    }
+}
+
 /// One compositing layer of a show.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Layer {
@@ -147,6 +195,12 @@ pub struct Layer {
     /// as one bank and still shows every slot it has — see [`Layer::bank_count`].
     #[serde(default = "one_bank")]
     pub banks: u16,
+    /// Who may choose this layer's slot.
+    ///
+    /// Absent from a document written before the setting existed, which reads
+    /// as [`SlotControl::Either`] — exactly what such a show did.
+    #[serde(default)]
+    pub slot_control: SlotControl,
     /// Effects applied to the whole layer, in chain order.
     pub effects: Vec<EffectInstance>,
 }
@@ -220,6 +274,7 @@ impl Layer {
             blend_mode: BlendMode::default(),
             slots: Vec::new(),
             banks: 1,
+            slot_control: SlotControl::Either,
             effects: Vec::new(),
         }
     }

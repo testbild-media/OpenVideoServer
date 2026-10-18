@@ -47,8 +47,9 @@ fn parse_id<T: std::str::FromStr>(raw: &str) -> ApiResult<T> {
 ///
 /// # Errors
 ///
-/// Returns [`ApiFailure`] when no show is open, or when the layer or slot is
-/// not part of the one that is.
+/// Returns [`ApiFailure`] when no show is open, when the layer or slot is not
+/// part of the one that is, or when the layer takes its slot from a console
+/// and not from here.
 pub async fn select_slot(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -58,12 +59,32 @@ pub async fn select_slot(
     authenticate(&state, &headers)?;
     let layer_id: LayerId = parse_id(&layer_id)?;
 
-    state.mutate_state(
-        |current| match current.select_slot(layer_id, request.slot_index) {
+    state.mutate_state(|current| {
+        // **The other half of the owner's switch** (2026-10-16). A layer set to
+        // take its slot from a console is one somebody is cueing from a desk,
+        // and the reason that setting exists at all is that a picture on a
+        // screen is easy to press by accident. Refused with a reason rather
+        // than ignored, because a client can say what happened and a console
+        // cannot.
+        let from_the_desk = current
+            .show()
+            .and_then(|show| show.layers.iter().find(|layer| layer.id == layer_id))
+            .is_some_and(|layer| !layer.slot_control.client_may_select());
+        if from_the_desk {
+            return (
+                Err(ApiFailure::bad_request(
+                    "slot_is_the_desks",
+                    "this layer takes its slot from a lighting console; \
+                     change that in the layer's settings to select here",
+                )),
+                None,
+            );
+        }
+        match current.select_slot(layer_id, request.slot_index) {
             Ok(change) => (Ok(()), change),
             Err(error) => (Err(ApiFailure::from(error)), None),
-        },
-    )?;
+        }
+    })?;
 
     Ok(StatusCode::NO_CONTENT)
 }

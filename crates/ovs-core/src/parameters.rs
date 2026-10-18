@@ -44,9 +44,10 @@
 //!
 //! [`Parameter`]: ovs_types::config::Parameter
 
+use ovs_types::config::layer::SlotControl;
 use ovs_types::config::slot::{ParameterMap, ParameterValue};
 use ovs_types::config::{ChannelValue, ColourPart, Parameter};
-use ovs_types::id::{EffectInstanceId, GeneratorInstanceId};
+use ovs_types::id::{EffectInstanceId, GeneratorInstanceId, LayerId};
 
 use crate::state::{AuthoritativeState, SequencedChange};
 
@@ -132,6 +133,21 @@ pub fn apply(
             let ChannelValue::Index(index) = value else {
                 return None;
             };
+            // **The layer may not take its slot from a console at all.**
+            // (owner, 2026-10-16). On his rig the slots of layers 1 to 6 are
+            // picked in the client, by people who press the picture they want,
+            // and a desk holding this channel re-sends it forty-four times a
+            // second — so without this the button they just pressed comes
+            // undone under their hand. Nothing else the console does to the
+            // layer is affected, which is the point: he drives the transform of
+            // these layers from the desk and only not the selection.
+            //
+            // Silent, like every other value a console sends that changes
+            // nothing: a log line here would be a hundred and fifty thousand an
+            // hour.
+            if !slot_control(state, layer_id).desk_may_select() {
+                return None;
+            }
             // A slot the layer does not have is refused by the state, which is
             // the right answer: a console patched against a bigger show must not
             // be able to put a layer on a slot that is not there.
@@ -140,6 +156,13 @@ pub fn apply(
         Parameter::LayerTrigger { layer_id } => {
             // Selecting the slot that is already running, which is exactly what
             // a retrigger is.
+            //
+            // **Not gated by `slot_control`**, deliberately. That setting is
+            // about *choosing* a slot, and a retrigger chooses nothing: it
+            // starts again whatever the layer is already on, whoever put it
+            // there. Taking the retrigger away from a desk as well would stop
+            // an operator re-firing a clip they can see, which is not what was
+            // asked for and is a thing they do on a beat.
             let current = state.layer(layer_id)?.active_slot;
             state.select_slot(layer_id, current).ok().flatten()
         }
@@ -255,6 +278,18 @@ fn apply_plugin(
         Plugin::Generator(id) => state.set_generator_parameters(id, &overrides, false),
     };
     moved.ok().flatten()
+}
+
+/// Who may choose this layer's slot, as the open show says.
+///
+/// [`SlotControl::Either`] for a layer this show does not have: the state
+/// refuses such a selection on its own, and answering "nobody may" here would
+/// turn a clear refusal into a value that silently did nothing.
+fn slot_control(state: &AuthoritativeState, layer_id: LayerId) -> SlotControl {
+    state
+        .show()
+        .and_then(|show| show.layers.iter().find(|layer| layer.id == layer_id))
+        .map_or(SlotControl::Either, |layer| layer.slot_control)
 }
 
 /// What one parameter of one plugin instance is worth now.
@@ -724,5 +759,133 @@ mod tests {
             .is_none(),
             "nothing changed, so nothing was said"
         );
+    }
+
+    /// Rewrites one layer's slot control in the open show.
+    fn set_control(state: &mut AuthoritativeState, layer_id: LayerId, control: SlotControl) {
+        let mut show = state.show().expect("a show").clone();
+        for layer in &mut show.layers {
+            if layer.id == layer_id {
+                layer.slot_control = control;
+            }
+        }
+        state.load_show(show, None);
+    }
+
+    /// A layer whose slots are the client's ignores the desk's slot channel.
+    ///
+    /// The owner, 2026-10-16: "Ich habe layer die ich gerne transformieren
+    /// möchte, aber keinen Slot auswählen möchte per DMX." A console holds
+    /// that channel at a value and re-sends it forty-four times a second, so
+    /// without this the slot somebody chose in the client is overwritten
+    /// before they let go of the button.
+    #[test]
+    fn a_console_cannot_select_on_a_layer_whose_slots_are_the_clients() {
+        let (mut state, layer_id) = show();
+        set_control(&mut state, layer_id, SlotControl::ClientOnly);
+
+        let before = state.layer(layer_id).expect("the layer").active_slot;
+        let moved = apply(
+            &mut state,
+            Parameter::LayerSlot { layer_id },
+            ChannelValue::Index(1),
+        );
+
+        assert!(moved.is_none(), "nothing changed, so nothing is published");
+        assert_eq!(
+            state.layer(layer_id).expect("the layer").active_slot,
+            before,
+            "the console must not have moved it"
+        );
+    }
+
+    /// And everything else the console does to that layer still works.
+    ///
+    /// The whole point of the setting: he drives the transform of these layers
+    /// from the desk and only not the selection. A switch that took the layer
+    /// away from the console altogether would be a different feature and not
+    /// the one asked for.
+    #[test]
+    fn the_rest_of_the_console_still_reaches_such_a_layer() {
+        let (mut state, layer_id) = show();
+        set_control(&mut state, layer_id, SlotControl::ClientOnly);
+
+        let moved = apply(
+            &mut state,
+            Parameter::LayerOpacity { layer_id },
+            ChannelValue::Number(0.25),
+        );
+        assert!(moved.is_some(), "the dimmer still moves");
+        let opacity = state.layer(layer_id).expect("the layer").opacity;
+        assert!((opacity - 0.25).abs() < 0.001, "got {opacity}");
+    }
+
+    /// A retrigger is not a selection, and is left alone.
+    ///
+    /// It starts again whatever the layer is already on, whoever put it there.
+    /// Taking it from a desk as well would stop an operator re-firing a clip
+    /// they can see, on a beat, which is not what was asked for.
+    #[test]
+    fn a_retrigger_still_reaches_a_layer_the_client_selects_on() {
+        let (mut state, layer_id) = show();
+        // The control first: `set_control` reloads the show, and loading one
+        // puts every layer back on its opening slot — so a slot chosen before
+        // it would be undone, which is exactly what caught this test out.
+        set_control(&mut state, layer_id, SlotControl::ClientOnly);
+        // Then on a slot, put there as the client would.
+        state.select_slot(layer_id, 1).expect("the slot exists");
+
+        let moved = apply(
+            &mut state,
+            Parameter::LayerTrigger { layer_id },
+            ChannelValue::Flag(true),
+        );
+        assert!(moved.is_some(), "a retrigger is a transport, not a choice");
+        assert_eq!(
+            state.layer(layer_id).expect("the layer").active_slot,
+            1,
+            "and it is still on the slot the client chose"
+        );
+    }
+
+    /// The default is unchanged behaviour, which is what every saved show has.
+    #[test]
+    fn a_layer_that_says_nothing_still_takes_the_consoles_slot() {
+        let (mut state, layer_id) = show();
+        assert_eq!(
+            state
+                .show()
+                .expect("a show")
+                .layers
+                .iter()
+                .find(|layer| layer.id == layer_id)
+                .expect("the layer")
+                .slot_control,
+            SlotControl::Either,
+            "adding the setting must not change a single existing show"
+        );
+
+        let moved = apply(
+            &mut state,
+            Parameter::LayerSlot { layer_id },
+            ChannelValue::Index(1),
+        );
+        assert!(moved.is_some(), "the console selects as it always did");
+        assert_eq!(state.layer(layer_id).expect("the layer").active_slot, 1);
+    }
+
+    /// And a desk-driven layer takes the console's slot as well.
+    #[test]
+    fn a_desk_driven_layer_takes_the_consoles_slot() {
+        let (mut state, layer_id) = show();
+        set_control(&mut state, layer_id, SlotControl::DeskOnly);
+
+        let moved = apply(
+            &mut state,
+            Parameter::LayerSlot { layer_id },
+            ChannelValue::Index(1),
+        );
+        assert!(moved.is_some());
+        assert_eq!(state.layer(layer_id).expect("the layer").active_slot, 1);
     }
 }

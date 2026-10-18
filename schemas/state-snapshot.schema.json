@@ -539,6 +539,15 @@
             }
           ]
         },
+        "slot_control": {
+          "description": "Who may choose this layer's slot.\n\nAbsent from a document written before the setting existed, which reads as [`SlotControl::Either`] — exactly what such a show did.",
+          "default": "either",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SlotControl"
+            }
+          ]
+        },
         "slots": {
           "description": "Configured slots, never including index 0.\n\nSlot 0 is permanently Black and is implicit on every layer . It is not stored, cannot be assigned and needs no decoder.",
           "type": "array",
@@ -1552,6 +1561,32 @@
           ]
         }
       }
+    },
+    "SlotControl": {
+      "description": "Who may choose which slot a layer plays.\n\nThe owner, 2026-10-16: \"Layer Slotauswahl, pro Layer von DMX oder GUI abschaltbar, also das nur eins schalten kann. Ich habe layer die ich gerne transformieren möchte, aber keinen Slot auswählen möchte per DMX.\"\n\n**It exists because the two fight.** On his rig the FX layer is driven entirely from the desk, slots included, while layers 1 to 6 have their slots picked in the client — people who are not lighting operators simply press the picture they want, which turned out to be the practical thing in the room. A console holding its slot channel at a value re-sends it forty-four times a second, so without this the desk wins every time and the button somebody just pressed comes undone under their hand.\n\nThis is only about *choosing a slot*. Everything else a console does to such a layer — the dimmer, the transform, the effects — is untouched, which is the whole point: he wants to transform these layers from the desk and only not to select on them.",
+      "oneOf": [
+        {
+          "description": "Both may. What every show written before this field did, and so the default: adding the setting must not change a single existing show.",
+          "type": "string",
+          "enum": [
+            "either"
+          ]
+        },
+        {
+          "description": "The client only. A console's slot channel is read and ignored here.",
+          "type": "string",
+          "enum": [
+            "client_only"
+          ]
+        },
+        {
+          "description": "A console only. The client's slot buttons are refused on this layer, so nobody takes a desk-driven layer off its cue by pressing a picture.",
+          "type": "string",
+          "enum": [
+            "desk_only"
+          ]
+        }
+      ]
     },
     "SlotSync": {
       "description": "Whether a slot runs at its own rate or to the show's beat.\n\nFree run is the default and stays the default: a clip dropped into a slot plays at the speed it was made at, whatever the tempo is doing, until somebody decides otherwise (owner, 2026-09-23). That is what an operator expects of a file they just imported, and it is the only setting under which a clip is certain to be playable — a beat-locked clip runs at whatever multiple of its own rate the tempo asks for, and a decoder has a ceiling.",

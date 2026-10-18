@@ -26,6 +26,7 @@ import type {
   MasterConfig,
   MediaItem,
   ModuleParameter,
+  Layer,
   OutputConfig,
   ParameterValue,
   Piece,
@@ -1696,6 +1697,33 @@ export class EditorPanel {
     // **A layer has no quantisation at all.** It belongs to the slot, because
     // how many beats a piece of footage takes is a fact about the footage; one
     // on the layer applied a single answer to every slot on it.
+    // **Who may choose this layer's slot** (owner, 2026-10-16). Here rather
+    // than on the layer row with route and blend, because it is not live
+    // state: it is a rule about the layer that a show carries from one night
+    // to the next, and it is set once while the rig is being built.
+    //
+    // His own use: the FX layer is cued entirely from the desk, slots
+    // included, while layers 1 to 6 have their slots pressed in the client by
+    // people who are not lighting operators. Without this the console wins,
+    // because it re-sends its slot channel forty-four times a second.
+    const slotControl = this.#select(
+      [
+        { value: 'either', label: 'Client or console' },
+        { value: 'client_only', label: 'Client only' },
+        { value: 'desk_only', label: 'Console only' },
+      ],
+      layer.slot_control ?? 'either',
+      (value) =>
+        this.#edit(
+          setLayer(show, layer.id, {
+            slot_control: value as Layer['slot_control'],
+          }),
+        ),
+    );
+    slotControl.title =
+      'Who may choose which slot this layer plays. Everything else a console does to the layer — ' +
+      'the dimmer, the transform, the effects — is unaffected either way.';
+
     this.#ui.layerFields.replaceChildren(
       this.#field('Name', name, `${base}.name`),
       this.#field(
@@ -1704,6 +1732,7 @@ export class EditorPanel {
         `${base}.default_opacity`,
         opacity.readout,
       ),
+      this.#field('Slot chosen by', slotControl, `${base}.slot_control`),
     );
 
     this.#drawChain(this.#ui.layerEffects, { layerId: layer.id }, layer.effects);

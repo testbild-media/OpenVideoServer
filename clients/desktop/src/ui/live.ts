@@ -4388,6 +4388,20 @@ export class LivePanel {
     if (layer === null) {
       return;
     }
+    // **This layer's slots are a console's** (owner, 2026-10-16). Refused here
+    // rather than by the server, so nothing is sent and nothing flashes as
+    // refused: the setting exists because a picture on a screen is easy to
+    // press by accident, and a press that travels and comes back rejected is
+    // still a press that looked like it did something.
+    //
+    // Read from the current view rather than from whatever the pad was built
+    // with, because the setting can change while the matrix is on screen.
+    if (!layer.mayChooseSlot) {
+      this.#note(
+        `${layer.name} takes its slot from a lighting console — change that in Settings to select here`,
+      );
+      return;
+    }
     const index = slotIndex ?? layer.activeSlot;
     // Putting a slot on stage makes it the one OPTIONS is about (owner,
     // 2026-09-23): the slot an operator has just started is the slot they are

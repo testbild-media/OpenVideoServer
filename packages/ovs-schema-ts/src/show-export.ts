@@ -99,6 +99,16 @@ export type ParameterValue =
  */
 export type Route = 'A' | 'B' | 'M';
 /**
+ * Who may choose which slot a layer plays.
+ *
+ * The owner, 2026-10-16: "Layer Slotauswahl, pro Layer von DMX oder GUI abschaltbar, also das nur eins schalten kann. Ich habe layer die ich gerne transformieren möchte, aber keinen Slot auswählen möchte per DMX."
+ *
+ * **It exists because the two fight.** On his rig the FX layer is driven entirely from the desk, slots included, while layers 1 to 6 have their slots picked in the client — people who are not lighting operators simply press the picture they want, which turned out to be the practical thing in the room. A console holding its slot channel at a value re-sends it forty-four times a second, so without this the desk wins every time and the button somebody just pressed comes undone under their hand.
+ *
+ * This is only about *choosing a slot*. Everything else a console does to such a layer — the dimmer, the transform, the effects — is untouched, which is the whole point: he wants to transform these layers from the desk and only not to select on them.
+ */
+export type SlotControl = 'either' | 'client_only' | 'desk_only';
+/**
  * The direction a source's timeline advances in.
  */
 export type PlaybackDirection = 'forward' | 'reverse';
@@ -489,6 +499,12 @@ export interface Layer {
    * Which bus this layer feeds.
    */
   route: Route;
+  /**
+   * Who may choose this layer's slot.
+   *
+   * Absent from a document written before the setting existed, which reads as [`SlotControl::Either`] — exactly what such a show did.
+   */
+  slot_control?: SlotControl & string;
   /**
    * Configured slots, never including index 0.
    *

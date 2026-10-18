@@ -153,6 +153,7 @@ export type {
 } from './reset-counters-request.js';
 export type {
   FixtureTarget,
+  SlotControl,
   PlaybackDirection,
   PlaybackMode,
   SlotSync,
