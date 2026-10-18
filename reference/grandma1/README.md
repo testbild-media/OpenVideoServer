@@ -73,9 +73,27 @@ here to it.
   "Block size", "Slot" — and so are its named values: Blur's Parameter 1
   reads `Radius 0`, `Radius 32`, `Radius 64`, a layer's `Black`, `Slot 1` to
   `Slot 84`. The fixture's comment lists them all.
-- **Colorize's hue is visualised as Color**, which is what lets the desk take
-  it in degrees, 0 to 360, and its named values are the colours: Red 0,
-  Orange 30, Yellow 60, Green 120, Cyan 180, Blue 240, Magenta 300.
+- **A control is typed in its own units** where the desk has a way to show
+  it — the Visualize column of the functional block — with its real range
+  beside it:
+
+  | Control | Visualize | Range |
+  |---|---|---|
+  | Colorize hue | Hue | 0 to 360° |
+  | Colorize and Colour Correct saturation | Color | 0 to 1, 0 to 4 |
+  | Colour Correct brightness, contrast | Brightness, Contrast | 0 to 4 |
+  | Colour Correct temperature | CTC, Wheel 1 | 2000 to 10000 K |
+  | Layer rotation | Rotation, Z | −180 to 180° |
+  | Shape rotation, RGB Split and Gradient angle | Rotation, Z | 0 to 360° |
+  | Layer scale X and Y | Scale, X and Y | 0 to 10 |
+  | Shape width and height, Text cap height | Scale, X, Y and All | pixels |
+  | Blur radius | Frost | 0 to 64 pixels |
+  | Strobe and Invert rate | Strobe | hertz |
+
+  Colorize's hue also has the colours as named values: Red 0, Orange 30,
+  Yellow 60, Green 120, Cyan 180, Blue 240, Magenta 300. The rest — gamma,
+  tint, Crop's edges, amounts, thresholds, the choices — has nothing on the
+  desk that means it, and is typed as a percentage.
 
 The first set of files was refused for every fixture with a colour, and put a
 module's alpha into the desk's own RGB group as a fourth attribute. Nothing

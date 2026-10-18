@@ -612,10 +612,17 @@ fn fixed(control: &str) -> Option<Attribute> {
         "layer_position_y" => Attribute::desk("TILT")
             .for_the_desk("TILT", None)
             .called("Position Y"),
-        // X, Y and the turn about Z on one page.
-        "layer_rotation" => Attribute::desk("OVS_ROTATION").called("Rotation"),
-        "layer_scale_x" => Attribute::desk("OVS_SCALE_X").called("Scale X"),
-        "layer_scale_y" => Attribute::desk("OVS_SCALE_Y").called("Scale Y"),
+        // X, Y and the turn about Z on one page, the turn in degrees.
+        "layer_rotation" => Attribute::desk("OVS_ROTATION")
+            .for_the_desk("VIDEO_ROTATION", Some("Z"))
+            .called("Rotation"),
+        // "Visualize Scale Subfunction X ist auch vorhanden [...] auch Y".
+        "layer_scale_x" => Attribute::desk("OVS_SCALE_X")
+            .for_the_desk("VIDEO_SCALE", Some("X"))
+            .called("Scale X"),
+        "layer_scale_y" => Attribute::desk("OVS_SCALE_Y")
+            .for_the_desk("VIDEO_SCALE", Some("Y"))
+            .called("Scale Y"),
         _ => return None,
     };
     Some(attribute)
@@ -712,17 +719,70 @@ fn attribute_of(
         .find(|defined| defined.key == parameter.key)
         .map_or(parameter.key, |defined| defined.name);
     *numbered += 1;
-    let attribute = Attribute::parameter(*numbered, name);
+    let mut attribute = Attribute::parameter(*numbered, name);
+    if let Some(&(_, _, effect, effect_sub)) = VISUALISED
+        .iter()
+        .find(|row| row.0 == personality.type_id && row.1 == parameter.key)
+    {
+        attribute = attribute.for_the_desk(effect, effect_sub);
+    }
     if parameter.key == "hue" {
-        // "Ohne den Visualize Color kann man nicht die Werte von 0 bis 360
-        // angeben als Degree" (owner, 2026-10-18): with it, a hue is typed in
-        // degrees, and its named values are the colours.
-        let mut attribute = attribute.for_the_desk("COLOR", None);
+        // Its named values are its colours.
         attribute.values = Some(&HUES);
-        return attribute;
     }
     attribute
 }
+
+/// How a module's control is visualised, where the desk has a kind for it.
+///
+/// **Visualised is what lets a value be typed in its own units.** The owner,
+/// 2026-10-18: "Ohne den Visualize Color kann man nicht die Werte von 0 bis
+/// 360 angeben als Degree" — and of the kinds there are: Brightness and
+/// Contrast take 0.0 to 4.0, "es gäbe sogar Visualize Hue direkt", CTC on
+/// Wheel 1 takes 2000 to 10000, Scale on X and Y takes 0.0 to 4.0. The
+/// physical range written beside it is the control's own, so a hue is typed in
+/// degrees and a temperature in kelvin.
+///
+/// The names are the program's own, read off the table in the grandMA1 image
+/// in the order its menu shows them — `VIDEO_HUE` is "Hue", `VIDEO_COLORINTENSITY`
+/// is "Color", `COLOR_CORRECTION` is "CTC", `COLOR` is "Color Wheel" — and
+/// `the_desk_knows_every_visualisation` holds every one written to that table.
+///
+/// Not here, because nothing on the desk means them: gamma, tint, the
+/// thresholds and amounts, widths of lines, the choices. Nor Crop, whose
+/// edges would be the shutter's blades, which side being which blade not
+/// being anything the library says.
+const VISUALISED: [(&str, &str, &str, Option<&str>); 15] = [
+    ("ovs.colorize", "hue", "VIDEO_HUE", None),
+    ("ovs.colorize", "saturation", "VIDEO_COLORINTENSITY", None),
+    ("ovs.colour_correct", "brightness", "VIDEO_BRIGHTNESS", None),
+    ("ovs.colour_correct", "contrast", "VIDEO_CONTRAST", None),
+    (
+        "ovs.colour_correct",
+        "saturation",
+        "VIDEO_COLORINTENSITY",
+        None,
+    ),
+    (
+        "ovs.colour_correct",
+        "temperature_k",
+        "COLOR_CORRECTION",
+        Some("WHEEL_1"),
+    ),
+    // A blur is what a frost does to a beam.
+    ("ovs.blur", "radius_px", "FROST", None),
+    // Angles and turns in degrees, about the axis out of the wall.
+    ("ovs.rgb_split", "angle_deg", "VIDEO_ROTATION", Some("Z")),
+    ("ovs.gradient", "angle_deg", "VIDEO_ROTATION", Some("Z")),
+    ("ovs.shape", "rotation_deg", "VIDEO_ROTATION", Some("Z")),
+    // Sizes, in the composition's pixels.
+    ("ovs.shape", "width_px", "VIDEO_SCALE", Some("X")),
+    ("ovs.shape", "height_px", "VIDEO_SCALE", Some("Y")),
+    ("ovs.text", "cap_px", "VIDEO_SCALE", Some("ALL")),
+    // Flashes a second, as MA's own strobes are.
+    ("ovs.strobe", "hz", "STROBE", None),
+    ("ovs.invert", "hz", "STROBE", None),
+];
 
 /// A hue's colours, in degrees. The owner, 2026-10-18: "Bei Hue kannst du noch
 /// bei 0 Red, 30 Orange, 60 Yellow, 120 Green, 180 Cyan, 240 Blue, 300 Magenta
@@ -1642,10 +1702,11 @@ mod tests {
         // angeben als Degree", and "Bei Hue kannst du noch bei 0 Red, 30
         // Orange, 60 Yellow, 120 Green, 180 Cyan, 240 Blue, 300 Magenta als
         // Werte eintragen?"
+        // "... es gäbe sogar Visualize Hue direkt."
         let colorize = named("OVS FX Colorize");
         assert!(
             colorize.contains(
-                "{ _NAME \"Hue\" _RANGE [ 0,255] _EFF COLOR _PHYS [ 0.00, 360.00] \t\t\t_CHANSET"
+                "{ _NAME \"Hue\" _RANGE [ 0,255] _EFF VIDEO_HUE _PHYS [ 0.00, 360.00] \t\t\t_CHANSET"
             ),
             "{colorize}"
         );
@@ -1665,6 +1726,139 @@ mod tests {
             !colorize.contains("\"Hue 180\""),
             "the colours replace the landmarks"
         );
+    }
+
+    #[test]
+    fn a_control_is_typed_in_its_own_units() {
+        // The owner, 2026-10-18: Brightness and Contrast take 0.0 to 4.0, CTC
+        // on Wheel 1 takes 2000 to 10000, Scale on X and Y takes 0.0 to 4.0.
+        let correct = named("OVS FX Colour Correct");
+        for line in [
+            "{ _NAME \"Brightness\" _RANGE [ 0,255] _EFF VIDEO_BRIGHTNESS _PHYS [ 0.00, 4.00]",
+            "{ _NAME \"Contrast\" _RANGE [ 0,255] _EFF VIDEO_CONTRAST _PHYS [ 0.00, 4.00]",
+            "{ _NAME \"Saturation\" _RANGE [ 0,255] _EFF VIDEO_COLORINTENSITY _PHYS [ 0.00, 4.00]",
+            "{ _NAME \"Temperature\" _RANGE [ 0,255] _EFF COLOR_CORRECTION _EFFSUB WHEEL_1 \
+             _PHYS [ 2000.00,10000.00]",
+        ] {
+            assert!(correct.contains(line), "{line} in {correct}");
+        }
+        let layer = named("OVS Layer");
+        for line in [
+            "{ _NAME \"Rotation\" _RANGE [ 0,255] _EFF VIDEO_ROTATION _EFFSUB Z _PHYS [ -180.00, 180.00]",
+            "{ _NAME \"Scale X\" _RANGE [ 0,255] _EFF VIDEO_SCALE _EFFSUB X _PHYS [ 0.00, 10.00]",
+            "{ _NAME \"Scale Y\" _RANGE [ 0,255] _EFF VIDEO_SCALE _EFFSUB Y _PHYS [ 0.00, 10.00]",
+        ] {
+            assert!(layer.contains(line), "{line} in {layer}");
+        }
+        assert!(named("OVS Gen Strobe")
+            .contains("{ _NAME \"Rate\" _RANGE [ 0,255] _EFF STROBE _PHYS [ 0.50, 30.00]"));
+        // Nothing is left visualised as the colour wheel by mistake.
+        for file in fixture_files() {
+            assert!(!file.contents.contains("_EFF COLOR "), "{}", file.file_name);
+        }
+    }
+
+    /// Every visualisation a grandMA1 has, as its program names them, in the
+    /// order of its menu: read off the table in the onPC 6.808 image.
+    const DESK_VISUALISATIONS: [&str; 70] = [
+        "NONE",
+        "PAN",
+        "TILT",
+        "GOBO",
+        "GOBO_ANGLE",
+        "GOBO_ROTATE",
+        "COLOR",
+        "COLOR_ROTATE",
+        "COLOR_MIX",
+        "DIMMER",
+        "STROBE",
+        "ZOOM",
+        "IRIS",
+        "FOCUS",
+        "VIDEO_POSITION",
+        "VIDEO_ROTATION",
+        "VIDEO_IMAGE_SPLIT",
+        "VIDEO_IMAGE_OFFSET",
+        "VIDEO_SCALE",
+        "VIDEO_OBJECT_TYPE",
+        "VIDEO_CAMERA_INDEX",
+        "VIDEO_FRAME_INDEX",
+        "VIDEO_IMAGE_ANIMATION",
+        "VIDEO_ROTATE_ANIMATION",
+        "VIDEO_POSITION_ANIMATION",
+        "VIDEO_SPEED",
+        "VIDEO_STARTFRAME",
+        "VIDEO_ENDFRAME",
+        "VIDEO_DARKNESS",
+        "VIDEO_CAMERA_POS",
+        "VIDEO_DARK_IS_TRANSPARENT",
+        "VIDEO_SHUTTER",
+        "VIDEO_PLAY_MODE",
+        "VIDEO_GOBO_POOL",
+        "VE_VIDEO_POSITION_SCALE",
+        "VE_VIDEO_CONTROL",
+        "VIDEO_CAMERA_ROT",
+        "VIDEO_EFFECT_1",
+        "VIDEO_EFFECT_2",
+        "VIDEO_EFFECT_3",
+        "VIDEO_EFFECT_4",
+        "VIDEO_COLOR_BOOSTER",
+        "BLADES_ROTATION",
+        "BARN_DOOR",
+        "GOBO_WHEEL_ROTATE",
+        "PRISM",
+        "PRISM_POS",
+        "PRISM_ROT",
+        "FROST",
+        "ROLL",
+        "CLAMP",
+        "COLOR_CORRECTION",
+        "GOBO_SHAKE",
+        "MOVE_SPEED",
+        "EFFECT_SPEED",
+        "COLOR_RANDOM",
+        "VIDEO_SHOW_LAYER_ON_HEAD",
+        "VIDEO_COLORINTENSITY",
+        "VIDEO_BRIGHTNESS",
+        "VIDEO_CONTRAST",
+        "VIDEO_COLOR_KEY",
+        "VIDEO_DUMMY",
+        "VIDEO_SOUND_VOLUMEN_1",
+        "VIDEO_SOUND_VOLUMEN_2",
+        "VIDEO_3D_KEYSTONE",
+        "VIDEO_MASTER_SHAPER_ON",
+        "VIDEO_KEYSTONE",
+        "VIDEO_SPLITSCREEN",
+        "VIDEO_HUE",
+        "VIDEO_SHOW_LAYER_ON_CAMERA",
+    ];
+
+    #[test]
+    fn the_desk_knows_every_visualisation() {
+        // A misspelt one would arrive as nothing, or be refused, and the
+        // file would still look right here.
+        for file in fixture_files() {
+            for line in file.contents.lines() {
+                let Some((_, rest)) = line.split_once("_EFF ") else {
+                    continue;
+                };
+                let effect = rest.split_whitespace().next().unwrap_or_default();
+                assert!(
+                    DESK_VISUALISATIONS.contains(&effect),
+                    "{}: {effect}",
+                    file.file_name
+                );
+                if let Some((_, sub)) = rest.split_once("_EFFSUB ") {
+                    let sub = sub.split_whitespace().next().unwrap_or_default();
+                    // The subfunctions MA's own files write for these.
+                    assert!(
+                        ["RED", "GREEN", "BLUE", "X", "Y", "Z", "ALL", "WHEEL_1"].contains(&sub),
+                        "{}: {effect} {sub}",
+                        file.file_name
+                    );
+                }
+            }
+        }
     }
 
     #[test]
