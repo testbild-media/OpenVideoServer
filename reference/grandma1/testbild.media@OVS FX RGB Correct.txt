@@ -1,0 +1,62 @@
+_FIXTURETYPE
+{
+	_NAME       "OVS FX RGB Correct"
+	_MANUFAC    "testbild.media"
+	_SHORTNAME  "FX RGB Correct"
+	_VERSION    ORIGINAL
+	_COMMENT    "OpenVideoServer ovs.rgb_correct v1, 12 channels. Patch in OVS to one effect instance in a chain, at the same address. Generated from the OVS fixture catalogue; reference/FIXTURES.md lists every value."
+	_BRIGHTMINW 5000.000000
+	_BRIGHTMAXW 5000.000000
+	_CHANTYPE
+	{ _ATTRIBUT "RED BLACK" _FEATURE "RGB CORRECT" _PRESET "VIDEO" _ATT_LABEL "Red black" _FEA_LABEL "RGB Correct" _DEFAULT 50.0008% _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Function"   _RANGE [  0,255] _EFF NONE _PHYS [   -1.00,    1.00] 			_CHANSET
+			{ _NAME "Min -1"     _RANGE [0.0000%,0.0000%] }
+			{ _NAME "Center 0"   _RANGE [50.0008%,50.0008%] }
+			{ _NAME "Max 1"      _RANGE [100.0000%,100.0000%] }
+		}
+	}
+	{ _ATTRIBUT "RED BLACK" _FEATURE "RGB CORRECT" _PRESET "VIDEO" _TYPE FINE }
+	{ _ATTRIBUT "GREEN BLACK" _FEATURE "RGB CORRECT" _PRESET "VIDEO" _ATT_LABEL "Green black" _FEA_LABEL "RGB Correct" _DEFAULT 50.0008% _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Function"   _RANGE [  0,255] _EFF NONE _PHYS [   -1.00,    1.00] 			_CHANSET
+			{ _NAME "Min -1"     _RANGE [0.0000%,0.0000%] }
+			{ _NAME "Center 0"   _RANGE [50.0008%,50.0008%] }
+			{ _NAME "Max 1"      _RANGE [100.0000%,100.0000%] }
+		}
+	}
+	{ _ATTRIBUT "GREEN BLACK" _FEATURE "RGB CORRECT" _PRESET "VIDEO" _TYPE FINE }
+	{ _ATTRIBUT "BLUE BLACK" _FEATURE "RGB CORRECT" _PRESET "VIDEO" _ATT_LABEL "Blue black" _FEA_LABEL "RGB Correct" _DEFAULT 50.0008% _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Function"   _RANGE [  0,255] _EFF NONE _PHYS [   -1.00,    1.00] 			_CHANSET
+			{ _NAME "Min -1"     _RANGE [0.0000%,0.0000%] }
+			{ _NAME "Center 0"   _RANGE [50.0008%,50.0008%] }
+			{ _NAME "Max 1"      _RANGE [100.0000%,100.0000%] }
+		}
+	}
+	{ _ATTRIBUT "BLUE BLACK" _FEATURE "RGB CORRECT" _PRESET "VIDEO" _TYPE FINE }
+	{ _ATTRIBUT "RED WHITE" _FEATURE "RGB CORRECT" _PRESET "VIDEO" _ATT_LABEL "Red white" _FEA_LABEL "RGB Correct" _DEFAULT 25.0004% _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Function"   _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    4.00] 			_CHANSET
+			{ _NAME "Min 0"      _RANGE [0.0000%,0.0000%] }
+			{ _NAME "Center 2"   _RANGE [50.0008%,50.0008%] }
+			{ _NAME "Max 4"      _RANGE [100.0000%,100.0000%] }
+			{ _NAME "Home 1"     _RANGE [25.0004%,25.0004%] }
+		}
+	}
+	{ _ATTRIBUT "RED WHITE" _FEATURE "RGB CORRECT" _PRESET "VIDEO" _TYPE FINE }
+	{ _ATTRIBUT "GREEN WHITE" _FEATURE "RGB CORRECT" _PRESET "VIDEO" _ATT_LABEL "Green white" _FEA_LABEL "RGB Correct" _DEFAULT 25.0004% _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Function"   _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    4.00] 			_CHANSET
+			{ _NAME "Min 0"      _RANGE [0.0000%,0.0000%] }
+			{ _NAME "Center 2"   _RANGE [50.0008%,50.0008%] }
+			{ _NAME "Max 4"      _RANGE [100.0000%,100.0000%] }
+			{ _NAME "Home 1"     _RANGE [25.0004%,25.0004%] }
+		}
+	}
+	{ _ATTRIBUT "GREEN WHITE" _FEATURE "RGB CORRECT" _PRESET "VIDEO" _TYPE FINE }
+	{ _ATTRIBUT "BLUE WHITE" _FEATURE "RGB CORRECT" _PRESET "VIDEO" _ATT_LABEL "Blue white" _FEA_LABEL "RGB Correct" _DEFAULT 25.0004% _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Function"   _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    4.00] 			_CHANSET
+			{ _NAME "Min 0"      _RANGE [0.0000%,0.0000%] }
+			{ _NAME "Center 2"   _RANGE [50.0008%,50.0008%] }
+			{ _NAME "Max 4"      _RANGE [100.0000%,100.0000%] }
+			{ _NAME "Home 1"     _RANGE [25.0004%,25.0004%] }
+		}
+	}
+	{ _ATTRIBUT "BLUE WHITE" _FEATURE "RGB CORRECT" _PRESET "VIDEO" _TYPE FINE }
+}

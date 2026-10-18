@@ -1,0 +1,47 @@
+_FIXTURETYPE
+{
+	_NAME       "OVS FX Edges"
+	_MANUFAC    "testbild.media"
+	_SHORTNAME  "FX Edges"
+	_VERSION    ORIGINAL
+	_COMMENT    "OpenVideoServer ovs.edges v1, 8 channels. Patch in OVS to one effect instance in a chain, at the same address. Generated from the OVS fixture catalogue; reference/FIXTURES.md lists every value."
+	_BRIGHTMINW 5000.000000
+	_BRIGHTMAXW 5000.000000
+	_CHANTYPE
+	{ _ATTRIBUT "AMOUNT" _FEATURE "EDGES" _PRESET "VIDEO" _ATT_LABEL "Amount" _FEA_LABEL "Edges" _DEFAULT 0.0000% _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Function"   _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] 			_CHANSET
+			{ _NAME "Min 0"      _RANGE [0.0000%,0.0000%] }
+			{ _NAME "Center 0.5" _RANGE [50.0008%,50.0008%] }
+			{ _NAME "Max 1"      _RANGE [100.0000%,100.0000%] }
+		}
+	}
+	{ _ATTRIBUT "AMOUNT" _FEATURE "EDGES" _PRESET "VIDEO" _TYPE FINE }
+	{ _ATTRIBUT "THRESHOLD" _FEATURE "EDGES" _PRESET "VIDEO" _ATT_LABEL "Threshold" _FEA_LABEL "Edges" _DEFAULT 19.9222% _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Function"   _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] 			_CHANSET
+			{ _NAME "Min 0"      _RANGE [0.0000%,0.3891%] }
+			{ _NAME "Center 0.5" _RANGE [50.0008%,50.3899%] }
+			{ _NAME "Max 1"      _RANGE [99.6109%,100.0000%] }
+			{ _NAME "Home 0.2"   _RANGE [19.9222%,20.3113%] }
+		}
+	}
+	{ _ATTRIBUT "LINE WIDTH" _FEATURE "EDGES" _PRESET "VIDEO" _ATT_LABEL "Line width" _FEA_LABEL "Edges" _DEFAULT 8.9845% _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Function"   _RANGE [  0,255] _EFF NONE _PHYS [    1.00,   12.00] 			_CHANSET
+			{ _NAME "Min 1"      _RANGE [0.0000%,0.3891%] }
+			{ _NAME "Center 6.52" _RANGE [50.0008%,50.3899%] }
+			{ _NAME "Max 12"     _RANGE [99.6109%,100.0000%] }
+			{ _NAME "Home 1.99"  _RANGE [8.9845%,9.3736%] }
+		}
+	}
+	{ _ATTRIBUT "RED" _FEATURE "RGB" _PRESET "COLOR" _ATT_LABEL "Red" _FEA_LABEL "RGB" _DEFAULT 99.6109% _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Function"   _RANGE [  0,255] _EFF COLOR_MIX _EFFSUB RED _PHYS [    0.00,    1.00] }
+	}
+	{ _ATTRIBUT "GREEN" _FEATURE "RGB" _PRESET "COLOR" _ATT_LABEL "Green" _FEA_LABEL "RGB" _DEFAULT 99.6109% _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Function"   _RANGE [  0,255] _EFF COLOR_MIX _EFFSUB GREEN _PHYS [    0.00,    1.00] }
+	}
+	{ _ATTRIBUT "BLUE" _FEATURE "RGB" _PRESET "COLOR" _ATT_LABEL "Blue" _FEA_LABEL "RGB" _DEFAULT 99.6109% _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Function"   _RANGE [  0,255] _EFF COLOR_MIX _EFFSUB BLUE _PHYS [    0.00,    1.00] }
+	}
+	{ _ATTRIBUT "ALPHA" _FEATURE "RGB" _PRESET "COLOR" _ATT_LABEL "Alpha" _FEA_LABEL "RGB" _DEFAULT 99.6109% _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Function"   _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] }
+	}
+}

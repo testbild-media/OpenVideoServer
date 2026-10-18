@@ -6,6 +6,10 @@
 # PowerShell is the exception: it wants CRLF on Windows.
 *.ps1 text eol=crlf
 
+# So are the grandMA1 fixture types, which go onto a USB stick for a desk and
+# should arrive with the line ends MA's own fixture files have.
+reference/grandma1/*.txt text eol=crlf
+
 # Binary assets must never be touched.
 *.png binary
 *.jpg binary
