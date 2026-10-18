@@ -188,6 +188,20 @@ fn mask_picture() -> Option<DecodedImage> {
     Some(source.frame(0).ok()?.image.as_ref().clone())
 }
 
+/// How many frames the echo's tile is drawn over.
+///
+/// **Mine, for the tile alone.** An echo is a picture of what moved, so a
+/// still reference draws it as the reference: the tile has to be the end of a
+/// move. Five jumps of the picture at a third of the wall's width each, every
+/// one covering part of the one before: at a sixth of the size, small steps
+/// smeared into a blur, and these read as copies stacked behind each other,
+/// each one darker than the one in front.
+const ECHO_FRAMES: u32 = 5;
+
+/// How wide and tall the moving picture is on the echo's tile, in the wall's
+/// own coordinates, where the wall is two across.
+const ECHO_PICTURE: f32 = 0.7;
+
 /// One effect's tile-sized picture, at the setting that shows what it does.
 fn picture_of(canvas: &mut Canvas, type_id: &str, version: u32) -> Option<DecodedImage> {
     let instance = EffectInstance {
@@ -198,29 +212,46 @@ fn picture_of(canvas: &mut Canvas, type_id: &str, version: u32) -> Option<Decode
     let mut passes = Vec::new();
     ovs_renderer::effects::passes_into(std::slice::from_ref(&instance), &mut passes);
 
-    let layer = LayerId::new();
-    let mut scene = Scene::new();
-    scene.set_effects(layer, &passes);
-    scene.push(Quad {
-        left: -1.0,
-        bottom: -1.0,
-        right: 1.0,
-        top: 1.0,
-        colour: [1.0, 1.0, 1.0, 1.0],
-        rotation_deg: 0.0,
-        anchor: ovs_types::geometry::AnchorPoint::CENTRE,
-        layer_id: Some(layer),
-        source: SourceRect::WHOLE,
-        source_turn: ovs_renderer::SourceTurn::NONE,
-        texture: TextureRef::Media(canvas.reference),
-        route: Route::A,
-        blend: BlendMode::Normal,
-    });
+    // Every effect but one is a function of the frame it is handed, and is
+    // drawn once over the whole wall. The echo is drawn as a move, ending on
+    // the right, so the tile is the picture with what it just was behind it.
+    let moves = type_id == "ovs.echo";
+    let frames = if moves { ECHO_FRAMES } else { 1 };
 
-    canvas
-        .backend
-        .compose(FrameRequest { index: 0 }, &scene)
-        .ok()?;
+    let layer = LayerId::new();
+    for step in 0..frames {
+        let (left, right, bottom, top) = if moves {
+            let travelled = step as f32 / (frames - 1) as f32;
+            let centre = -0.6 + 1.2 * travelled;
+            let half = ECHO_PICTURE / 2.0;
+            (centre - half, centre + half, -half, half)
+        } else {
+            (-1.0, 1.0, -1.0, 1.0)
+        };
+
+        let mut scene = Scene::new();
+        scene.set_effects(layer, &passes);
+        scene.push(Quad {
+            left,
+            bottom,
+            right,
+            top,
+            colour: [1.0, 1.0, 1.0, 1.0],
+            rotation_deg: 0.0,
+            anchor: ovs_types::geometry::AnchorPoint::CENTRE,
+            layer_id: Some(layer),
+            source: SourceRect::WHOLE,
+            source_turn: ovs_renderer::SourceTurn::NONE,
+            texture: TextureRef::Media(canvas.reference),
+            route: Route::A,
+            blend: BlendMode::Normal,
+        });
+
+        canvas
+            .backend
+            .compose(FrameRequest { index: 0 }, &scene)
+            .ok()?;
+    }
 
     // Scaled by the card on the way back rather than averaged here: this is
     // the same path a preview takes, so what a tile shows is what a watcher
@@ -292,6 +323,12 @@ fn settings(type_id: &str, version: u32, mask: MediaItemId) -> ParameterMap {
                 colour,
             ])
         }
+        // A fifth of a second, which at sixty keeps about five eighths of a
+        // copy each frame: the four behind the newest come out at roughly
+        // sixty, forty, twenty-five and fifteen per cent, so the fade is the
+        // thing the eye reads. Longer and they are all nearly as bright as the
+        // newest, which says "copies" and not "fading".
+        "ovs.echo" => ParameterMap::from([number("length_s", 0.2), choice("mode", "behind")]),
         // A wide frame off the sides and a narrow one off the top, so the tile
         // shows both that it cuts and that the cut is transparent.
         "ovs.crop" => ParameterMap::from([

@@ -385,6 +385,18 @@ pub trait Compositor: Send {
         let _ = seconds;
     }
 
+    /// Tells the effect passes how long one frame is on the wall, in seconds.
+    ///
+    /// For the pass that fades something over time, which has to fade by the
+    /// same amount a second at 50 Hz as at 60 — so it is told what a frame is
+    /// worth rather than counting frames. The wall's own rate, set beside the
+    /// clock, for the same reason the clock is the wall's.
+    ///
+    /// Does nothing by default, for the reason the clock does nothing.
+    fn set_effect_frame(&mut self, seconds: f32) {
+        let _ = seconds;
+    }
+
     /// Makes `image` available to every quad that names `key`.
     ///
     /// Replaces whatever was held under that key.

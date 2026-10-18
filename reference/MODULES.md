@@ -320,3 +320,12 @@ Keeps only the outlines of the picture, in one colour.
 | Line width | `width_px` | a number from 1 to 12 | 2 |
 | Colour | `colour` | a colour, linear RGBA | 1.00, 1.00, 1.00, 1.00 |
 
+### Echo — `ovs.echo` v1
+
+Leaves a fading trail of what the picture just was.
+
+| Parameter | Key | Takes | Default |
+|---|---|---|---|
+| Length | `length_s` | a number from 0 to 10 | 0 |
+| Mode | `mode` | one of `behind` (Behind), `lighten` (Lighten) | `behind` |
+

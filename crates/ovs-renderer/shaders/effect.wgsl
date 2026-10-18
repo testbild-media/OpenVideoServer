@@ -75,6 +75,14 @@ struct Effect {
     // same for every pass in a frame: two layers carrying one effect have to
     // move together.
     seconds: f32,
+    // How long one frame is on the wall, in seconds, for the pass that fades
+    // something over time: a fade worked out per frame would be a different
+    // fade at 50 Hz and at 60.
+    frame: f32,
+    // Which frame this is, counted by the compositor and wrapping. Not the
+    // clock: what reads this needs a number that is different every frame
+    // even if the clock were to stand still.
+    tick: u32,
 }
 
 var<immediate> effect: Effect;
@@ -95,6 +103,15 @@ const KIND_TV_GLITCH: u32 = 12u;
 const KIND_MASK: u32 = 13u;
 const KIND_INVERT: u32 = 14u;
 const KIND_EDGES: u32 = 15u;
+const KIND_ECHO: u32 = 16u;
+
+/// How far a frame of an echo has to fade before it counts as gone, in halvings.
+///
+/// Eight, so gone is below one part in 256 — under the last step an eight-bit
+/// picture has. That is what lets the length an operator sets be the time a
+/// frame takes to disappear, rather than a time constant whose end nobody can
+/// see.
+const ECHO_GONE_HALVINGS: f32 = 8.0;
 
 /// How far past the threshold an edge takes to come fully in, in the same
 /// units as the threshold.
@@ -740,6 +757,97 @@ fn edges(uv: vec2<f32>, source: vec4<f32>) -> vec4<f32> {
     return vec4<f32>(premultiplied / alpha, alpha);
 }
 
+/// A well-mixed thirty-two bits from thirty-two, in integers.
+///
+/// The PCG output function. Not the sine hash the glitch uses: that one is fine
+/// for texture and poor at large inputs, and this one is fed a pixel position
+/// and a frame count that climb for ever.
+fn mixed(value: u32) -> u32 {
+    let state = value * 747796405u + 2891336453u;
+    let word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
+/// A number from nought up to one, different for every pixel, channel and
+/// frame.
+fn dither(pixel: vec2<f32>, channel: u32) -> f32 {
+    let x = u32(pixel.x);
+    let y = u32(pixel.y);
+    let seed = mixed(x ^ mixed(y ^ mixed(effect.tick * 4u + channel)));
+    // Twenty-four bits, which an `f32` holds exactly, so this never reaches one.
+    return f32(seed >> 8u) / 16777216.0;
+}
+
+/// Rounds to the eight bits the picture is stored in, up or down at random in
+/// proportion to how close each is.
+///
+/// **What keeps a fading trail from stopping.** A trail fades by being
+/// multiplied a little below one every frame, and in eight bits a long trail's
+/// step is less than half a level — so rounding to the nearest gives back the
+/// level it started at, and the trail stands on the wall for ever at a fifth of
+/// its brightness. Rounded at random, it comes out right on average however
+/// small the step, and a level of nought stays nought, so it always ends.
+fn stochastic(value: f32, noise: f32) -> f32 {
+    return floor(value * 255.0 + noise) / 255.0;
+}
+
+/// The picture over what it was a moment ago, fading.
+///
+/// `values` is the length in seconds and the mode, nought for behind and one
+/// for lighten. The second picture bound to this pass is not a mask: it is the
+/// instance's memory, which holds what this pass drew last frame, and what is
+/// drawn here goes back into it.
+///
+/// **Each frame the memory is faded once** by what one frame is worth against
+/// the length, so a frame put in now is gone after the length has passed
+/// whatever the wall's rate. Straight alpha, as everywhere in this shader.
+fn echo(uv: vec2<f32>, pixel: vec2<f32>, source: vec4<f32>) -> vec4<f32> {
+    let length = effect.values.x;
+    // Nought is the picture untouched, to the bit: the published default, and
+    // what the renderer proves every effect is at its defaults.
+    if length <= 0.0 {
+        return source;
+    }
+    let trail = textureSampleLevel(mask_texture, mask_sampler, uv, 0.0);
+    let keep = exp2(-ECHO_GONE_HALVINGS * max(effect.frame, 0.0) / length);
+    let faded_alpha = stochastic(trail.a * keep, dither(pixel, 3u));
+
+    if effect.values.y >= 0.5 {
+        // **Lighten**: whichever is brighter, channel by channel. Compared
+        // premultiplied, so the trail's own fading counts and a trail half gone
+        // is half as bright; each channel rounded on its own, because on a
+        // full-frame picture the trail lives in the colour rather than in the
+        // alpha, which stays at one.
+        let faded = vec3<f32>(
+            stochastic(trail.r * trail.a * keep, dither(pixel, 0u)),
+            stochastic(trail.g * trail.a * keep, dither(pixel, 1u)),
+            stochastic(trail.b * trail.a * keep, dither(pixel, 2u)),
+        );
+        if faded_alpha <= 0.0 && all(faded <= vec3<f32>(0.0)) {
+            return source;
+        }
+        let alpha = max(source.a, faded_alpha);
+        if alpha <= 0.0 {
+            return vec4<f32>(0.0);
+        }
+        let premultiplied = max(source.rgb * source.a, faded);
+        return vec4<f32>(min(premultiplied / alpha, vec3<f32>(1.0)), alpha);
+    }
+
+    // **Behind**: the newest frame over the trail. Where the picture is opaque
+    // that is the picture and nothing else — returned as it came, rather than
+    // through arithmetic that would round it — and where nothing is left of
+    // the trail it is the picture too.
+    if source.a >= 1.0 || faded_alpha <= 0.0 {
+        return source;
+    }
+    // Only the alpha fades. The trail keeps its own colour, which is what makes
+    // it dissolve into whatever is under the layer rather than going grey.
+    let alpha = source.a + faded_alpha * (1.0 - source.a);
+    let rgb = (source.rgb * source.a + trail.rgb * faded_alpha * (1.0 - source.a)) / alpha;
+    return vec4<f32>(rgb, alpha);
+}
+
 @fragment
 fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // Straight alpha throughout, never premultiplied. What comes out of the
@@ -796,6 +904,9 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         }
         case KIND_EDGES: {
             return edges(input.uv, source);
+        }
+        case KIND_ECHO: {
+            return echo(input.uv, input.position.xy, source);
         }
         // Unreachable: the renderer only ever writes a kind it has a branch
         // for. Returning the picture untouched is the one answer that cannot

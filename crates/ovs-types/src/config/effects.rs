@@ -694,6 +694,78 @@ pub const EDGES_V1: EffectManifest = EffectManifest {
     ],
 };
 
+/// A trail: the picture as it is now in front, and what it was a moment ago
+/// fading out behind it.
+///
+/// The owner, 2026-10-17: "neuste Bild ist immer im Hintergrund und die letzten
+/// Frames werden dann immer Dunkler und verschwinden im Hintergrund", confirmed
+/// as the newest frame in front and the older ones behind it, fading.
+///
+/// **The first effect that remembers.** Every other one is a function of the
+/// frame it is handed; this one is handed the frame and what it left last time.
+/// The renderer keeps one picture per instance for that, at composition size,
+/// which is why two of these on one show cost two pictures and not one.
+///
+/// **`length_s` is how long a frame takes to be gone**, in seconds of the wall,
+/// not in frames: the fade is worked out against the output's own rate, so a
+/// look set up at 50 Hz is the same look at 59.94. Nought is the published
+/// default and is the picture untouched — the effect is neutral until somebody
+/// gives it a length, as every effect here must be. "Gone" is exact: after this
+/// long a frame is below the last step eight bits can show.
+///
+/// **Fading is opacity, not only brightness**, so over a black wall a trail
+/// goes dark and over another layer it dissolves into that layer instead of
+/// leaving a dark veil across it — which is what "verschwinden im Hintergrund"
+/// asks for.
+///
+/// **`mode` is there because "in front" needs somewhere to be seen.** Behind,
+/// the default and the owner's description, puts the newest frame over the
+/// trail — so the trail shows only where the picture is transparent: around
+/// outlines from `ovs.edges`, around a keyed clip, behind a layer smaller than
+/// the wall that moves. On a full-frame camera the newest frame covers it all.
+/// Lighten keeps whichever is brighter, the newest frame or the trail, which is
+/// the classic video echo and leaves streaks behind anything bright on any
+/// picture. **Mine**, the second mode: the owner asked for the first.
+pub const ECHO_V1: EffectManifest = EffectManifest {
+    type_id: "ovs.echo",
+    version: 1,
+    name: "Echo",
+    description: "Leaves a fading trail of what the picture just was.",
+    parameters: &[
+        ParameterDefinition {
+            key: "length_s",
+            name: "Length",
+            kind: ParameterKind::Number {
+                min: 0.0,
+                // **Mine.** Ten seconds is already a trail that outlives the
+                // move that made it; the range is about having the short end
+                // finely, which is why the channel is a fine one.
+                max: 10.0,
+                default: 0.0,
+            },
+            dmx: Some(DmxChannel::Fine),
+        },
+        ParameterDefinition {
+            key: "mode",
+            name: "Mode",
+            kind: ParameterKind::Choice {
+                choices: &[
+                    Choice {
+                        id: "behind",
+                        name: "Behind",
+                    },
+                    Choice {
+                        id: "lighten",
+                        name: "Lighten",
+                    },
+                ],
+                default: "behind",
+            },
+            dmx: Some(DmxChannel::Coarse),
+        },
+    ],
+};
+
 /// Four edges off the picture.
 ///
 /// What somebody reaches for when a camera feed has a letterbox in it, when a
@@ -767,7 +839,7 @@ pub const CROP_V1: EffectManifest = EffectManifest {
 };
 
 /// Every effect this build publishes.
-pub const PUBLISHED: [EffectManifest; 16] = [
+pub const PUBLISHED: [EffectManifest; 17] = [
     // Both versions, and the catalogue offers the newer: a show saved against
     // version one opens with the four controls it was saved with.
     COLOUR_CORRECT_V1,
@@ -786,6 +858,7 @@ pub const PUBLISHED: [EffectManifest; 16] = [
     INVERT_V1,
     INVERT_V2,
     EDGES_V1,
+    ECHO_V1,
 ];
 
 /// How far out of vertical hold the picture can be thrown, as a fraction of

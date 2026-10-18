@@ -495,6 +495,28 @@ Footprint: **8 channels**. Patch to: **one effect instance in a chain**.
 | 7 | Colour Blue | `0` → 0 | `128` → 0.502 | `255` → 1 | `255` → 1 |
 | 8 | Colour Alpha | `0` → 0 | `128` → 0.502 | `255` → 1 | `255` → 1 |
 
+## Echo — `ovs.echo` v1
+
+Footprint: **3 channels**. Patch to: **one effect instance in a chain**.
+
+| Channel | Name | Control | Values | Home |
+|---|---|---|---|---|
+| 1–2 | Length | `length_s` | 0 at 0, 10 at 65535 | 0 |
+| 3 | Mode | `mode` | 2 steps, listed below | 64 |
+
+### Where the values sit
+
+| Channel | Name | Bottom | Middle | Top | Home |
+|---|---|---|---|---|---|
+| 1–2 | Length | `0` (0/0) → 0 | `32768` (128/0) → 5 | `65535` (255/255) → 10 | `0` (0/0) → 0 |
+
+### Mode (channel 3)
+
+| DMX | Step |
+|---|---|
+| 0–127 | `behind` |
+| 128–255 | `lighten` |
+
 ## Solid Colour — `ovs.solid_colour` v1
 
 Footprint: **4 channels**. Patch to: **one generator instance in a slot**.

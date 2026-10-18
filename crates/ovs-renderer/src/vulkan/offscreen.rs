@@ -23,10 +23,10 @@ use std::sync::Arc;
 use ash::vk;
 use ovs_types::config::{BlendMode, DisplayMode, Route};
 use ovs_types::geometry::SizePx;
-use ovs_types::id::OutputId;
+use ovs_types::id::{EffectInstanceId, OutputId};
 
 use crate::backend::{BackendError, CompositionSource, Compositor, FrameRequest, OutputBackend};
-use crate::effects::EffectPass;
+use crate::effects::{EffectPass, PassKind};
 use crate::media::DecodedImage;
 use crate::scene::{quad_basis, Quad, Scene, TextureKey, TextureRef};
 use crate::vulkan::blend;
@@ -113,11 +113,16 @@ const VERTICES_PER_FULL_SCREEN: u32 = 3;
 /// a chain of twenty costs the same memory as a chain of one.
 const SCRATCH_COUNT: usize = 2;
 
-/// How many distinct textures one canvas may hold at once.
+/// How many echoes one canvas remembers at once.
 ///
-/// One per active layer, plus the white default. The descriptor pool is sized
-/// here because Vulkan pools cannot grow, so the limit is explicit rather than a
-/// surprise on the night a show uses one texture too many; exceeding it draws
+/// Each one keeps a picture at composition size — eight megabytes at 1080p,
+/// thirty-three at 4K — and a Vulkan descriptor pool cannot grow, so there has
+/// to be a ceiling. **Mine**: eight is one per layer on the owner's rig with
+/// room over, and at 4K it is a quarter of a gigabyte, which a card driving a
+/// show can carry. An echo beyond the eighth draws its layer untouched and says
+/// so once.
+const MAX_ECHOES: usize = 8;
+
 /// How many threads may copy pictures into mapped memory at once.
 ///
 /// One core writes about 4.8 GB/s across the bus and the link takes far more,
@@ -126,6 +131,11 @@ const SCRATCH_COUNT: usize = 2;
 /// card has only moved the problem.
 const STAGING_THREADS: usize = 4;
 
+/// How many distinct textures one canvas may hold at once.
+///
+/// One per active layer, plus the white default. The descriptor pool is sized
+/// here because Vulkan pools cannot grow, so the limit is explicit rather than a
+/// surprise on the night a show uses one texture too many; exceeding it draws
 /// the quad flat and says so rather than failing the frame.
 const MAX_TEXTURES: usize = 64;
 
@@ -263,12 +273,39 @@ struct Scratch {
     sampler: vk::Sampler,
 }
 
+/// What one echo drew last frame, which it reads this frame.
+///
+/// The one thing on a target that an effect keeps from one frame to the next.
+/// Made like a scratch image and drawn through the same render pass and
+/// pipeline, which is what lets an echo's result be copied into it without a
+/// second kind of anything.
+struct History {
+    /// Whose memory it is.
+    instance: EffectInstanceId,
+    image: SampledImage,
+    /// The composition it was last drawn in.
+    ///
+    /// An echo that was not drawn last frame — its layer faded out, its bus at
+    /// nought, its slot not playing — starts again from nothing rather than
+    /// from what it held when it stopped. Otherwise fading a layer back up
+    /// would bring back a trail of a picture from minutes ago, which is a
+    /// wrong picture that looks deliberate.
+    drawn_in: u64,
+    /// Whether it has to be cleared before this frame reads it.
+    ///
+    /// New, handed over from an echo that has gone, or not drawn last frame.
+    /// The clear is recorded into the frame's own command buffer, before any
+    /// chain, and costs a render pass with nothing drawn in it.
+    clear: bool,
+}
+
 /// One effect pass as the shader reads it.
 ///
 /// Laid out to match the `Effect` structure in `shaders/effect.wgsl`: four
-/// floats, four floats, two floats and an integer, which WGSL rounds up to
-/// forty-eight bytes. Every Vulkan implementation offers at least 128 bytes of
-/// push constants, so this needs no buffer, no descriptor and no allocation.
+/// floats, four floats, two floats, an integer, three more numbers, which WGSL
+/// rounds up to sixty-four bytes. Every Vulkan implementation offers at least
+/// 128 bytes of push constants, so this needs no buffer, no descriptor and no
+/// allocation.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 struct EffectPush {
@@ -281,17 +318,52 @@ struct EffectPush {
     /// In the four bytes WGSL was padding this structure out to anyway, so it
     /// costs nothing: the layout was already forty-eight bytes and still is.
     seconds: f32,
+    /// How long one frame is on the wall, in seconds.
+    frame: f32,
+    /// Which frame this is, wrapping.
+    tick: u32,
+    /// What WGSL rounds the structure up to, written out so the two agree.
+    padding: [u32; 2],
+}
+
+/// What every pass in one frame is told about time.
+#[derive(Debug, Clone, Copy)]
+struct EffectClock {
+    seconds: f32,
+    frame: f32,
+    tick: u32,
 }
 
 impl EffectPush {
     /// The push constants for one pass on a canvas of the given texel size.
-    const fn new(pass: &EffectPass, texel: [f32; 2], seconds: f32) -> Self {
+    const fn new(pass: &EffectPass, texel: [f32; 2], clock: EffectClock) -> Self {
         Self {
             values: pass.values,
             colour: pass.colour,
             texel,
             kind: pass.kind.code(),
-            seconds,
+            seconds: clock.seconds,
+            frame: clock.frame,
+            tick: clock.tick,
+            padding: [0; 2],
+        }
+    }
+
+    /// The pass that puts an echo's result into its memory.
+    ///
+    /// An echo at length nought, which hands back the picture it was given to
+    /// the bit — and that is exactly a copy, through the pipeline and the
+    /// render pass that are already there.
+    const fn keeping(texel: [f32; 2]) -> Self {
+        Self {
+            values: [0.0; 4],
+            colour: [0.0; 4],
+            texel,
+            kind: PassKind::Echo.code(),
+            seconds: 0.0,
+            frame: 0.0,
+            tick: 0,
+            padding: [0; 2],
         }
     }
 
@@ -346,6 +418,30 @@ pub struct OffscreenTarget {
     /// once a frame by the render loop; zero until it is, which is a legal
     /// moment like any other.
     effect_seconds: f32,
+    /// How long one frame is on the wall, for the passes that fade.
+    ///
+    /// Set once a frame by the render loop from the rate the wall is really
+    /// running at; until then, the rate this canvas was made for.
+    effect_frame: f32,
+    /// How many compositions this target has drawn, wrapping.
+    ///
+    /// What an echo's memory is dated by, so one that was not drawn last frame
+    /// can be told apart from one that was.
+    composed: u64,
+    /// What each echo drew last, one picture per instance.
+    ///
+    /// A short list rather than a map: there are at most [`MAX_ECHOES`] of
+    /// them and a frame looks each one up once. Never shrunk — a picture whose
+    /// echo has gone is handed to the next echo that needs one — so a show
+    /// that used echoes keeps at most that many pictures for as long as the
+    /// canvas lives, and a show that never did keeps none.
+    histories: Vec<History>,
+    /// The echoes this frame draws, gathered before any picture is handed out,
+    /// so that one about to be drawn is never the one taken for another.
+    /// Kept between frames so a frame allocates nothing.
+    wanted_histories: Vec<EffectInstanceId>,
+    /// Whether "more echoes than this canvas remembers" has been logged.
+    warned_about_echoes: bool,
     /// The finished frame, shrunk, on the card.
     ///
     /// Previews and streams want a small picture, and the cheapest way to get
@@ -564,6 +660,10 @@ struct BusUpload {
     /// default — the set has to be bound either way, and white is a mask that
     /// does nothing.
     masks: Vec<vk::DescriptorSet>,
+    /// Where each of those passes leaves its result as well, one for one with
+    /// them: the echo's memory, by its place in the target's list, and `None`
+    /// for every pass that remembers nothing.
+    keeps: Vec<Option<usize>>,
     /// The quads that combine the buses into the composition.
     combine: Vec<DrawRun>,
 }
@@ -581,6 +681,7 @@ impl BusUpload {
         // One for one with the passes, so they are emptied together or the next
         // frame's passes read the last frame's pictures.
         self.masks.clear();
+        self.keeps.clear();
         self.combine.clear();
     }
 }
@@ -1006,6 +1107,13 @@ impl OffscreenTarget {
             readback,
             readback_memory,
             effect_seconds: 0.0,
+            // A sixtieth until whoever makes this says otherwise; the backend
+            // that owns it does, from the mode it was made for.
+            effect_frame: 1.0 / 60.0,
+            composed: 0,
+            histories: Vec::new(),
+            wanted_histories: Vec::new(),
+            warned_about_echoes: false,
             readback_wanted: true,
             preview_image,
             preview_memory,
@@ -1152,6 +1260,113 @@ impl OffscreenTarget {
             sampler,
         });
         Ok(())
+    }
+
+    /// Gives every echo this frame draws a memory, and marks the ones that
+    /// have to start again from nothing.
+    ///
+    /// A picture is made only for an echo that has never had one and only
+    /// while there are fewer than [`MAX_ECHOES`]; past that, the one drawn
+    /// longest ago that this frame does not want is handed over. So what a
+    /// show holds is bounded whatever it does, and a frame allocates only the
+    /// first time a new echo appears.
+    ///
+    /// Not an error when it cannot. An echo with no memory draws its layer
+    /// untouched, which is what it does at length nought, and a wall missing a
+    /// trail is still a wall.
+    ///
+    /// After the fence wait: a memory being cleared or handed over must not
+    /// still be read by the frame before.
+    fn ensure_histories(&mut self, context: &VulkanContext, scene: &Scene) {
+        let mut wanted = std::mem::take(&mut self.wanted_histories);
+        wanted.clear();
+        for quad in scene.quads() {
+            let Some(layer) = quad.layer_id else {
+                continue;
+            };
+            for pass in scene.effects(layer) {
+                if let Some(instance) = pass.history {
+                    if !wanted.contains(&instance) {
+                        wanted.push(instance);
+                    }
+                }
+            }
+        }
+
+        let last_frame = self.composed.wrapping_sub(1);
+        for &instance in &wanted {
+            if let Some(history) = self
+                .histories
+                .iter_mut()
+                .find(|history| history.instance == instance)
+            {
+                if history.drawn_in != last_frame {
+                    history.clear = true;
+                }
+                continue;
+            }
+
+            if self.histories.len() < MAX_ECHOES {
+                match self.create_history(context, instance) {
+                    Ok(history) => self.histories.push(history),
+                    Err(error) => self.warn_about_echoes(&error.to_string()),
+                }
+                continue;
+            }
+
+            let spare = self
+                .histories
+                .iter_mut()
+                .filter(|history| !wanted.contains(&history.instance))
+                .min_by_key(|history| history.drawn_in);
+            match spare {
+                Some(history) => {
+                    history.instance = instance;
+                    history.clear = true;
+                }
+                None => self.warn_about_echoes("every memory this canvas has is in use"),
+            }
+        }
+
+        self.wanted_histories = wanted;
+    }
+
+    /// Makes one echo's memory: a scratch image of its own.
+    fn create_history(
+        &self,
+        context: &VulkanContext,
+        instance: EffectInstanceId,
+    ) -> Result<History, VulkanError> {
+        let scratch = self.scratch.as_ref().ok_or(VulkanError::Call {
+            operation: "remembering an echo with no scratch image",
+            result: vk::Result::ERROR_INITIALIZATION_FAILED,
+        })?;
+        let image = Self::create_sampled_image(
+            context,
+            scratch.render_pass,
+            self.size,
+            self.descriptor_pool,
+            self.descriptor_layout,
+            scratch.sampler,
+        )?;
+        Ok(History {
+            instance,
+            image,
+            drawn_in: self.composed,
+            clear: true,
+        })
+    }
+
+    /// Says once that an echo is being drawn without its memory.
+    fn warn_about_echoes(&mut self, reason: &str) {
+        if !self.warned_about_echoes {
+            tracing::warn!(
+                remembered = MAX_ECHOES,
+                reason,
+                "an echo has no memory to draw from; its layer is drawn untouched"
+            );
+            self.warned_about_echoes = true;
+        }
     }
 
     /// Creates one image this target draws into and samples, with its view,
@@ -1842,21 +2057,41 @@ impl OffscreenTarget {
         };
         *index += 1;
 
+        let clock = EffectClock {
+            seconds: self.effect_seconds,
+            frame: self.effect_frame,
+            // Wrapping, which is all a dither needs of it.
+            tick: self.composed as u32,
+        };
         let first = upload.passes.len();
         for pass in passes {
-            upload
-                .passes
-                .push(EffectPush::new(pass, texel, self.effect_seconds));
+            let mut push = EffectPush::new(pass, texel, clock);
+            let kept = pass.history.and_then(|instance| {
+                self.histories
+                    .iter()
+                    .position(|history| history.instance == instance)
+            });
             // Resolved here rather than at record time, because this is where
             // the textures are. A picture that is not on the GPU yet resolves
             // to white, which is a mask that does nothing: an effect waiting
             // for its picture to decode leaves the layer alone, the same way a
             // layer whose clip is still opening keeps drawing.
-            upload
-                .masks
-                .push(pass.mask.map_or(self.default_texture.set, |media_item_id| {
+            let second = match (pass.history, kept) {
+                (_, Some(at)) => self.histories[at].image.set,
+                // An echo with no memory is drawn at length nought, which is
+                // the picture untouched. White is a mask that does nothing,
+                // but read as a trail it would be opaque white over all of it.
+                (Some(_), None) => {
+                    push.values[0] = 0.0;
+                    self.default_texture.set
+                }
+                (None, None) => pass.mask.map_or(self.default_texture.set, |media_item_id| {
                     self.set_for(TextureRef::Media(media_item_id))
-                }));
+                }),
+            };
+            upload.passes.push(push);
+            upload.masks.push(second);
+            upload.keeps.push(kept);
         }
 
         // The composite quad: the whole canvas, because the scratch already
@@ -2074,7 +2309,13 @@ impl OffscreenTarget {
     /// The flag costs a pool that cannot use the simplest allocator, which is
     /// nothing next to that.
     fn create_descriptor_pool(device: &ash::Device) -> Result<vk::DescriptorPool, VulkanError> {
-        let count = u32::try_from(MAX_TEXTURES + 1).unwrap_or(u32::MAX);
+        // Every set the target can hold at once: the textures and the white
+        // default, and the images it draws into and samples itself — the
+        // buses, the scratch and the echoes' memories. Those used to be left
+        // out, so a canvas that had made its buses and scratch could not hold
+        // its last five textures.
+        let count = u32::try_from(MAX_TEXTURES + 1 + BUS_COUNT + SCRATCH_COUNT + MAX_ECHOES)
+            .unwrap_or(u32::MAX);
         let sizes = [
             vk::DescriptorPoolSize::default()
                 .ty(vk::DescriptorType::SAMPLED_IMAGE)
@@ -2957,6 +3198,13 @@ impl OffscreenTarget {
         let device = context.device();
         self.wait_for_frame(device)?;
 
+        // After the fence wait, so the last frame has finished with every
+        // memory that is about to be cleared or handed to another echo.
+        self.composed = self.composed.wrapping_add(1);
+        if scene.has_effects() {
+            self.ensure_histories(context, scene);
+        }
+
         // After the fence wait, because the copy the last frame submitted has
         // finished reading these buffers only now. Before the recording, because
         // the copies onto the card go into the command buffer below.
@@ -2965,6 +3213,15 @@ impl OffscreenTarget {
         // Written after the fence wait: the GPU has finished reading last
         // frame's instances, so overwriting them now cannot race it.
         self.upload_buses(scene);
+        // Dated by what was really drawn rather than by what the scene asked
+        // for: a layer on a bus at nought is in the scene and is not drawn, and
+        // its echo has to start again when it comes back.
+        let composed = self.composed;
+        for kept in self.upload.keeps.iter().flatten() {
+            if let Some(history) = self.histories.get_mut(*kept) {
+                history.drawn_in = composed;
+            }
+        }
         // The copies go to their own queue before the drawing is recorded, so
         // the card is moving pixels while the processor is still writing the
         // command buffer that will read them.
@@ -3008,6 +3265,10 @@ impl OffscreenTarget {
         self.default_texture.dirty = false;
         for bound in self.textures.values_mut() {
             bound.dirty = false;
+        }
+        // The clears were recorded into this frame too.
+        for history in &mut self.histories {
+            history.clear = false;
         }
     }
 
@@ -3068,6 +3329,7 @@ impl OffscreenTarget {
 
         self.begin_recording(device)?;
         self.record_generated(device);
+        self.record_history_clears(device);
 
         let transparent = vk::ClearValue {
             color: vk::ClearColorValue { float32: BUS_CLEAR },
@@ -3243,9 +3505,117 @@ impl OffscreenTarget {
                 device.cmd_draw(self.command_buffer, VERTICES_PER_FULL_SCREEN, 1, 0, 0);
                 device.cmd_end_render_pass(self.command_buffer);
             }
+
+            // An echo's result goes into its memory as well as on down the
+            // chain, for the next frame to read. A pass of its own rather than
+            // a second attachment, because the memory is what this pass just
+            // read: an image cannot be sampled and drawn into at once. The
+            // chain carries on from `into` as before, so the ping-pong does
+            // not notice.
+            if let Some(history) = self
+                .upload
+                .keeps
+                .get(chain.first + step)
+                .copied()
+                .flatten()
+                .and_then(|at| self.histories.get(at))
+            {
+                self.record_keep(device, scratch, scratch.images[into].set, history);
+            }
         }
 
         Ok(())
+    }
+
+    /// Copies a finished echo into its memory.
+    fn record_keep(
+        &self,
+        device: &ash::Device,
+        scratch: &Scratch,
+        from: vk::DescriptorSet,
+        history: &History,
+    ) {
+        let clear = [vk::ClearValue {
+            color: vk::ClearColorValue { float32: BUS_CLEAR },
+        }];
+        let begin = vk::RenderPassBeginInfo::default()
+            .render_pass(scratch.render_pass)
+            .framebuffer(history.image.framebuffer)
+            .render_area(vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent: self.size,
+            })
+            .clear_values(&clear);
+        let texel = [
+            1.0 / self.size.width.max(1) as f32,
+            1.0 / self.size.height.max(1) as f32,
+        ];
+        let push = EffectPush::keeping(texel);
+
+        // SAFETY: recording is in progress, no render pass is open, and every
+        // handle came from this target. The memory was last read by the echo
+        // pass just recorded; the render pass's own dependency orders that
+        // read before this write.
+        unsafe {
+            device.cmd_begin_render_pass(self.command_buffer, &begin, vk::SubpassContents::INLINE);
+            device.cmd_bind_pipeline(
+                self.command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                scratch.pass,
+            );
+            device.cmd_bind_descriptor_sets(
+                self.command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                scratch.pass_layout,
+                0,
+                &[from, self.default_texture.set],
+                &[],
+            );
+            device.cmd_push_constants(
+                self.command_buffer,
+                scratch.pass_layout,
+                vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
+                0,
+                push.bytes(),
+            );
+            device.cmd_draw(self.command_buffer, VERTICES_PER_FULL_SCREEN, 1, 0, 0);
+            device.cmd_end_render_pass(self.command_buffer);
+        }
+    }
+
+    /// Clears the memories that have to start again from nothing.
+    ///
+    /// Before any chain, outside any render pass, and in this frame's own
+    /// command buffer, so the clear cannot race the echo that reads it. A
+    /// render pass that clears and draws nothing, which is also what leaves the
+    /// image in the layout the echo samples it in.
+    fn record_history_clears(&self, device: &ash::Device) {
+        let Some(scratch) = self.scratch.as_ref() else {
+            return;
+        };
+        let clear = [vk::ClearValue {
+            color: vk::ClearColorValue { float32: BUS_CLEAR },
+        }];
+        for history in self.histories.iter().filter(|history| history.clear) {
+            let begin = vk::RenderPassBeginInfo::default()
+                .render_pass(scratch.render_pass)
+                .framebuffer(history.image.framebuffer)
+                .render_area(vk::Rect2D {
+                    offset: vk::Offset2D { x: 0, y: 0 },
+                    extent: self.size,
+                })
+                .clear_values(&clear);
+            // SAFETY: recording is in progress, no render pass is open, and the
+            // framebuffer was made against this render pass.
+            unsafe {
+                device.cmd_begin_render_pass(
+                    self.command_buffer,
+                    &begin,
+                    vk::SubpassContents::INLINE,
+                );
+                device.cmd_end_render_pass(self.command_buffer);
+            }
+        }
     }
 
     /// Records the frame: clear the canvas, then copy it out for readback.
@@ -4388,6 +4758,19 @@ impl OffscreenTarget {
 
     /// Releases every Vulkan object, in reverse order of creation.
     fn destroy(&mut self, device: &ash::Device) {
+        // The echoes' memories before the scratch, whose render pass their
+        // framebuffers were made against.
+        for history in self.histories.drain(..) {
+            // SAFETY: the caller has waited for the device to be idle. The
+            // descriptor sets go with the pool, below.
+            unsafe {
+                device.destroy_framebuffer(history.image.framebuffer, None);
+                device.destroy_image_view(history.image.view, None);
+                device.destroy_image(history.image.image, None);
+                device.free_memory(history.image.memory, None);
+            }
+        }
+
         // The scratch first, for the same reason the buses go before the rest:
         // it borrows this target's descriptor pool and its composition shader.
         if let Some(scratch) = self.scratch.take() {
@@ -4521,13 +4904,19 @@ impl VulkanOffscreenBackend {
         mode: DisplayMode,
     ) -> Result<Self, VulkanError> {
         let name = name.into();
-        let target = OffscreenTarget::new(
+        let mut target = OffscreenTarget::new(
             &context,
             vk::Extent2D {
                 width: mode.size.width,
                 height: mode.size.height,
             },
         )?;
+        // The rate this canvas was made for, until the render loop says what
+        // the wall is really running at.
+        let hertz = mode.refresh.as_f64();
+        if hertz > 0.0 {
+            target.effect_frame = (1.0 / hertz) as f32;
+        }
 
         Ok(Self {
             context,
@@ -4758,6 +5147,10 @@ impl OutputBackend for VulkanOffscreenBackend {
 impl Compositor for VulkanOffscreenBackend {
     fn set_effect_time(&mut self, seconds: f32) {
         self.target.effect_seconds = seconds;
+    }
+
+    fn set_effect_frame(&mut self, seconds: f32) {
+        self.target.effect_frame = seconds;
     }
 
     fn compose(&mut self, _frame: FrameRequest, scene: &Scene) -> Result<(), BackendError> {
@@ -5880,6 +6273,17 @@ mod tests {
             return;
         };
 
+        // Everything the canvas draws into for itself made first — the buses,
+        // the scratch and an echo's memory — because those come out of the
+        // same descriptor pool.
+        let echo = effect_at("ovs.echo", 1, &[("length_s", ParameterValue::Float(1.0))]);
+        canvas
+            .compose(
+                FrameRequest { index: 0 },
+                &effected_flat(LayerId::new(), RED, &echo),
+            )
+            .expect("composes");
+
         let picture =
             DecodedImage::new(vec![200u8; 64 * 64 * 4], SizePx::new(64, 64)).expect("a picture");
         let mut held = Vec::new();
@@ -5891,10 +6295,13 @@ mod tests {
             held.push(key);
         }
 
-        assert!(
-            held.len() >= MAX_TEXTURES - BUS_COUNT - SCRATCH_COUNT,
-            "the canvas holds what it says it holds, less what it uses itself: {}",
-            held.len()
+        // All of them. This used to allow for the buses and the scratch taking
+        // sets out of the same pool, which is a ceiling that is not the one the
+        // constant names; the pool now has room for those as well.
+        assert_eq!(
+            held.len(),
+            MAX_TEXTURES,
+            "the canvas holds what it says it holds"
         );
         for key in held {
             assert!(crate::backend::Compositor::drop_texture(&mut canvas, key));
@@ -8975,6 +9382,227 @@ mod tests {
             light_at(&mut canvas, 4.0, 11),
             255,
             "and a wide one is still there",
+        );
+    }
+
+    /// One echo, made once, so every frame of a test is the same instance.
+    ///
+    /// Not [`effect_at`], which makes a new instance each call — and an echo's
+    /// memory belongs to its instance, so a test calling that every frame
+    /// would be testing a new echo every frame.
+    fn echo(length_s: f64, mode: &str) -> Vec<EffectPass> {
+        let mut instance = EffectInstance::new("ovs.echo", 1);
+        instance
+            .parameters
+            .insert("length_s".to_owned(), ParameterValue::Float(length_s));
+        instance
+            .parameters
+            .insert("mode".to_owned(), ParameterValue::Choice(mode.to_owned()));
+        let mut passes = Vec::new();
+        crate::effects::passes_into(&[instance], &mut passes);
+        passes
+    }
+
+    /// A red layer, and over it a white one between two edges, carrying `passes`.
+    fn echoed(layer: LayerId, left: f32, right: f32, passes: &[EffectPass]) -> Scene {
+        let mut scene = Scene::new();
+        scene.push(quad_at(-1.0, -1.0, 1.0, 1.0, RED));
+        let mut quad = quad_at(left, -1.0, right, 1.0, [1.0, 1.0, 1.0, 1.0]);
+        quad.layer_id = Some(layer);
+        scene.push(quad);
+        scene.set_effects(layer, passes);
+        scene
+    }
+
+    /// The first three channels of the middle row's pixel at `x`.
+    fn middle_at(frame: &[u8], x: usize) -> [u8; 3] {
+        let first = (8 * 16 + x) * 4;
+        [frame[first], frame[first + 1], frame[first + 2]]
+    }
+
+    #[test]
+    fn an_echo_leaves_a_trail_that_fades_into_what_is_underneath_and_ends() {
+        let _gpu = crate::vulkan::one_gpu_at_a_time();
+        // The owner, 2026-10-17: the newest frame in front, the ones before it
+        // "immer Dunkler" and "verschwinden im Hintergrund". A white layer on
+        // the left for one frame, then on the right: the left is where it was
+        // a moment ago, and over a red layer that has to be the white
+        // dissolving into the red — not a dark veil over it, and not still
+        // there a long time later.
+        let Some(mut canvas) = backend(16, 16) else {
+            return;
+        };
+        canvas.set_effect_frame(1.0 / 60.0);
+        let layer = LayerId::new();
+        // Half a second, which is thirty frames at sixty: one frame keeps
+        // two to the minus eight-thirtieths, about 0.83, of the trail.
+        let passes = echo(0.5, "behind");
+
+        composed_frame(&mut canvas, &echoed(layer, -1.0, 0.0, &passes), 16);
+        let after_one = composed_frame(&mut canvas, &echoed(layer, 0.0, 1.0, &passes), 16);
+
+        close_to(
+            middle_at(&after_one, 12)[1],
+            255,
+            "the newest frame, white, in front",
+        );
+        let trail = middle_at(&after_one, 3);
+        close_to(
+            trail[0],
+            255,
+            "where it was, the red under it and the white over it",
+        );
+        close_to(trail[1], 212, "five sixths of the white, one frame on");
+        close_to(trail[2], 212, "in green and in blue alike");
+
+        let mut last = after_one;
+        for _ in 0..90 {
+            last = composed_frame(&mut canvas, &echoed(layer, 0.0, 1.0, &passes), 16);
+        }
+        assert_eq!(
+            middle_at(&last, 3),
+            [255, 0, 0],
+            "three lengths later the trail has to be gone to the last bit, leaving the red"
+        );
+        for x in 0..8 {
+            assert_eq!(
+                middle_at(&last, x),
+                [255, 0, 0],
+                "a level left standing at {x} is a ghost that never fades"
+            );
+        }
+    }
+
+    #[test]
+    fn an_echo_at_length_nought_remembers_nothing() {
+        let _gpu = crate::vulkan::one_gpu_at_a_time();
+        // The published default, and it must be the picture untouched even
+        // though the memory is being kept: the layer moves and the place it
+        // left is the red underneath at once.
+        let Some(mut canvas) = backend(16, 16) else {
+            return;
+        };
+        canvas.set_effect_frame(1.0 / 60.0);
+        let layer = LayerId::new();
+        let passes = echo(0.0, "behind");
+
+        composed_frame(&mut canvas, &echoed(layer, -1.0, 0.0, &passes), 16);
+        let moved = composed_frame(&mut canvas, &echoed(layer, 0.0, 1.0, &passes), 16);
+        assert_eq!(middle_at(&moved, 3), [255, 0, 0], "no trail at nought");
+        assert_eq!(middle_at(&moved, 12), [255, 255, 255]);
+    }
+
+    #[test]
+    fn an_echo_that_was_not_drawn_starts_again_from_nothing() {
+        let _gpu = crate::vulkan::one_gpu_at_a_time();
+        // A layer faded out and back up must not bring back a trail of what it
+        // showed when it went: that is a picture from minutes ago, and it
+        // looks deliberate. One frame on the left, one frame with the layer
+        // gone, then the right — and the left must be the red alone.
+        let Some(mut canvas) = backend(16, 16) else {
+            return;
+        };
+        canvas.set_effect_frame(1.0 / 60.0);
+        let layer = LayerId::new();
+        let passes = echo(2.0, "behind");
+
+        composed_frame(&mut canvas, &echoed(layer, -1.0, 0.0, &passes), 16);
+        let mut gone = Scene::new();
+        gone.push(quad_at(-1.0, -1.0, 1.0, 1.0, RED));
+        composed_frame(&mut canvas, &gone, 16);
+        let back = composed_frame(&mut canvas, &echoed(layer, 0.0, 1.0, &passes), 16);
+
+        assert_eq!(
+            middle_at(&back, 3),
+            [255, 0, 0],
+            "the trail came back from before the layer went"
+        );
+        close_to(
+            middle_at(&back, 12)[1],
+            255,
+            "and the layer itself is drawn",
+        );
+    }
+
+    #[test]
+    fn lighten_leaves_a_trail_on_a_full_picture_and_behind_does_not() {
+        let _gpu = crate::vulkan::one_gpu_at_a_time();
+        // Why there are two modes. On a full-frame picture the newest frame
+        // covers everything, so behind shows no trail at all; lighten keeps
+        // whichever is brighter, so white then black leaves the white fading.
+        let Some(mut canvas) = backend(16, 16) else {
+            return;
+        };
+        canvas.set_effect_frame(1.0 / 60.0);
+
+        let after = |canvas: &mut VulkanOffscreenBackend, mode: &str| {
+            let layer = LayerId::new();
+            let passes = echo(0.5, mode);
+            composed_frame(
+                canvas,
+                &effected_flat(layer, [1.0, 1.0, 1.0, 1.0], &passes),
+                16,
+            );
+            let frame = composed_frame(
+                canvas,
+                &effected_flat(layer, [0.0, 0.0, 0.0, 1.0], &passes),
+                16,
+            );
+            middle_at(&frame, 8)
+        };
+
+        assert_eq!(
+            after(&mut canvas, "behind"),
+            [0, 0, 0],
+            "behind: the newest frame is opaque and in front of everything"
+        );
+        let lightened = after(&mut canvas, "lighten");
+        close_to(
+            lightened[0],
+            212,
+            "lighten: the white of a frame ago, fading",
+        );
+        close_to(lightened[1], 212, "in every channel");
+        close_to(lightened[2], 212, "alike");
+    }
+
+    #[test]
+    fn more_echoes_than_the_canvas_remembers_draw_their_layers_untouched() {
+        let _gpu = crate::vulkan::one_gpu_at_a_time();
+        // The ceiling is a number of pictures, and a show that goes past it
+        // must still draw every layer — the ones over it without a trail —
+        // rather than failing the frame or drawing a white one.
+        let Some(mut canvas) = backend(16, 16) else {
+            return;
+        };
+        canvas.set_effect_frame(1.0 / 60.0);
+
+        let layers: Vec<(LayerId, Vec<EffectPass>)> = (0..=MAX_ECHOES)
+            .map(|_| (LayerId::new(), echo(1.0, "behind")))
+            .collect();
+        let scene = |left: f32, right: f32| {
+            let mut scene = Scene::new();
+            scene.push(quad_at(-1.0, -1.0, 1.0, 1.0, RED));
+            for (layer, passes) in &layers {
+                let mut quad = quad_at(left, -1.0, right, 1.0, [1.0, 1.0, 1.0, 1.0]);
+                quad.layer_id = Some(*layer);
+                scene.push(quad);
+                scene.set_effects(*layer, passes);
+            }
+            scene
+        };
+
+        composed_frame(&mut canvas, &scene(-1.0, 0.0), 16);
+        let moved = composed_frame(&mut canvas, &scene(0.0, 1.0), 16);
+        assert_eq!(
+            middle_at(&moved, 12),
+            [255, 255, 255],
+            "every layer is drawn"
+        );
+        assert_eq!(
+            canvas.target.histories.len(),
+            MAX_ECHOES,
+            "and no more pictures than the ceiling"
         );
     }
 

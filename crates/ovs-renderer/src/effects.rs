@@ -38,7 +38,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use ovs_types::config::effects::{self, EffectValues};
 use ovs_types::config::manifest::ParameterKind;
 use ovs_types::config::EffectInstance;
-use ovs_types::id::MediaItemId;
+use ovs_types::id::{EffectInstanceId, MediaItemId};
 use ovs_types::live::EffectOverrides;
 
 /// What one full-screen pass computes.
@@ -82,6 +82,9 @@ pub enum PassKind {
     /// Only the outlines, in one colour, transparent between them. Reads its
     /// neighbours, like the blur.
     Edges,
+    /// The picture over what it was a moment ago, fading. The one pass that
+    /// remembers, through the picture its instance keeps.
+    Echo,
 }
 
 impl PassKind {
@@ -105,6 +108,7 @@ impl PassKind {
             Self::Mask => 13,
             Self::Invert => 14,
             Self::Edges => 15,
+            Self::Echo => 16,
         }
     }
 }
@@ -132,6 +136,16 @@ pub struct EffectPass {
     /// identifier is sixteen bytes and a chain is rebuilt into a reused buffer
     /// every frame.
     pub mask: Option<MediaItemId>,
+    /// Whose memory this pass reads and leaves its result in, for the one pass
+    /// that has one.
+    ///
+    /// The instance rather than the layer, because the memory belongs to the
+    /// effect: two echoes on one layer are two trails, and the echo on one slot
+    /// never draws the trail of the slot before it. `None` for every pass but
+    /// the echo's,
+    /// which is set by [`live_passes_into`] — the only place that knows which
+    /// instance a pass came from.
+    pub history: Option<EffectInstanceId>,
 }
 
 /// Appends the passes a chain runs at its configured values, in chain order.
@@ -174,10 +188,19 @@ pub fn live_passes_into(
         // somebody has actually touched. Nothing is built and nothing is
         // copied; an effect nobody is driving finds nothing and reads the
         // show's values exactly as before.
+        let first = into.len();
         passes_of(
             manifest.live_over(&instance.parameters, live.get(&instance.id)),
             into,
         );
+
+        // Which instance a remembering pass belongs to is known here and
+        // nowhere below: `passes_of` is handed values, not an instance.
+        for pass in &mut into[first..] {
+            if pass.kind == PassKind::Echo {
+                pass.history = Some(instance.id);
+            }
+        }
     }
 }
 
@@ -237,12 +260,14 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
                 ],
                 colour: [0.0; 4],
                 mask: None,
+                history: None,
             });
             into.push(EffectPass {
                 kind: PassKind::WhiteBalance,
                 values: [number("temperature_k"), number("tint"), 0.0, 0.0],
                 colour: [0.0; 4],
                 mask: None,
+                history: None,
             });
         }
         ("ovs.colour_correct", 1) => into.push(EffectPass {
@@ -255,6 +280,7 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
             ],
             colour: [0.0; 4],
             mask: None,
+            history: None,
         }),
         // A switch, and the pass runs either way: an effect that appended
         // nothing when it was off would never be drawn, and the renderer
@@ -266,6 +292,7 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
             values: [f32::from(u8::from(values.flag("on"))), 0.0, 0.0, 0.0],
             colour: [0.0; 4],
             mask: None,
+            history: None,
         }),
         // The same pass with a rate. The flashing is decided in the shader
         // rather than here: the pass is built once per frame and the clock it
@@ -282,6 +309,7 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
             ],
             colour: [0.0; 4],
             mask: None,
+            history: None,
         }),
         // One pass: the outlines are found and the crossfade done in the same
         // place, reading the eight neighbours of each pixel at `width_px`
@@ -297,6 +325,26 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
             ],
             colour: values.colour("colour"),
             mask: None,
+            history: None,
+        }),
+        // One pass, which reads the instance's memory as its second picture
+        // and leaves its own result there for the next frame. The memory is
+        // named by the caller, which is the one that knows the instance.
+        // Appended at length nought as well, which the shader returns
+        // untouched: the renderer proves an effect neutral by drawing it.
+        ("ovs.echo", 1) => into.push(EffectPass {
+            kind: PassKind::Echo,
+            values: [
+                number("length_s"),
+                // Which way the newest frame meets the trail, as a code: the
+                // newest in front, or whichever is brighter.
+                f32::from(u8::from(values.choice("mode") == "lighten")),
+                0.0,
+                0.0,
+            ],
+            colour: [0.0; 4],
+            mask: None,
+            history: None,
         }),
         ("ovs.tint", 1) => into.push(EffectPass {
             kind: PassKind::Tint,
@@ -308,6 +356,7 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
             ],
             colour: values.colour("colour"),
             mask: None,
+            history: None,
         }),
         ("ovs.pixelate", 1) => {
             let block = number("block_px");
@@ -317,6 +366,7 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
                     values: [block, 0.0, 0.0, 0.0],
                     colour: [0.0; 4],
                     mask: None,
+                    history: None,
                 });
             }
         }
@@ -329,6 +379,7 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
                     values: [radius, amount, 0.0, 0.0],
                     colour: [0.0; 4],
                     mask: None,
+                    history: None,
                 });
             }
         }
@@ -346,6 +397,7 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
             ],
             colour: [0.0; 4],
             mask: None,
+            history: None,
         }),
         // **Appended with no picture as well**, like every other effect here,
         // because that is what lets the renderer prove it neutral by rendering
@@ -367,6 +419,7 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
             ],
             colour: [0.0; 4],
             mask: values.media("image"),
+            history: None,
         }),
         ("ovs.mirror", 1) => into.push(EffectPass {
             kind: PassKind::Mirror,
@@ -382,12 +435,14 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
             ],
             colour: [0.0; 4],
             mask: None,
+            history: None,
         }),
         ("ovs.colorize", 1) => into.push(EffectPass {
             kind: PassKind::Colorize,
             values: [number("hue"), number("saturation"), number("amount"), 0.0],
             colour: [0.0; 4],
             mask: None,
+            history: None,
         }),
         // **The lift travels in the colour slot, because it is one.** A pass
         // carries four numbers and this effect has six, and a black level per
@@ -399,12 +454,14 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
             values: [number("gain_r"), number("gain_g"), number("gain_b"), 0.0],
             colour: [number("lift_r"), number("lift_g"), number("lift_b"), 0.0],
             mask: None,
+            history: None,
         }),
         ("ovs.rgb_split", 1) => into.push(EffectPass {
             kind: PassKind::RgbSplit,
             values: [number("offset_px"), number("angle_deg"), 0.0, 0.0],
             colour: [0.0; 4],
             mask: None,
+            history: None,
         }),
         // **The fifth number travels in the colour slot, because a pass has four
         // and this effect has five.** The same thing RGB Correct does with its
@@ -429,6 +486,7 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
                 0.0,
             ],
             mask: None,
+            history: None,
         }),
         ("ovs.tv_glitch", 1) => into.push(EffectPass {
             kind: PassKind::TvGlitch,
@@ -440,6 +498,7 @@ fn passes_of(values: EffectValues<'_>, into: &mut Vec<EffectPass>) {
             ],
             colour: [0.0; 4],
             mask: None,
+            history: None,
         }),
         // A manifest this build publishes but the renderer cannot draw. Nothing
         // is in this state today — the four published effects are the four
@@ -835,6 +894,46 @@ mod tests {
             older[0].values[1], 0.0,
             "version one must carry no rate at all, which the shader reads as steady"
         );
+    }
+
+    /// An echo's pass names the instance it came from, and nothing else does.
+    ///
+    /// The memory is keyed by that name, so a pass that named the wrong one —
+    /// or two echoes that shared one — would be a trail drawn from another
+    /// effect's frames, which looks deliberate and is not.
+    #[test]
+    fn an_echo_remembers_through_its_own_instance_and_no_other_pass_does() {
+        let mut first = EffectInstance::new("ovs.echo", 1);
+        first
+            .parameters
+            .insert("length_s".to_owned(), ParameterValue::Float(1.5));
+        first.parameters.insert(
+            "mode".to_owned(),
+            ParameterValue::Choice("lighten".to_owned()),
+        );
+        let second = EffectInstance::new("ovs.echo", 1);
+        let blur = EffectInstance::new("ovs.blur", 1);
+
+        let chain = [first.clone(), blur, second.clone()];
+        let passes = passes(&chain);
+
+        assert_eq!(
+            passes.len(),
+            4,
+            "an echo, the two halves of a blur, an echo"
+        );
+        assert_eq!(passes[0].kind, PassKind::Echo);
+        assert_eq!(passes[0].history, Some(first.id));
+        assert_eq!(passes[0].values[0], 1.5, "the length");
+        assert_eq!(passes[0].values[1], 1.0, "lighten");
+        assert_eq!(passes[1].history, None, "a blur remembers nothing");
+        assert_eq!(passes[2].history, None);
+        assert_eq!(passes[3].history, Some(second.id), "and the second its own");
+        assert_eq!(
+            passes[3].values[0], 0.0,
+            "published at nought, which is off"
+        );
+        assert_eq!(passes[3].values[1], 0.0, "and behind the picture");
     }
 
     /// Switched off is off, whatever the rate says.

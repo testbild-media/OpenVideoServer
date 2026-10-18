@@ -1031,6 +1031,10 @@ impl RenderLoop {
             let shown = self.shown_on(&state);
             self.compositor
                 .set_effect_time(folded_into_a_day(pattern_seconds(shown.frames, shown.rate)));
+            // And what one of those frames is worth, from the same rate, for
+            // the pass that fades: an echo set to a second is gone after a
+            // second at 50 Hz and at 59.94 alike.
+            self.compositor.set_effect_frame(frame_seconds(shown.rate));
 
             let compose_began = Instant::now();
             match self.compositor.compose(FrameRequest { index }, &self.scene) {
@@ -2488,6 +2492,18 @@ fn pattern_seconds(frames: u64, rate: FrameRate) -> f64 {
         return 0.0;
     }
     frames as f64 / hertz
+}
+
+/// How long one frame is at a rate, in seconds.
+///
+/// Nought for a rate of nought, which is not a rate a wall runs at, and which a
+/// fading pass reads as no time passing rather than as a division by zero.
+fn frame_seconds(rate: FrameRate) -> f32 {
+    let hertz = rate.as_f64();
+    if hertz <= 0.0 {
+        return 0.0;
+    }
+    (1.0 / hertz) as f32
 }
 
 /// Narrows a running count of seconds to the `f32` an effect pass reads.
