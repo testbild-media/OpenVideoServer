@@ -4641,6 +4641,9 @@ impl OffscreenTarget {
         let width = target.width.max(1);
         let height = target.height.max(1);
         let device = context.device();
+        let source_width = self.preview_size.width;
+        let source_height = self.preview_size.height;
+        let frame_bytes = source_width as usize * source_height as usize * 4;
 
         // SAFETY: the memory is host-visible and host-coherent, nothing else
         // maps it, and the frame has completed.
@@ -4656,42 +4659,58 @@ impl OffscreenTarget {
             operation: "vkMapMemory",
             result,
         })?;
+        // SAFETY: the mapping covers the whole buffer, which holds the
+        // preview picture and is exactly `frame_bytes` long; it stays mapped
+        // until the unmap below, and nothing writes to it in between.
+        let mapping = unsafe { std::slice::from_raw_parts(mapped.cast::<u8>(), frame_bytes) };
 
-        // Copied out in one pass before anything is sampled. Reading the
-        // mapping directly, pixel by scattered pixel, is a separate bus
-        // transaction each time; one sequential copy is what the hardware is
-        // built for. On this machine that was the difference between 57 fps
-        // and 60.
-        let frame_bytes = self.preview_size.width as usize * self.preview_size.height as usize * 4;
-        let mut frame = vec![0_u8; frame_bytes];
-        // SAFETY: the mapping covers the whole buffer, which is exactly
-        // `frame_bytes` long, and the destination is a fresh allocation of the
-        // same size that cannot overlap it.
-        unsafe {
-            std::ptr::copy_nonoverlapping(mapped.cast::<u8>(), frame.as_mut_ptr(), frame_bytes);
+        // **The size it already is: one copy, straight out.** That is what a
+        // preview stream asks for — `stream_size` and the card's own shrink
+        // share one ceiling — and it used to go the long way round: a zeroed
+        // copy of the whole picture, then the same picture again pixel by
+        // pixel, two 64-bit divisions a pixel, nine hundred thousand times.
+        // Measured on the development machine at 2,259 us a 720p read, on the
+        // render thread, between composing a frame and showing it — once a
+        // frame since a hardware encoder made the preview sixty a second, and
+        // on the location server on 2026-10-18 that was a wall missing a
+        // frame every few seconds whenever a client opened the preview.
+        if width == source_width && height == source_height {
+            into.clear();
+            into.extend_from_slice(mapping);
+            // SAFETY: the mapping was made above and `mapping` is not used
+            // after this.
+            unsafe { device.unmap_memory(self.readback_memory) };
+            return Ok(());
         }
 
-        // SAFETY: the mapping was made immediately above, and nothing below
-        // touches it.
+        // Another size: copied out in one pass before anything is sampled.
+        // Reading the mapping directly, pixel by scattered pixel, is a separate
+        // bus transaction each time; one sequential copy is what the hardware
+        // is built for. On this machine that was the difference between 57 fps
+        // and 60.
+        let frame = mapping.to_vec();
+
+        // SAFETY: the mapping was made above, and only the copy is read below.
         unsafe { device.unmap_memory(self.readback_memory) };
+
+        // Sampled at the centre of each target pixel, so a scale that is not a
+        // whole number does not bias the picture up and to the left. Where
+        // each column comes from is the same on every row, so it is worked out
+        // once rather than once a pixel.
+        let centre = |index: u32, of: u32, from: u32| -> usize {
+            let source = (u64::from(index) * 2 + 1) * u64::from(from) / (u64::from(of) * 2);
+            (source as u32).min(from.saturating_sub(1)) as usize
+        };
+        let columns: Vec<usize> = (0..width)
+            .map(|column| centre(column, width, source_width) * 4)
+            .collect();
 
         into.clear();
         into.reserve(width as usize * height as usize * 4);
-
         for row in 0..height {
-            // Sampled at the centre of each target pixel, so a scale that is not
-            // a whole number does not bias the picture up and to the left.
-            let source_y = ((u64::from(row) * 2 + 1) * u64::from(self.preview_size.height)
-                / (u64::from(height) * 2)) as u32;
-            let source_y = source_y.min(self.preview_size.height.saturating_sub(1));
-
-            for column in 0..width {
-                let source_x = ((u64::from(column) * 2 + 1) * u64::from(self.preview_size.width)
-                    / (u64::from(width) * 2)) as u32;
-                let source_x = source_x.min(self.preview_size.width.saturating_sub(1));
-
-                let offset =
-                    (source_y as usize * self.preview_size.width as usize + source_x as usize) * 4;
+            let row_start = centre(row, height, source_height) * source_width as usize * 4;
+            for &column in &columns {
+                let offset = row_start + column;
                 into.extend_from_slice(&frame[offset..offset + 4]);
             }
         }
