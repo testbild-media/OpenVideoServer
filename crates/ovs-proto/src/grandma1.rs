@@ -51,9 +51,8 @@
 //!   VPU (`Eff1 Par1` to `Par3`): "ansonsten finde ich die Param Sachen gut."
 //! - "Rotation könnte mit zu Pan/Tilt in die selbe Attribute Gruppe" — "Pan
 //!   Tilt und Rotation bei uns dann X Y und Z Rotation [...] Das setze ich
-//!   fest." And "Layer Scale sollte eine eigene Gruppe fern ab von den
-//!   Parametern sein", but "OVS Layer braucht keine eigene Gruppe wenn nur
-//!   eine Sache drin ist", so the slot joins the scale.
+//!   fest." And "OVS Layer braucht keine eigene Gruppe wenn nur eine Sache drin
+//!   ist."
 //! - "Man könnte Global RGBX als Gruppe definieren auch für Foreground RGBA,
 //!   weil hier das X mehrere Bedeutungen haben kann.. X kann Alpha, Amber oder
 //!   auch White sein bei anderen Fixtures." And a background is a background:
@@ -61,41 +60,41 @@
 //! - "Params bitte alle unter der Video Hauptgruppe machen, so kann man das
 //!   Video Fenster in der GrandMA für Presets nutzen."
 //!
-//! So there are **six groups, and a seventh only on purpose**
-//! (`the_groups_are_these_six` says so when one appears):
+//! And then the names themselves, off his desk: "ich habe hier mal ein
+//! Beispiel mit Attributen und Gruppen geschrieben, die du so übernehmen
+//! kannst. die kommen direkt aus dem Pult." **Every attribute and group here
+//! is one of his, spelt as his desk spelt it** — underscores, leading ones
+//! included — and [`DESK`] is that example, which a test holds every file to.
+//! The slot and the master's own controls were not in it; on his word they are
+//! parameters too, so there is no group but his.
 //!
 //! | Group | Preset | Attributes |
 //! |---|---|---|
 //! | `DIMMER` | Dimmer | `DIM`: the master's, a layer's, a module's |
-//! | `PAN/TILT` | Pan/Tilt | `PAN` (X), `TILT` (Y), `OVS ROTATION` (Z) |
-//! | `RGBX` | Color | `R`, `G`, `B`, `X`; then `BG R`, `BG G`, `BG B`, `BG X` |
-//! | `OVS LAYER` | Video | `OVS SLOT`, `OVS SCALE X`, `OVS SCALE Y` |
-//! | `OVS MASTER` | Video | freeze, BPM tap, BPM scale, crossfade |
-//! | `OVS PARAM` | Video | `OVS PARAM 1` to `6`, shared by every module |
+//! | `PAN/TILT` | Pan/Tilt | `PAN` (X), `TILT` (Y), `OVS_ROTATION` (Z) |
+//! | `SCALE` | Pan/Tilt | `OVS_SCALE_X`, `OVS_SCALE_Y` |
+//! | `OVS_PARAMETER` | Video | `PARA_1` to `PARA_8`, shared by everything |
+//! | `RGBX` | Color | `_RED`, `_GREEN`, `_BLUE`, `_ALPHA` |
+//! | `OVS_RGBX_BG` | Color | `OVS_BG_RED`, `OVS_BG_GREEN`, `OVS_BG_BLUE`, `OVS_BG_ALPHA` |
 //!
-//! `DIM`, `PAN` and `TILT` are the desk's own, written as the library writes
-//! them, because a tool of the desk answers to them: the masters and
-//! Highlight, the trackball and position effects. `RGBX` is the owner's own
-//! group for any fixture, so it says nothing of OVS; its `R`, `G` and `B` keep
-//! the colour-mix effect the colour picker looks for, and `X` is whatever a
-//! fixture's fourth part is — alpha, here. A gradient's far colour is the
-//! background's four, the one place `BG` is not literally a background.
-//! Everything else is ours and says `OVS`.
+//! `DIM`, `PAN` and `TILT` are the desk's own, because a tool of the desk
+//! answers to them: the masters and Highlight, the trackball and position
+//! effects. `_RED`, `_GREEN` and `_BLUE` carry the colour-mix effect the
+//! colour picker looks for. A gradient's far colour is the background's four.
 //!
-//! **A module's parameters are numbered**, in the order the module declares
-//! them, leaving out its dimmer and its colours: Blur's radius is Param 1, a
-//! text's cap height is Param 1 and its alignment Param 4. The encoder says
-//! "Param 1"; the named values say what it is — `Radius 0`, `Radius 32`,
-//! `Radius 64` — because a label belongs to the attribute and the attribute
-//! to every module.
+//! **Parameters are numbered.** A module's, in the order the module declares
+//! them, leaving out its dimmer and its colours: Blur's radius is Parameter 1,
+//! a text's cap height Parameter 1 and its alignment Parameter 4. A layer's
+//! slot is its Parameter 1; the master's freeze, tap, scale and crossfade are
+//! its 1 to 4. The encoder says "Parameter 1"; the named values say what it
+//! is — `Radius 0`, `Radius 32`, `Radius 64`, `Slot 12`, `BPM Tap Fire` —
+//! because a label belongs to the attribute and the attribute to everything.
 //!
-//! **A colour-mix group is not shared with the desk's `RGB`.** The first set of
-//! files put a module's alpha into `RGB` as a fourth attribute, and every
-//! fixture type with a colour was refused by the desk (owner, 2026-10-18)
-//! while every one without was taken; no fixture of the 25 in the library
-//! with colour mixing in `RGB` has anything else in it. Whether `RGBX`, which
-//! is new and has an `X`, is taken is not known until it is imported: two
-//! probe files beside these ask the desk.
+//! **Nothing goes into the desk's own `RGB`.** The first set of files put a
+//! module's alpha there as a fourth attribute, and every fixture type with a
+//! colour was refused (owner, 2026-10-18). His example puts `_ALPHA` beside
+//! three colour-mix attributes in `RGBX`, straight off the desk, so that much
+//! the desk takes.
 
 use ovs_types::config::fixtures::{definition, ColourPart, ParameterSlot};
 use ovs_types::config::{ParameterDefinition, ParameterKind};
@@ -110,8 +109,122 @@ pub const MANUFACTURER: &str = "testbild.media";
 /// The longest attribute, feature, label or named value a grandMA1 shows.
 pub const NAME_FIELD: usize = 18;
 
-/// The group every module's parameters share.
-const PARAMETERS: &str = "OVS PARAM";
+/// The owner's attributes, exactly as his desk exported them on 2026-10-18:
+/// attribute, group, preset, label and the group's label. Every attribute in
+/// every file here is one of these or the desk's `DIM`; a test holds them to
+/// it. `_AMBER` and `_WHITE` are his for other fixtures and no OVS one has
+/// either.
+pub const DESK: [(&str, &str, &str, &str, &str); 24] = [
+    ("PAN", "PAN/TILT", "PAN/TILT", "Pan", "Pan/Tilt"),
+    ("TILT", "PAN/TILT", "PAN/TILT", "Tilt", "Pan/Tilt"),
+    (
+        "OVS_ROTATION",
+        "PAN/TILT",
+        "PAN/TILT",
+        "Rotation",
+        "Pan/Tilt",
+    ),
+    ("OVS_SCALE_X", "SCALE", "PAN/TILT", "Scale X", "Scale"),
+    ("OVS_SCALE_Y", "SCALE", "PAN/TILT", "Scale Y", "Scale"),
+    (
+        "PARA_1",
+        PARAMETERS,
+        "VIDEO",
+        "Parameter 1",
+        "OVS Parameter",
+    ),
+    (
+        "PARA_2",
+        PARAMETERS,
+        "VIDEO",
+        "Parameter 2",
+        "OVS Parameter",
+    ),
+    (
+        "PARA_3",
+        PARAMETERS,
+        "VIDEO",
+        "Parameter 3",
+        "OVS Parameter",
+    ),
+    (
+        "PARA_4",
+        PARAMETERS,
+        "VIDEO",
+        "Parameter 4",
+        "OVS Parameter",
+    ),
+    (
+        "PARA_5",
+        PARAMETERS,
+        "VIDEO",
+        "Parameter 5",
+        "OVS Parameter",
+    ),
+    (
+        "PARA_6",
+        PARAMETERS,
+        "VIDEO",
+        "Parameter 6",
+        "OVS Parameter",
+    ),
+    (
+        "PARA_7",
+        PARAMETERS,
+        "VIDEO",
+        "Parameter 7",
+        "OVS Parameter",
+    ),
+    (
+        "PARA_8",
+        PARAMETERS,
+        "VIDEO",
+        "Parameter 8",
+        "OVS Parameter",
+    ),
+    ("_RED", "RGBX", "COLOR", "Red", "RGBX"),
+    ("_GREEN", "RGBX", "COLOR", "Green", "RGBX"),
+    ("_BLUE", "RGBX", "COLOR", "Blue", "RGBX"),
+    ("_ALPHA", "RGBX", "COLOR", "Alpha", "RGBX"),
+    ("_AMBER", "RGBX", "COLOR", "Amber", "RGBX"),
+    ("_WHITE", "RGBX", "COLOR", "White", "RGBX"),
+    (
+        "OVS_BG_RED",
+        "OVS_RGBX_BG",
+        "COLOR",
+        "BG Red",
+        "OVS BG RGBX",
+    ),
+    (
+        "OVS_BG_GREEN",
+        "OVS_RGBX_BG",
+        "COLOR",
+        "BG Green",
+        "OVS BG RGBX",
+    ),
+    (
+        "OVS_BG_BLUE",
+        "OVS_RGBX_BG",
+        "COLOR",
+        "BG Blue",
+        "OVS BG RGBX",
+    ),
+    (
+        "OVS_BG_ALPHA",
+        "OVS_RGBX_BG",
+        "COLOR",
+        "BG Alpha",
+        "OVS BG RGBX",
+    ),
+    // Not in his example, and the desk's own on 490 fixtures of its library.
+    ("DIM", "DIMMER", "DIMMER", "Dim", "Dimmer"),
+];
+
+/// The group every parameter shares.
+const PARAMETERS: &str = "OVS_PARAMETER";
+
+/// How many parameters the owner's desk has.
+const PARAMETER_COUNT: usize = 8;
 
 /// One fixture type, ready to be written to disk and imported.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -121,7 +234,8 @@ pub struct FixtureFile {
     pub file_name: String,
     /// What the desk's fixture list calls it.
     pub name: String,
-    /// The file, with the CRLF line ends MA's own files have.
+    /// The file, with CRLF line ends. MA's own files and the owner's desk
+    /// write CR CR LF; the desk has taken these as they are.
     pub contents: String,
 }
 
@@ -292,9 +406,9 @@ fn comment(personality: &Personality) -> String {
         .attributes
         .iter()
         .filter_map(|attribute| {
-            let number = attribute.attribute.strip_prefix("OVS PARAM ")?;
+            let number = attribute.attribute.strip_prefix("PARA_")?;
             Some(format!(
-                "Param {number} {}",
+                "Parameter {number} {}",
                 attribute.named_for.as_deref()?
             ))
         })
@@ -356,37 +470,40 @@ impl Attribute {
         self
     }
 
+    /// One of the owner's attributes, exactly as his desk has it.
+    ///
+    /// Only ever asked for by a name written in this file, so a name that is
+    /// not in [`DESK`] is a mistake here and every test says so at once.
+    fn desk(name: &str) -> Self {
+        let &(attribute, feature, preset, label, feature_label) = DESK
+            .iter()
+            .find(|row| row.0 == name)
+            .unwrap_or_else(|| panic!("{name} is not an attribute of the owner's desk"));
+        Self::plain(attribute, feature, preset, label, feature_label)
+    }
+
     /// The desk's dimmer, written as 490 fixtures of the library write it.
     fn dimmer() -> Self {
-        Self::plain("DIM", "DIMMER", "DIMMER", "Dim", "Dimmer").for_the_desk("DIMMER", None)
+        Self::desk("DIM").for_the_desk("DIMMER", None)
     }
 
-    /// One of the master's own controls.
-    fn master(attribute: impl Into<String>, label: impl Into<String>) -> Self {
-        Self::plain(attribute, "OVS MASTER", "VIDEO", label, "OVS Master")
-    }
-
-    /// One of a layer's own controls that is not position or turn.
-    fn layer(attribute: impl Into<String>, label: impl Into<String>) -> Self {
-        Self::plain(attribute, "OVS LAYER", "VIDEO", label, "OVS Layer")
-    }
-
-    /// One part of a colour, in the owner's RGBX: `R`, `G`, `B` and `X`, or
-    /// the same with `BG` in front for a background. The attribute is its own
-    /// label, because both are what the encoder shows.
-    fn rgbx(attribute: String) -> Self {
-        Self::plain(attribute.clone(), "RGBX", "COLOR", attribute, "RGBX")
-    }
-
-    /// A module's `number`th parameter, which is `control` in this module.
+    /// The `number`th parameter, which is `control` on this fixture.
+    ///
+    /// Past the owner's eight it is a name his desk does not have, and the
+    /// test that holds every attribute to [`DESK`] says so rather than this
+    /// stopping the generator.
     fn parameter(number: usize, control: &str) -> Self {
-        let mut attribute = Self::plain(
-            format!("{PARAMETERS} {number}"),
-            PARAMETERS,
-            "VIDEO",
-            format!("Param {number}"),
-            "OVS Param",
-        );
+        let mut attribute = if number <= PARAMETER_COUNT {
+            Self::desk(&format!("PARA_{number}"))
+        } else {
+            Self::plain(
+                format!("PARA_{number}"),
+                PARAMETERS,
+                "VIDEO",
+                format!("Parameter {number}"),
+                "OVS Parameter",
+            )
+        };
         attribute.named_for = Some(ascii(control));
         attribute
     }
@@ -463,24 +580,23 @@ fn slot_of(personality: &Personality, channel: &PersonalityChannel) -> Option<Pa
 /// row here and is laid out like any other control rather than taking another
 /// one's attribute.
 fn fixed(control: &str) -> Option<Attribute> {
-    let pan_tilt =
-        |attribute, label| Attribute::plain(attribute, "PAN/TILT", "PAN/TILT", label, "Pan/Tilt");
     let attribute = match control {
         "master_dimmer" | "layer_opacity" => Attribute::dimmer(),
-        "master_freeze" => Attribute::master("OVS FREEZE", "Freeze"),
-        "master_tap_tempo" => Attribute::master("OVS BPM TAP", "BPM Tap"),
-        "master_speed_scale" => Attribute::master("OVS BPM SCALE", "BPM Scale"),
-        "master_crossfader" => Attribute::master("OVS CROSSFADE", "Crossfade A/B"),
-        "layer_slot" => Attribute::layer("OVS SLOT", "Slot"),
+        // Parameters, so the master and the layer bring no group of their own
+        // (owner, 2026-10-18: "ja passt und baue es").
+        "master_freeze" => Attribute::parameter(1, "Freeze"),
+        "master_tap_tempo" => Attribute::parameter(2, "BPM Tap"),
+        "master_speed_scale" => Attribute::parameter(3, "BPM Scale"),
+        "master_crossfader" => Attribute::parameter(4, "Crossfade"),
+        "layer_slot" => Attribute::parameter(1, "Slot"),
         // The trackball's. Up is up: a larger value moves the picture up the
         // wall, as a larger tilt lifts a head.
-        "layer_position_x" => pan_tilt("PAN", "Pan").for_the_desk("PAN", None),
-        "layer_position_y" => pan_tilt("TILT", "Tilt").for_the_desk("TILT", None),
-        // Ours, in the desk's group: X, Y and the turn about Z on one page.
-        "layer_rotation" => pan_tilt("OVS ROTATION", "Rotation"),
-        // With the slot, away from the parameters.
-        "layer_scale_x" => Attribute::layer("OVS SCALE X", "Scale X"),
-        "layer_scale_y" => Attribute::layer("OVS SCALE Y", "Scale Y"),
+        "layer_position_x" => Attribute::desk("PAN").for_the_desk("PAN", None),
+        "layer_position_y" => Attribute::desk("TILT").for_the_desk("TILT", None),
+        // X, Y and the turn about Z on one page.
+        "layer_rotation" => Attribute::desk("OVS_ROTATION"),
+        "layer_scale_x" => Attribute::desk("OVS_SCALE_X"),
+        "layer_scale_y" => Attribute::desk("OVS_SCALE_Y"),
         _ => return None,
     };
     Some(attribute)
@@ -519,6 +635,15 @@ fn attribute_of(
     numbered: &mut usize,
 ) -> Attribute {
     if let Some(attribute) = fixed(&channel.control) {
+        // A control the server publishes itself may be numbered already; one
+        // after it is not given the same number.
+        if let Some(number) = attribute
+            .attribute
+            .strip_prefix("PARA_")
+            .and_then(|number| number.parse::<usize>().ok())
+        {
+            *numbered = (*numbered).max(number);
+        }
         return attribute;
     }
 
@@ -528,13 +653,10 @@ fn attribute_of(
         }
         _ => None,
     }) else {
-        // A control of the server's own that `fixed` does not know yet, in
-        // the group of whichever it belongs to.
-        let attribute = format!("OVS {}", upper(&channel.name));
-        return match personality.target {
-            PersonalityTarget::Layer => Attribute::layer(attribute, field(&channel.name)),
-            _ => Attribute::master(attribute, field(&channel.name)),
-        };
+        // A control of the server's own that `fixed` does not know yet: the
+        // next parameter, named after itself.
+        *numbered += 1;
+        return Attribute::parameter(*numbered, &field(&channel.name));
     };
 
     if is_dimmer(&personality.type_id, parameter.key) {
@@ -542,26 +664,28 @@ fn attribute_of(
     }
 
     if let Some(part) = parameter.component {
-        let letter = match part {
-            ColourPart::Red => "R",
-            ColourPart::Green => "G",
-            ColourPart::Blue => "B",
-            ColourPart::Alpha => "X",
-        };
         // The first colour is the foreground, and its red, green and blue
         // carry the colour-mix effect, which is what the colour picker looks
         // for. The background — or a gradient's far colour — has no picker:
         // one per fixture, as in every fixture of the library.
         if first_colour == Some(parameter.key) {
-            let attribute = Attribute::rgbx(letter.to_owned());
             return match part {
-                ColourPart::Red => attribute.for_the_desk("COLOR_MIX", Some("RED")),
-                ColourPart::Green => attribute.for_the_desk("COLOR_MIX", Some("GREEN")),
-                ColourPart::Blue => attribute.for_the_desk("COLOR_MIX", Some("BLUE")),
-                ColourPart::Alpha => attribute,
+                ColourPart::Red => Attribute::desk("_RED").for_the_desk("COLOR_MIX", Some("RED")),
+                ColourPart::Green => {
+                    Attribute::desk("_GREEN").for_the_desk("COLOR_MIX", Some("GREEN"))
+                }
+                ColourPart::Blue => {
+                    Attribute::desk("_BLUE").for_the_desk("COLOR_MIX", Some("BLUE"))
+                }
+                ColourPart::Alpha => Attribute::desk("_ALPHA"),
             };
         }
-        return Attribute::rgbx(format!("BG {letter}"));
+        return Attribute::desk(match part {
+            ColourPart::Red => "OVS_BG_RED",
+            ColourPart::Green => "OVS_BG_GREEN",
+            ColourPart::Blue => "OVS_BG_BLUE",
+            ColourPart::Alpha => "OVS_BG_ALPHA",
+        });
     }
 
     let name = parameters
@@ -722,7 +846,7 @@ fn channel_sets(
 /// the round figure it is near: the middle of an eight-bit channel is 128 of
 /// 255, which is not quite half way. A shared parameter's are named after what
 /// it is in this module instead — `Radius 32` rather than `Center 32` — since
-/// its encoder says only "Param 1".
+/// its encoder says only "Parameter 1".
 fn landmarks(
     min: f64,
     max: f64,
@@ -831,14 +955,6 @@ fn field(name: &str) -> String {
         .collect::<String>()
         .trim_end()
         .to_owned()
-}
-
-/// A name in the capitals an attribute or a group is written in.
-///
-/// Not cut to the field: an attribute cut short could become another one, and
-/// a test says when a name no longer fits instead.
-fn upper(name: &str) -> String {
-    ascii(name).to_uppercase()
 }
 
 /// Only what a grandMA1 text file can carry.
@@ -1013,78 +1129,118 @@ mod tests {
     }
 
     #[test]
-    fn the_groups_are_these_six() {
-        // "Es sind zu viele einzelne Attribute Groups." A seventh is a
-        // decision, not something a new module does by being added.
-        let mut groups: BTreeMap<String, (&str, BTreeSet<String>)> = BTreeMap::new();
-        for (_, attribute) in every_attribute() {
-            groups
-                .entry(attribute.feature)
-                .or_insert((attribute.preset, BTreeSet::new()))
-                .1
-                .insert(attribute.attribute);
-        }
-        let names: Vec<(&str, &str)> = groups
-            .iter()
-            .map(|(group, (preset, _))| (group.as_str(), *preset))
-            .collect();
-        // "Params bitte alle unter der Video Hauptgruppe", "RGBX unter Color!"
-        assert_eq!(
-            names,
-            [
-                ("DIMMER", "DIMMER"),
-                ("OVS LAYER", "VIDEO"),
-                ("OVS MASTER", "VIDEO"),
-                ("OVS PARAM", "VIDEO"),
-                ("PAN/TILT", "PAN/TILT"),
-                ("RGBX", "COLOR"),
-            ]
-        );
-        // "Es können max. 4 Parameter angezeigt werden. Hat eine Gruppe mehr
-        // als 4 Parameter gibt es die A und B Seiten." Two pages at most.
-        for (group, (_, attributes)) in &groups {
-            assert!(
-                attributes.len() <= 8,
-                "{group} needs a third page: {attributes:?}"
+    fn every_attribute_is_one_the_owners_desk_has() {
+        // "ich habe hier mal ein Beispiel mit Attributen und Gruppen
+        // geschrieben, die du so übernehmen kannst. die kommen direkt aus dem
+        // Pult." Name, group, preset, label and the group's label, each as his
+        // desk wrote it.
+        for (fixture, attribute) in every_attribute() {
+            let row = DESK
+                .iter()
+                .find(|row| row.0 == attribute.attribute)
+                .unwrap_or_else(|| panic!("{fixture}: {} is not on the desk", attribute.attribute));
+            assert_eq!(
+                (
+                    attribute.feature.as_str(),
+                    attribute.preset,
+                    attribute.attribute_label.as_str(),
+                    attribute.feature_label.as_str()
+                ),
+                (row.1, row.2, row.3, row.4),
+                "{fixture}: {}",
+                attribute.attribute
             );
         }
-        let members = |group: &str| groups[group].1.clone();
-        let set = |names: &[&str]| names.iter().map(|name| (*name).to_owned()).collect();
-        // X, Y and the turn on one page.
-        assert_eq!(members("PAN/TILT"), set(&["PAN", "TILT", "OVS ROTATION"]));
-        // The layer's size with its slot, away from the parameters; and no
-        // group with one thing in it.
-        assert_eq!(
-            members("OVS LAYER"),
-            set(&["OVS SLOT", "OVS SCALE X", "OVS SCALE Y"])
-        );
-        // "BPM Sync entfernen wir komplett aus DMX": four, one page.
-        assert_eq!(
-            members("OVS MASTER"),
-            set(&[
-                "OVS FREEZE",
-                "OVS BPM TAP",
-                "OVS BPM SCALE",
-                "OVS CROSSFADE"
-            ])
-        );
-        // A foreground on one page, a background on the other.
-        assert_eq!(
-            members("RGBX"),
-            set(&["R", "G", "B", "X", "BG R", "BG G", "BG B", "BG X"])
-        );
     }
 
     #[test]
-    fn a_colour_is_rgbx_and_only_the_foreground_is_under_the_picker() {
+    fn the_desk_table_is_the_owners_example_line_for_line() {
+        // Typed out from the file his desk exported, which is committed beside
+        // the fixture types so this can be wrong: a label mistyped here is
+        // a label his desk does not have.
+        let example = include_str!("../../../reference/grandma1/desk/EXAMPLE.TXT");
+        let exported: BTreeSet<(String, String, String, String, String)> = example
+            .lines()
+            .filter_map(|line| {
+                let mut quoted = line.split('"').skip(1).step_by(2);
+                if !line.trim_start().starts_with("{ _ATTRIBUT") || line.contains("_TYPE FINE") {
+                    return None;
+                }
+                Some((
+                    quoted.next()?.to_owned(),
+                    quoted.next()?.to_owned(),
+                    quoted.next()?.to_owned(),
+                    quoted.next()?.to_owned(),
+                    quoted.next()?.to_owned(),
+                ))
+            })
+            .collect();
+        assert_eq!(exported.len(), 23, "{exported:?}");
+        let typed: BTreeSet<(String, String, String, String, String)> = DESK
+            .iter()
+            .filter(|row| row.0 != "DIM")
+            .map(|row| {
+                (
+                    row.0.to_owned(),
+                    row.1.to_owned(),
+                    row.2.to_owned(),
+                    row.3.to_owned(),
+                    row.4.to_owned(),
+                )
+            })
+            .collect();
+        assert_eq!(typed, exported);
+    }
+
+    #[test]
+    fn the_groups_are_the_owners_six() {
+        // "Es sind zu viele einzelne Attribute Groups." No group but his, and
+        // none needs a third page: "Es können max. 4 Parameter angezeigt
+        // werden. Hat eine Gruppe mehr als 4 Parameter gibt es die A und B
+        // Seiten."
+        let mut groups: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        for (_, attribute) in every_attribute() {
+            groups
+                .entry(attribute.feature)
+                .or_default()
+                .insert(attribute.attribute);
+        }
+        let names: Vec<&str> = groups.keys().map(String::as_str).collect();
+        assert_eq!(
+            names,
+            [
+                "DIMMER",
+                "OVS_PARAMETER",
+                "OVS_RGBX_BG",
+                "PAN/TILT",
+                "RGBX",
+                "SCALE"
+            ]
+        );
+        let set = |names: &[&str]| -> BTreeSet<String> {
+            names.iter().map(|name| (*name).to_owned()).collect()
+        };
+        // X, Y and the turn about Z on one page.
+        assert_eq!(groups["PAN/TILT"], set(&["PAN", "TILT", "OVS_ROTATION"]));
+        assert_eq!(groups["SCALE"], set(&["OVS_SCALE_X", "OVS_SCALE_Y"]));
+        // The foreground, and the background beside it.
+        assert_eq!(groups["RGBX"], set(&["_RED", "_GREEN", "_BLUE", "_ALPHA"]));
+        assert_eq!(
+            groups["OVS_RGBX_BG"],
+            set(&["OVS_BG_RED", "OVS_BG_GREEN", "OVS_BG_BLUE", "OVS_BG_ALPHA"])
+        );
+        assert!(groups["OVS_PARAMETER"].len() <= PARAMETER_COUNT);
+    }
+
+    #[test]
+    fn only_the_foreground_is_under_the_picker() {
         // "Man könnte Global RGBX als Gruppe definieren auch für Foreground
-        // RGBA, weil hier das X mehrere Bedeutungen haben kann." And nothing in
-        // the desk's own RGB: every fixture type that put a fourth attribute
-        // there was refused.
+        // RGBA." And nothing in the desk's own RGB: every fixture type that put
+        // a fourth attribute there was refused.
         for (fixture, attribute) in every_attribute() {
             assert_ne!(attribute.feature, "RGB", "{fixture}");
-            if attribute.feature == "RGBX" {
-                let mixed = ["R", "G", "B"].contains(&attribute.attribute.as_str());
+            let mixed = ["_RED", "_GREEN", "_BLUE"].contains(&attribute.attribute.as_str());
+            if attribute.preset == "COLOR" {
                 assert_eq!(
                     attribute.effect,
                     if mixed { "COLOR_MIX" } else { "NONE" },
@@ -1096,49 +1252,64 @@ mod tests {
         let shape = named("OVS Gen Shape");
         assert!(
             shape.contains(
-                "_ATTRIBUT \"R\" _FEATURE \"RGBX\" _PRESET \"COLOR\" _ATT_LABEL \"R\" \
+                "_ATTRIBUT \"_RED\" _FEATURE \"RGBX\" _PRESET \"COLOR\" _ATT_LABEL \"Red\" \
                  _FEA_LABEL \"RGBX\""
             ),
             "{shape}"
         );
         assert!(shape.contains("_EFF COLOR_MIX _EFFSUB RED"));
-        assert!(shape.contains("_ATTRIBUT \"X\" _FEATURE \"RGBX\""));
+        assert!(shape.contains("_ATTRIBUT \"_ALPHA\" _FEATURE \"RGBX\""));
         // "Background Color sollte nicht Color 2 sein."
-        assert!(shape.contains("_ATTRIBUT \"BG R\" _FEATURE \"RGBX\""));
-        assert!(shape.contains("_ATTRIBUT \"BG X\" _FEATURE \"RGBX\""));
+        assert!(shape.contains(
+            "_ATTRIBUT \"OVS_BG_RED\" _FEATURE \"OVS_RGBX_BG\" _PRESET \"COLOR\" \
+             _ATT_LABEL \"BG Red\" _FEA_LABEL \"OVS BG RGBX\""
+        ));
         assert_eq!(shape.matches("COLOR_MIX").count(), 3, "one picker");
         // A gradient runs from the foreground to the background's four.
         let gradient = named("OVS Gen Gradient");
-        assert!(gradient.contains("_ATTRIBUT \"BG B\""));
+        assert!(gradient.contains("_ATTRIBUT \"OVS_BG_BLUE\""));
     }
 
     #[test]
     fn a_parameter_is_numbered_and_its_values_say_what_it_is() {
-        // "ansonsten finde ich die Param Sachen gut": the encoder says Param 1,
-        // so the named values have to say Radius.
+        // "ansonsten finde ich die Param Sachen gut": the encoder says
+        // Parameter 1, so the named values have to say Radius.
         let blur = named("OVS FX Blur");
         assert!(
             blur.contains(
-                "_ATTRIBUT \"OVS PARAM 1\" _FEATURE \"OVS PARAM\" _PRESET \"VIDEO\" \
-                 _ATT_LABEL \"Param 1\" _FEA_LABEL \"OVS Param\""
+                "_ATTRIBUT \"PARA_1\" _FEATURE \"OVS_PARAMETER\" _PRESET \"VIDEO\" \
+                 _ATT_LABEL \"Parameter 1\" _FEA_LABEL \"OVS Parameter\""
             ),
             "{blur}"
         );
         for value in ["\"Radius 0\"", "\"Radius 32\"", "\"Radius 64\""] {
             assert!(blur.contains(value), "{value} in {blur}");
         }
-        assert!(blur.contains("Param 1 Radius"), "the comment says it too");
+        assert!(
+            blur.contains("Parameter 1 Radius"),
+            "the comment says it too"
+        );
 
         // Numbered past the dimmer and the colours: a text's alignment is its
         // fourth parameter although it is its seventh channel.
         let text = named("OVS Gen Text");
-        assert!(text.contains("_ATTRIBUT \"OVS PARAM 4\""), "{text}");
-        assert!(text.contains("Param 4 Alignment"), "{text}");
-        assert!(!text.contains("OVS PARAM 5"));
-        // Colour Correct uses all six.
+        assert!(text.contains("_ATTRIBUT \"PARA_4\""), "{text}");
+        assert!(text.contains("Parameter 4 Alignment"), "{text}");
+        assert!(!text.contains("PARA_5"));
+        // Colour Correct uses six.
         let correct = named("OVS FX Colour Correct");
-        assert!(correct.contains("_ATTRIBUT \"OVS PARAM 6\""));
+        assert!(correct.contains("_ATTRIBUT \"PARA_6\""));
         assert!(correct.contains("\"Temperature 10000\""), "{correct}");
+
+        // The master's and the layer's own controls are parameters too, so
+        // neither brings a group (owner, 2026-10-18: "ja passt und baue es").
+        let master = named("OVS Master");
+        assert!(master.contains(
+            "Parameter 1 Freeze, Parameter 2 BPM Tap, Parameter 3 BPM Scale, \
+             Parameter 4 Crossfade"
+        ));
+        assert!(master.contains("{ _NAME \"Freeze On\" _RANGE [50.0008%,100.0000%] }"));
+        assert!(named("OVS Layer").contains("Parameter 1 Slot"));
     }
 
     #[test]
@@ -1160,7 +1331,7 @@ mod tests {
             "{layer}"
         );
         assert_eq!(layer.matches("\"Slot ").count(), 84);
-        assert!(layer.contains("_ATTRIBUT \"OVS SLOT\" _FEATURE \"OVS LAYER\" _PRESET \"VIDEO\""));
+        assert!(layer.contains("_ATTRIBUT \"PARA_1\" _FEATURE \"OVS_PARAMETER\" _PRESET \"VIDEO\""));
     }
 
     #[test]
@@ -1182,7 +1353,7 @@ mod tests {
             assert!(layer.contains(&format!("_EFF {effect} ")), "{layer}");
         }
         assert!(layer.contains(
-            "_ATTRIBUT \"OVS ROTATION\" _FEATURE \"PAN/TILT\" _PRESET \"PAN/TILT\" \
+            "_ATTRIBUT \"OVS_ROTATION\" _FEATURE \"PAN/TILT\" _PRESET \"PAN/TILT\" \
              _ATT_LABEL \"Rotation\""
         ));
     }
@@ -1198,10 +1369,10 @@ mod tests {
             "{layer}"
         );
         // "Layer Scale sollte eine eigene Gruppe fern ab von den Parametern
-        // sein."
+        // sein": his desk's SCALE, beside pan and tilt.
         assert!(layer.contains(
-            "_ATTRIBUT \"OVS SCALE X\" _FEATURE \"OVS LAYER\" _PRESET \"VIDEO\" \
-             _ATT_LABEL \"Scale X\" _FEA_LABEL \"OVS Layer\" _DEFAULT 10.0008%"
+            "_ATTRIBUT \"OVS_SCALE_X\" _FEATURE \"SCALE\" _PRESET \"PAN/TILT\" \
+             _ATT_LABEL \"Scale X\" _FEA_LABEL \"Scale\" _DEFAULT 10.0008%"
         ));
         // And the centre of a position is the middle the server reads as nought.
         assert!(layer.contains("{ _NAME \"Center 0\" _RANGE [50.0008%,50.0008%] }"));
@@ -1299,32 +1470,6 @@ mod tests {
     }
 
     #[test]
-    fn everything_but_the_desks_and_rgbx_says_ovs() {
-        // "Wenn du neue Attribute hinzufügst mach auch OVS Blur z.B. statt nur
-        // Blur." RGBX is the owner's group for every fixture, not ours.
-        const DESK_GROUPS: [&str; 3] = ["DIMMER", "PAN/TILT", "RGBX"];
-        const DESK: [&str; 3] = ["DIM", "PAN", "TILT"];
-        for (fixture, attribute) in every_attribute() {
-            if !DESK.contains(&attribute.attribute.as_str()) && attribute.feature != "RGBX" {
-                assert!(
-                    attribute.attribute.starts_with("OVS "),
-                    "{fixture}: {}",
-                    attribute.attribute
-                );
-            }
-            if !DESK_GROUPS.contains(&attribute.feature.as_str()) {
-                assert!(
-                    attribute.feature.starts_with("OVS ")
-                        && attribute.feature_label.starts_with("OVS "),
-                    "{fixture}: {} / {}",
-                    attribute.feature,
-                    attribute.feature_label
-                );
-            }
-        }
-    }
-
-    #[test]
     fn an_attribute_means_one_thing_in_every_file() {
         // The desk keeps one label and one group for an attribute, for the
         // whole show: whatever a second file said would not be shown.
@@ -1356,7 +1501,7 @@ mod tests {
                 attribute.feature
             );
         }
-        assert!(seen.contains_key("OVS PARAM 6"));
+        assert!(seen.contains_key("PARA_6"));
     }
 
     #[test]
@@ -1418,11 +1563,11 @@ mod tests {
         let master = named("OVS Master");
         assert!(master.contains("\"0.125x\""), "{master}");
         assert!(master.contains("\"1x\""), "{master}");
-        assert!(master.contains("_ATTRIBUT \"OVS BPM TAP\" _FEATURE \"OVS MASTER\""));
-        assert!(!master.contains("SYNC"), "{master}");
+        assert!(master.contains("_ATTRIBUT \"PARA_2\" _FEATURE \"OVS_PARAMETER\""));
+        assert!(!master.contains("Sync"), "{master}");
         assert!(master.contains("ovs.master, 5 channels"), "{master}");
         assert!(
-            master.contains("{ _NAME \"Fire\" _RANGE [50.0008%,100.0000%] }"),
+            master.contains("{ _NAME \"BPM Tap Fire\" _RANGE [50.0008%,100.0000%] }"),
             "{master}"
         );
     }

@@ -45,31 +45,36 @@ that — so BPM Scale is channel 4 and the crossfader channel 5.
 
 ## Groups
 
-Six, so a show with every one of these patched lists six groups of ours and
-the desk's.
+**The owner's own, off his desk.** Every attribute and group is spelt as his
+desk exported them on 2026-10-18 — underscores, leading ones included — and
+[`desk/EXAMPLE.TXT`](desk/EXAMPLE.TXT) is that export. A test holds every file
+here to it.
 
-| Group | Preset | Attributes | Pages |
+| Group | Preset | Attributes | Labels |
 |---|---|---|---|
-| Dimmer | Dimmer | `DIM` | 1 |
-| Pan/Tilt | Pan/Tilt | `PAN` (X), `TILT` (Y), `OVS ROTATION` (Z) | 1 |
-| RGBX | Color | `R`, `G`, `B`, `X` · `BG R`, `BG G`, `BG B`, `BG X` | 2 |
-| OVS Layer | Video | `OVS SLOT`, `OVS SCALE X`, `OVS SCALE Y` | 1 |
-| OVS Master | Video | `OVS FREEZE`, `OVS BPM TAP`, `OVS BPM SCALE`, `OVS CROSSFADE` | 1 |
-| OVS Param | Video | `OVS PARAM 1` to `OVS PARAM 6` | 2 |
+| DIMMER | Dimmer | `DIM` | Dim |
+| PAN/TILT | Pan/Tilt | `PAN` (X), `TILT` (Y), `OVS_ROTATION` (Z) | Pan, Tilt, Rotation |
+| SCALE | Pan/Tilt | `OVS_SCALE_X`, `OVS_SCALE_Y` | Scale X, Scale Y |
+| OVS_PARAMETER | Video | `PARA_1` to `PARA_8` | Parameter 1 to 8 |
+| RGBX | Color | `_RED`, `_GREEN`, `_BLUE`, `_ALPHA` | Red, Green, Blue, Alpha |
+| OVS_RGBX_BG | Color | `OVS_BG_RED`, `OVS_BG_GREEN`, `OVS_BG_BLUE`, `OVS_BG_ALPHA` | BG Red to BG Alpha |
 
 - **Pan and tilt are a layer's X and Y**, so the trackball moves a layer and
   the desk's position effects run on it. A larger tilt moves the picture up
   the wall; if it goes the wrong way, invert tilt in the patch.
-- **RGBX is a colour of four parts** — red, green, blue and an X that is alpha
-  here and could be amber or white on another fixture. The first page is the
-  foreground, and its R, G and B are what the colour picker drives; the second
-  is the background (`BG`), which for a gradient is its far colour.
-- **Everything of ours that is not a colour is under Video**, so the Video
-  window keeps presets of it.
-- **A module's controls are Param 1 to 6**, shared by every effect and
-  generator. The encoder says "Param 1"; what it is in the module you have
-  selected is in its named values — Blur's Param 1 reads `Radius 0`,
-  `Radius 32`, `Radius 64` — and in the fixture's comment.
+- **RGBX is the foreground**, and its red, green and blue are what the colour
+  picker drives. `_AMBER` and `_WHITE` are in the group on the desk for other
+  fixtures; no OVS fixture has them. **OVS_RGBX_BG is the background**, which
+  for a gradient is its far colour.
+- **Everything else is a parameter, under Video**, so the Video window keeps
+  presets of it and no fixture brings a group of its own. The encoder says
+  "Parameter 1"; what it is on the fixture you have selected is in its named
+  values — Blur's Parameter 1 reads `Radius 0`, `Radius 32`, `Radius 64`, a
+  layer's reads `Black`, `Slot 1` to `Slot 84` — and in the fixture's comment.
+
+The first set of files was refused for every fixture with a colour, and put a
+module's alpha into the desk's own RGB group as a fourth attribute. Nothing
+goes there now.
 
 Choices and switches snap, and every step is a named value with the name the
 client shows. Every channel's home is the fixture's default, so a freshly
@@ -78,10 +83,10 @@ changes nothing.
 
 ## Every fixture
 
-| Fixture | Dimmer | Param 1 to 6 | RGBX |
+| Fixture | Dimmer | Parameter 1 to 6 | Colour |
 |---|---|---|---|
-| OVS Master | Master dimmer | — (Freeze, BPM Tap, BPM Scale, Crossfade in OVS Master) | — |
-| OVS Layer | Layer dimmer | — (Slot and Scale in OVS Layer, position in Pan/Tilt) | — |
+| OVS Master | Master dimmer | Freeze, BPM Tap, BPM Scale, Crossfade | — |
+| OVS Layer | Layer dimmer | Slot (and pan, tilt, rotation, scale in Pan/Tilt) | — |
 | FX Blur | Amount | Radius | — |
 | FX Colorize | Amount | Hue, Saturation | — |
 | FX Colour Correct | — | Brightness, Contrast, Saturation, Gamma, Temperature, Tint | — |
@@ -123,20 +128,3 @@ master does not reach them.
 **The grand master reaches these dimmers too.** Pulling it down to fade a show
 out also pulls the effects' amounts down on the way, and Blackout takes them to
 nought with everything else.
-
-## The probe files
-
-`probe/` holds two fixture types that are not for a show. The first set of
-files was refused for every fixture with a colour, and the likeliest reason is
-that it put a fourth attribute into the desk's own RGB group. RGBX is a group
-of its own, but it still has an X beside three colour-mix attributes. Import
-`OVS Gen Solid Colour` and both probes, and the three answers say which:
-
-| Solid Colour | Probe RGBX no X | Probe MA RGB | Then |
-|---|---|---|---|
-| taken | — | — | RGBX works; delete the probes |
-| refused | taken | — | X must not sit beside the colour mix |
-| refused | refused | taken | the colour mix must be the desk's RED, GREEN, BLUE |
-| refused | refused | refused | it is not the colour group at all |
-
-Delete them from the desk and from here once that is answered.
