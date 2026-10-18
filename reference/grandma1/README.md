@@ -13,11 +13,17 @@ disagree.
 
 ## Importing
 
-1. Copy the `.txt` files to a USB stick (any folder).
+1. Copy the `.TXT` files to a USB stick (any folder).
 2. On the desk: **Setup → Full Access → Fixture Types → Import → External**,
    and pick each file.
 3. To keep them in the desk's own library as well: select them in Fixture
    Types, **Export → Export Intern**.
+
+**The file names are the desk's rule, not a style.** Capitals, and no dot but
+the one before `TXT` — so the manufacturer is `TESTBILD MEDIA` in the name of
+every file, as in `TESTBILD MEDIA@OVS FX ECHO.TXT`. A grandMA1 refuses a file
+named any other way (found on the first import, 2026-10-18). Inside the files
+nothing changed: the desk still lists them under `testbild.media`.
 
 ## Names
 

@@ -60,7 +60,8 @@ pub const NAME_FIELD: usize = 18;
 /// One fixture type, ready to be written to disk and imported.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FixtureFile {
-    /// The file's name, in the library's own `MANUFACTURER@NAME` form.
+    /// The file's name, in the library's own `MANUFACTURER@NAME.TXT` form and
+    /// the capitals the desk insists on; see [`file_name`].
     pub file_name: String,
     /// What the desk's fixture list calls it.
     pub name: String,
@@ -132,9 +133,39 @@ fn with_version(base: String, version: u32) -> String {
     }
 }
 
-/// The file's name.
-fn file_name(personality: &Personality) -> String {
-    format!("{MANUFACTURER}@{}.txt", fixture_name(personality))
+/// The file's name: `MANUFACTURER@NAME.TXT`, in capitals, with no dot but the
+/// one before the extension.
+///
+/// **The desk refuses anything else.** The owner, importing the first set on
+/// 2026-10-18: "Die Fixturenamen sollten alle in Großbuchstaben sein und kein
+/// Punkt vorkommen im Namen außer .TXT. Aus Punkte sollte man ein Leerzeichen
+/// machen. Erst dann kann man die importieren, sonst werden die abgelehnt."
+/// So `testbild.media@OVS FX Echo.txt` is `TESTBILD MEDIA@OVS FX ECHO.TXT`.
+/// Only the file's name: the manufacturer and the fixture's name *inside* the
+/// file are as they were, and the desk lists them as written there.
+#[must_use]
+pub fn file_name(personality: &Personality) -> String {
+    format!(
+        "{}.TXT",
+        format!("{MANUFACTURER}@{}", fixture_name(personality))
+            .replace('.', " ")
+            .to_uppercase()
+    )
+}
+
+/// Whether a file in the fixture folder is one of these, of any vintage.
+///
+/// Either spelling, so whatever writes the folder can clear out the names the
+/// desk refused along with anything retired.
+#[must_use]
+pub fn is_fixture_file(name: &str) -> bool {
+    let upper = name.to_uppercase();
+    upper.ends_with(".TXT")
+        && (upper.starts_with(&format!("{}@", MANUFACTURER.to_uppercase()))
+            || upper.starts_with(&format!(
+                "{}@",
+                MANUFACTURER.replace('.', " ").to_uppercase()
+            )))
 }
 
 /// Renders one personality as a grandMA1 fixture type.
@@ -796,6 +827,29 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn every_file_name_is_capitals_with_one_dot_before_txt() {
+        // The owner, 2026-10-18: the desk refused the first set until the
+        // names were in capitals with no dot but the extension's.
+        for file in fixture_files() {
+            let name = &file.file_name;
+            assert!(name.ends_with(".TXT"), "{name}");
+            assert_eq!(name.matches('.').count(), 1, "{name}");
+            assert_eq!(&name.to_uppercase(), name, "{name}");
+            assert!(name.starts_with("TESTBILD MEDIA@OVS "), "{name}");
+            assert!(is_fixture_file(name), "{name}");
+        }
+        assert!(fixture_files()
+            .iter()
+            .any(|file| file.file_name == "TESTBILD MEDIA@OVS FX ECHO.TXT"));
+        assert!(fixture_files()
+            .iter()
+            .any(|file| file.file_name == "TESTBILD MEDIA@OVS FX COLOUR CORRECT V2.TXT"));
+        // The old spelling is still recognised as ours, so it can be cleared.
+        assert!(is_fixture_file("testbild.media@OVS FX Echo.txt"));
+        assert!(!is_fixture_file("README.md"));
     }
 
     #[test]

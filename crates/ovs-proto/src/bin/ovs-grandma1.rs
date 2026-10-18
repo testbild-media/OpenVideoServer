@@ -7,7 +7,7 @@
 //! cargo run -p ovs-proto --bin ovs-grandma1 -- somewhere/else
 //! ```
 //!
-//! One `.txt` per personality, into `reference/grandma1/` unless told
+//! One `.TXT` per personality, into `reference/grandma1/` unless told
 //! otherwise. A file of ours that the catalogue no longer produces is removed,
 //! so the directory is always exactly what a desk should import. The golden
 //! test in `tests/golden_grandma1.rs` checks that what is committed matches.
@@ -15,7 +15,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use ovs_proto::grandma1::{fixture_files, MANUFACTURER};
+use ovs_proto::grandma1::{fixture_files, is_fixture_file};
 
 fn main() -> ExitCode {
     let target: PathBuf = std::env::args_os().nth(1).map_or_else(
@@ -29,14 +29,14 @@ fn main() -> ExitCode {
     }
 
     let files = fixture_files();
-    let ours = format!("{MANUFACTURER}@");
 
     // Whatever of ours is there and is no longer made goes first, so an
-    // import of the whole directory never brings back a retired module.
+    // import of the whole directory never brings back a retired module — nor
+    // a file under the name the desk refused, before the names were capitals.
     if let Ok(listed) = std::fs::read_dir(&target) {
         for entry in listed.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
-            if name.starts_with(&ours) && !files.iter().any(|file| file.file_name == name) {
+            if is_fixture_file(&name) && !files.iter().any(|file| file.file_name == name) {
                 match std::fs::remove_file(entry.path()) {
                     Ok(()) => println!("removed {name}"),
                     Err(error) => {
