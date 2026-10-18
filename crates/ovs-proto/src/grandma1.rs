@@ -39,7 +39,8 @@
 //!   eight-bit step it falls in, on a sixteen-bit channel too.
 //! - Named values run in order of where they are on the channel.
 //! - A channel resting at nought has no `_DEFAULT`; one resting at the top is
-//!   `100.0000%`, a colour as well as a dimmer. A stepped one rests in the middle of its home's band, where
+//!   `100.0000%`, a colour as well as a dimmer. A module's dimmer — its
+//!   Amount — rests at nought whatever the client's default. A stepped one rests in the middle of its home's band, where
 //!   the desk puts it when a named value is chosen as the default.
 //! - Per cent is the sixteen-bit value divided by 655.35 in single precision,
 //!   to four places: double precision prints four of the 205 values in his
@@ -885,7 +886,7 @@ fn channel_block(
         quoted(&attribute.feature_label),
     );
     // Left out at nought, as the desk leaves it out.
-    if let Some(default) = default_of(channel, attribute) {
+    if let Some(default) = default_of(personality, channel, attribute) {
         header.push_str(&format!(" _DEFAULT {}", percent(default)));
     }
     if attribute.effect == "DIMMER" {
@@ -1047,15 +1048,29 @@ fn channel_sets(
 /// A step rests in the middle of its home's band, which is where the owner's
 /// desk put the master's freeze, tap and scale and the layer's slot when he
 /// chose a named value as the default: an edge is one value from the next
-/// step. A dimmer rests where its home is, so an effect's switch on the
-/// dimmer stays at nought and a group master finds it there. Anything else
-/// rests on its home, and a channel at full is the whole channel,
-/// `100.0000%`, as his desk writes Full — a dimmer or a colour alike (owner,
-/// 2026-10-18: "default bei Farben auch 100% nicht 99.6109%.. das hatte ich
-/// bei den Dimmern schon immer geändert").
-fn default_of(channel: &PersonalityChannel, attribute: &Attribute) -> Option<u16> {
+/// step. A module's dimmer — its Amount, or whatever else says how much of it
+/// there is — rests at nought, so a freshly patched effect is out of the
+/// picture until somebody brings it in, even where the client's own default
+/// is full (owner, 2026-10-18: "Wenn dimmer aber Amount ist sollte default 0
+/// sein"). The master's and a layer's dimmer rest where their home is. Anything
+/// else rests on its home, and a channel at full is the whole channel,
+/// `100.0000%`, as his desk writes Full — a dimmer or a colour alike ("default
+/// bei Farben auch 100% nicht 99.6109%.. das hatte ich bei den Dimmern schon
+/// immer geändert").
+fn default_of(
+    personality: &Personality,
+    channel: &PersonalityChannel,
+    attribute: &Attribute,
+) -> Option<u16> {
     let home = channel.home;
     let dimmer = attribute.effect == "DIMMER";
+    let module = matches!(
+        personality.target,
+        PersonalityTarget::Effect | PersonalityTarget::Generator
+    );
+    if dimmer && module {
+        return None;
+    }
     let middle = |(from, to): (u16, u16)| ((u32::from(from) + u32::from(to)) / 2) as u16;
     let rest = match &channel.encoding {
         ChannelEncodingInfo::Stepped { bands } if !dimmer => bands
@@ -2147,6 +2162,20 @@ mod tests {
         }
         // The middle of Black.
         assert!(named("OVS Layer").contains("_DEFAULT 0.7797%"));
+        // A module's dimmer rests at nought, Blur's and Mask's Amount too,
+        // whose client default is full: "Wenn dimmer aber Amount ist sollte
+        // default 0 sein".
+        for name in [
+            "OVS FX Blur",
+            "OVS FX Mask",
+            "OVS FX TV Glitch",
+            "OVS FX Shake",
+        ] {
+            assert!(
+                named(name).contains("_FEA_LABEL \"Dimmer\" _HIGHLITE"),
+                "{name} rests its dimmer somewhere other than nought"
+            );
+        }
         // A colour at full is Full too: "default bei Farben auch 100% nicht
         // 99.6109%".
         assert!(named("OVS Gen Solid Colo")

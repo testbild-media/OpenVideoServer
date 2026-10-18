@@ -148,6 +148,13 @@ effect changes nothing. The desk writes no default at nought; anything at full
 — a dimmer, a colour — is `100.0000%`; a step rests in the middle of its band,
 where his desk put the master's freeze, tap and scale and the layer's slot.
 
+**A module's dimmer rests at nought** — "Wenn dimmer aber Amount ist sollte
+default 0 sein" — so a freshly patched effect is out of the picture until it is
+brought in. Blur's and Mask's Amount are full in the client, where a blur of
+radius nought or a mask with no picture is nothing anyway; on the desk they
+start at nought like every other effect's. [`../FIXTURES.md`](../FIXTURES.md)
+gives the client's value as their home.
+
 **Where these differed from his export when they were made:**
 
 - **Slots 21 to 84** are ranges too: "Die Slots 0-20 hatte ich gemacht, aber
