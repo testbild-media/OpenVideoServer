@@ -748,11 +748,53 @@ fn attribute_of(
 /// is "Color", `COLOR_CORRECTION` is "CTC", `COLOR` is "Color Wheel" — and
 /// `the_desk_knows_every_visualisation` holds every one written to that table.
 ///
-/// Not here, because nothing on the desk means them: gamma, tint, the
+/// Not here, and typed as a percentage: tint ("Tint wäre % okay"), the
 /// thresholds and amounts, widths of lines, the choices. Nor Crop, whose
-/// edges would be the shutter's blades, which side being which blade not
-/// being anything the library says.
-const VISUALISED: [(&str, &str, &str, Option<&str>); 15] = [
+/// edges would be the shutter's blades, which side being which blade being
+/// something neither the library nor the owner could say.
+const VISUALISED: [(&str, &str, &str, Option<&str>); 22] = [
+    // Nothing on the desk is a gamma. The owner: "Gamma würde ich etwas
+    // nehmen wo man auch 1.0-3.0 oder ähnlich nehmen kann" — and Brightness
+    // is one he has seen take 0.0 to 4.0.
+    ("ovs.colour_correct", "gamma", "VIDEO_BRIGHTNESS", None),
+    // Each colour's black and white on its Color Boost ("RGB Correct ist
+    // angenommen").
+    (
+        "ovs.rgb_correct",
+        "lift_r",
+        "VIDEO_COLOR_BOOSTER",
+        Some("COL_BOOST_R"),
+    ),
+    (
+        "ovs.rgb_correct",
+        "lift_g",
+        "VIDEO_COLOR_BOOSTER",
+        Some("COL_BOOST_G"),
+    ),
+    (
+        "ovs.rgb_correct",
+        "lift_b",
+        "VIDEO_COLOR_BOOSTER",
+        Some("COL_BOOST_B"),
+    ),
+    (
+        "ovs.rgb_correct",
+        "gain_r",
+        "VIDEO_COLOR_BOOSTER",
+        Some("COL_BOOST_R"),
+    ),
+    (
+        "ovs.rgb_correct",
+        "gain_g",
+        "VIDEO_COLOR_BOOSTER",
+        Some("COL_BOOST_G"),
+    ),
+    (
+        "ovs.rgb_correct",
+        "gain_b",
+        "VIDEO_COLOR_BOOSTER",
+        Some("COL_BOOST_B"),
+    ),
     ("ovs.colorize", "hue", "VIDEO_HUE", None),
     ("ovs.colorize", "saturation", "VIDEO_COLORINTENSITY", None),
     ("ovs.colour_correct", "brightness", "VIDEO_BRIGHTNESS", None),
@@ -1752,6 +1794,21 @@ mod tests {
         }
         assert!(named("OVS Gen Strobe")
             .contains("{ _NAME \"Rate\" _RANGE [ 0,255] _EFF STROBE _PHYS [ 0.50, 30.00]"));
+        // "Gamma würde ich etwas nehmen wo man auch 1.0-3.0 oder ähnlich
+        // nehmen kann"; "RGB Correct ist angenommen"; "Tint wäre % okay".
+        assert!(correct.contains(
+            "{ _NAME \"Gamma\" _RANGE [ 0,255] _EFF VIDEO_BRIGHTNESS _PHYS [ 0.10, 4.00]"
+        ));
+        assert!(correct.contains("{ _NAME \"Tint\" _RANGE [ 0,255] _EFF NONE"));
+        let rgb = named("OVS FX RGB Correct");
+        for line in [
+            "{ _NAME \"Red black\" _RANGE [ 0,255] _EFF VIDEO_COLOR_BOOSTER _EFFSUB COL_BOOST_R \
+             _PHYS [ -1.00, 1.00]",
+            "{ _NAME \"Blue white\" _RANGE [ 0,255] _EFF VIDEO_COLOR_BOOSTER _EFFSUB COL_BOOST_B \
+             _PHYS [ 0.00, 4.00]",
+        ] {
+            assert!(rgb.contains(line), "{line} in {rgb}");
+        }
         // Nothing is left visualised as the colour wheel by mistake.
         for file in fixture_files() {
             assert!(!file.contents.contains("_EFF COLOR "), "{}", file.file_name);
@@ -1852,7 +1909,20 @@ mod tests {
                     let sub = sub.split_whitespace().next().unwrap_or_default();
                     // The subfunctions MA's own files write for these.
                     assert!(
-                        ["RED", "GREEN", "BLUE", "X", "Y", "Z", "ALL", "WHEEL_1"].contains(&sub),
+                        [
+                            "RED",
+                            "GREEN",
+                            "BLUE",
+                            "X",
+                            "Y",
+                            "Z",
+                            "ALL",
+                            "WHEEL_1",
+                            "COL_BOOST_R",
+                            "COL_BOOST_G",
+                            "COL_BOOST_B"
+                        ]
+                        .contains(&sub),
                         "{}: {effect} {sub}",
                         file.file_name
                     );

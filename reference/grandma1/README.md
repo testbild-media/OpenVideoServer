@@ -83,6 +83,8 @@ here to it.
   | Colorize and Colour Correct saturation | Color | 0 to 1, 0 to 4 |
   | Colour Correct brightness, contrast | Brightness, Contrast | 0 to 4 |
   | Colour Correct temperature | CTC, Wheel 1 | 2000 to 10000 K |
+  | Colour Correct gamma | Brightness | 0.1 to 4 |
+  | RGB Correct black and white | Color Boost, R, G and B | −1 to 1, 0 to 4 |
   | Layer rotation | Rotation, Z | −180 to 180° |
   | Shape rotation, RGB Split and Gradient angle | Rotation, Z | 0 to 360° |
   | Layer scale X and Y | Scale, X and Y | 0 to 10 |
@@ -91,9 +93,10 @@ here to it.
   | Strobe and Invert rate | Strobe | hertz |
 
   Colorize's hue also has the colours as named values: Red 0, Orange 30,
-  Yellow 60, Green 120, Cyan 180, Blue 240, Magenta 300. The rest — gamma,
-  tint, Crop's edges, amounts, thresholds, the choices — has nothing on the
-  desk that means it, and is typed as a percentage.
+  Yellow 60, Green 120, Cyan 180, Blue 240, Magenta 300. Gamma has no kind
+  of its own on the desk and borrows Brightness, which takes a range. The
+  rest — tint, Crop's edges, amounts, thresholds, the choices — is typed as
+  a percentage; a tint of 50% is none.
 
 The first set of files was refused for every fixture with a colour, and put a
 module's alpha into the desk's own RGB group as a fourth attribute. Nothing
