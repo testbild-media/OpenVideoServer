@@ -1,0 +1,15 @@
+_FIXTURETYPE
+{
+	_NAME       "OVS FX Pixelate"
+	_MANUFAC    "testbild.media"
+	_SHORTNAME  "FX Pixelate"
+	_VERSION    ORIGINAL
+	_COMMENT    "OpenVideoServer ovs.pixelate, 2 channels. Patch in OVS to one effect instance in a chain, at the same address. Generated from the OVS fixture catalogue; reference/FIXTURES.md lists every value."
+	_BRIGHTMINW 5000.000000
+	_BRIGHTMAXW 5000.000000
+	_CHANTYPE
+	{ _ATTRIBUT "DIM" _FEATURE "DIMMER" _PRESET "DIMMER" _ATT_LABEL "Dim" _FEA_LABEL "Dimmer" _HIGHLITE 100.0000% _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Block size" _RANGE [  0,255] _EFF DIMMER _PHYS [    1.00,  256.00] }
+	}
+	{ _ATTRIBUT "DIM" _FEATURE "DIMMER" _PRESET "DIMMER" _TYPE FINE }
+}

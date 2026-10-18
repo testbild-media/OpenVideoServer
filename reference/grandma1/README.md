@@ -25,6 +25,18 @@ every file, as in `TESTBILD MEDIA@OVS FX ECHO.TXT`. A grandMA1 refuses a file
 named any other way (found on the first import, 2026-10-18). Inside the files
 the desk lists them under `testbild.media`.
 
+**A fixture's name is eighteen characters at most**, because the owner's desk
+cuts it there: Colour Correct is `OVS FX Colour Corr` and Solid Colour is
+`OVS Gen Solid Colo`, and their files are named so.
+
+**The files are written the way his desk writes them.** The owner edited every
+one on his desk and exported them again on 2026-10-18 ("Alles was du gerade
+siehst wurde von der GMA1 wieder exportiert und richtig formatiert"); that
+export is [`desk/export-2026-10-18/`](desk/export-2026-10-18/), untouched, and
+what was generated from the same build matched it byte for byte except where
+noted under [Named values](#named-values). Lines end CR CR LF, and git keeps
+them so.
+
 ## What there is
 
 | On the desk | What it is | Patch in OVS to |
@@ -38,8 +50,9 @@ the desk lists them under `testbild.media`.
 aber in der Software keine Versionsvergabe und ist auch nicht gewünscht. TV
 Glitch V2 ist TV Glitch", and later "Es gibt kein Invert V2.. nirgendwo". The
 server publishes one module of each type, so each file is simply that module.
-(`_VERSION ORIGINAL` in the header is the desk's own field for the file, not
-ours.)
+(`_VERSION` in the header is the desk's own field for the file, not ours: his
+desk writes the moment it exported, and these say `ORIGINAL`, as MA's own
+library does, so that generating them twice gives the same files.)
 Retired modules (Tint, Clock, Countdown, Grid) have no file, and neither has
 Noise, which has no DMX: it is set up in the client and faded with its layer.
 
@@ -63,8 +76,9 @@ here to it.
 | OVS_RGBX_BG | Color | `OVS_BG_RED`, `OVS_BG_GREEN`, `OVS_BG_BLUE`, `OVS_BG_ALPHA` | BG Red to BG Alpha |
 
 - **Pan and tilt are a layer's X and Y**, so the trackball moves a layer and
-  the desk's position effects run on it. A larger tilt moves the picture up
-  the wall; if it goes the wrong way, invert tilt in the patch.
+  the desk's position effects run on it, visualised as a video position on X
+  and Y. A larger tilt moves the picture up the wall; if it goes the wrong
+  way, invert tilt in the patch.
 - **RGBX is the foreground**, and its red, green and blue are what the colour
   picker drives. `_AMBER` and `_WHITE` are in the group on the desk for other
   fixtures; no OVS fixture has them. **OVS_RGBX_BG is the background**, which
@@ -92,8 +106,10 @@ here to it.
   | Shape rotation, RGB Split and Gradient angle | Rotation, Z | 0 to 360° |
   | Layer scale X and Y | Scale, X and Y | 0 to 10 |
   | Shape width and height, Text cap height | Scale, X, Y and All | pixels |
+  | Layer position X and Y | Video Position, X and Y | −2 to 2 |
   | Blur radius | Frost | 0 to 64 pixels |
-  | Strobe and Invert rate | Strobe | hertz |
+  | Strobe and Invert rate | Strobe, Strobe | hertz |
+  | Text stroke weight and tracking | Snd Volume 1 | 0.02 to 0.4, −0.2 to 1 |
   | Shake speed | Speed | 0.5 to 20 new places a second |
 
   Colorize's hue also has the colours as named values: Red 0, Orange 30,
@@ -106,23 +122,52 @@ The first set of files was refused for every fixture with a colour, and put a
 module's alpha into the desk's own RGB group as a fourth attribute. Nothing
 goes there now.
 
-Choices and switches snap, and every step is a named value with the name the
-client shows. Each named value is **one** DMX value, not its whole band — the
-desk's sheet shows a name only for a value that sits on one — chosen inside
-the band so the server reads it as that step: home where home is in the band,
-the band's middle elsewhere, nought and full for a switch. Every channel's home is the fixture's default, so a freshly
-patched layer is visible, full size and upright, and a freshly patched effect
-changes nothing.
+## Named values
+
+**Always a range, never a single value** — the owner, 2026-10-18: "Es ist
+immer von bis Wert und kein einzelner Wert." So:
+
+- **A step is its whole band**, exactly the values the server reads as that
+  step: a layer's Black is DMX 0 to 3 and every slot its three values, Slot 1
+  is 4 to 6 and Slot 84 is 253 to 255; a choice is its even share of the
+  channel (Echo's Behind 0 to 127, Lighten 128 to 255); a switch is off below
+  half and on from it. Anything the desk sends inside a set is that step.
+- **A landmark of a continuous channel is the eight-bit step it is in** —
+  `Radius 32` is DMX 128, `Hue` Orange is the coarse step 21 of a sixteen-bit
+  channel, 5376 to 5631. On a sixteen-bit channel that is a coarse value and
+  every fine one under it, so choosing `Home 1` on a layer's scale lands
+  between 0.98 and 1.02; the fixture's default is the exact 1, and Home goes
+  back there.
+- **Invert's switch on the dimmer** is named at nought and full only, as it is
+  in his export.
+- They are listed in the order they sit on the channel.
+
+**Where a channel rests.** Every channel's home is the fixture's default, so a
+freshly patched layer is visible, full size and upright, and a freshly patched
+effect changes nothing. The desk writes no default at nought; a dimmer at full
+is `100.0000%`; a step rests in the middle of its band, where his desk put the
+master's freeze, tap and scale and the layer's slot.
+
+**Where these differed from his export when they were made:**
+
+- **Slots 21 to 84** are ranges too: "Die Slots 0-20 hatte ich gemacht, aber
+  bis 84 musst du noch weiterführen."
+- **Slot 11 starts at 34**, not 35: his set left DMX 34 out of every slot.
+- **Echo's mode, Mirror's two axes, Shape's shape, Strobe's mode and Text's
+  alignment rest in the middle of their bands** like the master's steps
+  (24.9989% rather than 25.0004%, 16.7956% rather than 16.4065%). The same
+  step either way.
+- `_VERSION` is `ORIGINAL`, as above.
 
 ## Every fixture
 
 | Fixture | Dimmer | Parameter 1 to 6 | Colour |
 |---|---|---|---|
-| OVS Master | Master dimmer | Freeze, BPM Tap, BPM Scale, Crossfade | — |
+| OVS Master | Master dimmer | Freeze, BPM Tap, BPM Scale, Crossfade (A, Mix, B) | — |
 | OVS Layer | Layer dimmer | Slot (and pan, tilt, rotation, scale in Pan/Tilt) | — |
 | FX Blur | Amount | Radius | — |
 | FX Colorize | Amount | Hue, Saturation | — |
-| FX Colour Correct | — | Brightness, Contrast, Saturation, Gamma, Temperature, Tint | — |
+| FX Colour Corr | — | Brightness, Contrast, Saturation, Gamma, Temperature, Tint | — |
 | FX Crop | — | Left, Right, Top, Bottom | — |
 | FX Echo | Length | Mode | — |
 | FX Edges | Amount | Threshold, Line width | foreground |
@@ -136,7 +181,7 @@ changes nothing.
 | FX TV Glitch | Amount | Line jumps, Snow, Rolling error, Out of sync | — |
 | Gen Gradient | — | Angle | from (foreground), to (background) |
 | Gen Shape | — | Shape, Width, Height, Rotation | foreground, background |
-| Gen Solid Colour | — | — | foreground |
+| Gen Solid Colo | — | — | foreground |
 | Gen Strobe | — | Rate, Mode | foreground |
 | Gen Text | — | Cap height, Stroke weight, Tracking, Alignment | foreground, background |
 

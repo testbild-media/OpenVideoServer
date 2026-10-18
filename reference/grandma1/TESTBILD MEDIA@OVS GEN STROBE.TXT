@@ -1,37 +1,37 @@
-_FIXTURETYPE
-{
-	_NAME       "OVS Gen Strobe"
-	_MANUFAC    "testbild.media"
-	_SHORTNAME  "Gen Strobe"
-	_VERSION    ORIGINAL
-	_COMMENT    "OpenVideoServer ovs.strobe, 6 channels. Patch in OVS to one generator instance in a slot, at the same address. Parameter 1 Rate, Parameter 2 Mode. Generated from the OVS fixture catalogue; reference/FIXTURES.md lists every value."
-	_BRIGHTMINW 5000.000000
-	_BRIGHTMAXW 5000.000000
-	_CHANTYPE
-	{ _ATTRIBUT "_RED" _FEATURE "RGBX" _PRESET "COLOR" _ATT_LABEL "Red" _FEA_LABEL "RGBX" _DEFAULT 99.6109% _ETIME -1.000000 		_CHANFUNC
-		{ _NAME "Colour Red" _RANGE [  0,255] _EFF COLOR_MIX _EFFSUB RED _PHYS [    0.00,    1.00] }
-	}
-	{ _ATTRIBUT "_GREEN" _FEATURE "RGBX" _PRESET "COLOR" _ATT_LABEL "Green" _FEA_LABEL "RGBX" _DEFAULT 99.6109% _ETIME -1.000000 		_CHANFUNC
-		{ _NAME "Colour Green" _RANGE [  0,255] _EFF COLOR_MIX _EFFSUB GREEN _PHYS [    0.00,    1.00] }
-	}
-	{ _ATTRIBUT "_BLUE" _FEATURE "RGBX" _PRESET "COLOR" _ATT_LABEL "Blue" _FEA_LABEL "RGBX" _DEFAULT 99.6109% _ETIME -1.000000 		_CHANFUNC
-		{ _NAME "Colour Blue" _RANGE [  0,255] _EFF COLOR_MIX _EFFSUB BLUE _PHYS [    0.00,    1.00] }
-	}
-	{ _ATTRIBUT "_ALPHA" _FEATURE "RGBX" _PRESET "COLOR" _ATT_LABEL "Alpha" _FEA_LABEL "RGBX" _DEFAULT 99.6109% _ETIME -1.000000 		_CHANFUNC
-		{ _NAME "Colour Alpha" _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] }
-	}
-	{ _ATTRIBUT "PARA_1" _FEATURE "OVS_PARAMETER" _PRESET "VIDEO" _ATT_LABEL "Parameter 1" _FEA_LABEL "OVS Parameter" _DEFAULT 32.0317% _ETIME -1.000000 		_CHANFUNC
-		{ _NAME "Rate"       _RANGE [  0,255] _EFF STROBE _PHYS [    0.50,   30.00] 			_CHANSET
-			{ _NAME "Rate 0.5"   _RANGE [0.0000%,0.3891%] }
-			{ _NAME "Rate 15.31" _RANGE [50.0008%,50.3899%] }
-			{ _NAME "Rate 30"    _RANGE [99.6109%,100.0000%] }
-			{ _NAME "Rate 9.99"  _RANGE [32.0317%,32.4208%] }
-		}
-	}
-	{ _ATTRIBUT "PARA_2" _FEATURE "OVS_PARAMETER" _PRESET "VIDEO" _ATT_LABEL "Parameter 2" _FEA_LABEL "OVS Parameter" _DEFAULT 25.0004% _ETIME 0.000000 _SNAP YES 		_CHANFUNC
-		{ _NAME "Mode"       _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] 			_CHANSET
-			{ _NAME "Colour"     _RANGE [25.0004%,25.3895%] }
-			{ _NAME "Invert"     _RANGE [74.6105%,74.9996%] }
-		}
-	}
-}
+_FIXTURETYPE
+{
+	_NAME       "OVS Gen Strobe"
+	_MANUFAC    "testbild.media"
+	_SHORTNAME  "Gen Strobe"
+	_VERSION    ORIGINAL
+	_COMMENT    "OpenVideoServer ovs.strobe, 6 channels. Patch in OVS to one generator instance in a slot, at the same address. Parameter 1 Rate, Parameter 2 Mode. Generated from the OVS fixture catalogue; reference/FIXTURES.md lists every value."
+	_BRIGHTMINW 5000.000000
+	_BRIGHTMAXW 5000.000000
+	_CHANTYPE
+	{ _ATTRIBUT "_RED" _FEATURE "RGBX" _PRESET "COLOR" _ATT_LABEL "Red" _FEA_LABEL "RGBX" _DEFAULT 99.6109% _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Colour Red" _RANGE [  0,255] _EFF COLOR_MIX _EFFSUB RED _PHYS [    0.00,    1.00] }
+	}
+	{ _ATTRIBUT "_GREEN" _FEATURE "RGBX" _PRESET "COLOR" _ATT_LABEL "Green" _FEA_LABEL "RGBX" _DEFAULT 99.6109% _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Colour Green" _RANGE [  0,255] _EFF COLOR_MIX _EFFSUB GREEN _PHYS [    0.00,    1.00] }
+	}
+	{ _ATTRIBUT "_BLUE" _FEATURE "RGBX" _PRESET "COLOR" _ATT_LABEL "Blue" _FEA_LABEL "RGBX" _DEFAULT 99.6109% _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Colour Blue" _RANGE [  0,255] _EFF COLOR_MIX _EFFSUB BLUE _PHYS [    0.00,    1.00] }
+	}
+	{ _ATTRIBUT "_ALPHA" _FEATURE "RGBX" _PRESET "COLOR" _ATT_LABEL "Alpha" _FEA_LABEL "RGBX" _DEFAULT 99.6109% _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Colour Alpha" _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] }
+	}
+	{ _ATTRIBUT "PARA_1" _FEATURE "OVS_PARAMETER" _PRESET "VIDEO" _ATT_LABEL "Parameter 1" _FEA_LABEL "OVS Parameter" _DEFAULT 32.0317% _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Rate"       _RANGE [  0,255] _EFF STROBE _EFFSUB STROBE_STROBE _PHYS [    0.50,   30.00] 			_CHANSET
+			{ _NAME "Rate 0.5"   _RANGE [0.0000%,0.3891%] }
+			{ _NAME "Rate 9.99"  _RANGE [32.0317%,32.4208%] }
+			{ _NAME "Rate 15.31" _RANGE [50.0008%,50.3899%] }
+			{ _NAME "Rate 30"    _RANGE [99.6109%,100.0000%] }
+		}
+	}
+	{ _ATTRIBUT "PARA_2" _FEATURE "OVS_PARAMETER" _PRESET "VIDEO" _ATT_LABEL "Parameter 2" _FEA_LABEL "OVS Parameter" _DEFAULT 24.9989% _ETIME 0.000000 _SNAP YES 		_CHANFUNC
+		{ _NAME "Mode"       _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] 			_CHANSET
+			{ _NAME "Colour"     _RANGE [0.0000%,49.9992%] }
+			{ _NAME "Invert"     _RANGE [50.0008%,100.0000%] }
+		}
+	}
+}

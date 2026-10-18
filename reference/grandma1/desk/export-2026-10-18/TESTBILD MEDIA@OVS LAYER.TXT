@@ -1,0 +1,146 @@
+_FIXTURETYPE
+{
+	_NAME       "OVS Layer"
+	_MANUFAC    "testbild.media"
+	_SHORTNAME  "OVS Layer"
+	_VERSION    1792350341
+	_COMMENT    "OpenVideoServer ovs.layer, 12 channels. Patch in OVS to one layer, at the same address. Parameter 1 Slot. Generated from the OVS fixture catalogue; reference/FIXTURES.md lists every value."
+	_LIGHTVECT  0.000000 -0.300000 0.000000
+	_BRIGHTMINW 5000.000000
+	_BRIGHTMAXW 5000.000000
+	_CHANTYPE
+	{ _ATTRIBUT "DIM" _FEATURE "DIMMER" _PRESET "DIMMER" _ATT_LABEL "Dim" _FEA_LABEL "Dimmer" _DEFAULT 100.0000% _HIGHLITE 100.0000% _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Dimmer"     _RANGE [  0,255] _EFF DIMMER _PHYS [    0.00,    1.00] }
+	}
+	{ _ATTRIBUT "PARA_1" _FEATURE "OVS_PARAMETER" _PRESET "VIDEO" _ATT_LABEL "Parameter 1" _FEA_LABEL "OVS Parameter" _DEFAULT 0.7797% _ETIME 0.000000 _SNAP YES 		_CHANFUNC
+		{ _NAME "Slot"       _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] 			_CHANSET
+			{ _NAME "Black"      _RANGE [0.0000%,1.5610%] }
+			{ _NAME "Slot 1"     _RANGE [1.5625%,2.7329%] }
+			{ _NAME "Slot 2"     _RANGE [2.7344%,3.9048%] }
+			{ _NAME "Slot 3"     _RANGE [3.9063%,5.0767%] }
+			{ _NAME "Slot 4"     _RANGE [5.0782%,6.2486%] }
+			{ _NAME "Slot 5"     _RANGE [6.2501%,7.4205%] }
+			{ _NAME "Slot 6"     _RANGE [7.4220%,8.5924%] }
+			{ _NAME "Slot 7"     _RANGE [8.5939%,9.7642%] }
+			{ _NAME "Slot 8"     _RANGE [9.7658%,10.9361%] }
+			{ _NAME "Slot 9"     _RANGE [10.9377%,12.1080%] }
+			{ _NAME "Slot 10"    _RANGE [12.1096%,13.2799%] }
+			{ _NAME "Slot 11"    _RANGE [13.6721%,14.4518%] }
+			{ _NAME "Slot 12"    _RANGE [14.4533%,15.6237%] }
+			{ _NAME "Slot 13"    _RANGE [15.6252%,16.7956%] }
+			{ _NAME "Slot 14"    _RANGE [16.7971%,17.9675%] }
+			{ _NAME "Slot 15"    _RANGE [17.9690%,19.1394%] }
+			{ _NAME "Slot 16"    _RANGE [19.1409%,20.3113%] }
+			{ _NAME "Slot 17"    _RANGE [20.3128%,21.4832%] }
+			{ _NAME "Slot 18"    _RANGE [21.4847%,22.6551%] }
+			{ _NAME "Slot 19"    _RANGE [22.6566%,23.8270%] }
+			{ _NAME "Slot 20"    _RANGE [23.8285%,24.9989%] }
+			{ _NAME "Slot 21"    _RANGE [25.3910%,25.7801%] }
+			{ _NAME "Slot 22"    _RANGE [26.5629%,26.9520%] }
+			{ _NAME "Slot 23"    _RANGE [27.7348%,28.1239%] }
+			{ _NAME "Slot 24"    _RANGE [28.9067%,29.2958%] }
+			{ _NAME "Slot 25"    _RANGE [30.0786%,30.4677%] }
+			{ _NAME "Slot 26"    _RANGE [31.2505%,31.6396%] }
+			{ _NAME "Slot 27"    _RANGE [32.4224%,32.8115%] }
+			{ _NAME "Slot 28"    _RANGE [33.5943%,33.9834%] }
+			{ _NAME "Slot 29"    _RANGE [34.7662%,35.1553%] }
+			{ _NAME "Slot 30"    _RANGE [35.9380%,36.3272%] }
+			{ _NAME "Slot 31"    _RANGE [37.1099%,37.4990%] }
+			{ _NAME "Slot 32"    _RANGE [38.2818%,38.6709%] }
+			{ _NAME "Slot 33"    _RANGE [39.4537%,39.8428%] }
+			{ _NAME "Slot 34"    _RANGE [40.6256%,41.0147%] }
+			{ _NAME "Slot 35"    _RANGE [41.7975%,42.1866%] }
+			{ _NAME "Slot 36"    _RANGE [42.9694%,43.3585%] }
+			{ _NAME "Slot 37"    _RANGE [44.1413%,44.5304%] }
+			{ _NAME "Slot 38"    _RANGE [45.3132%,45.7023%] }
+			{ _NAME "Slot 39"    _RANGE [46.4851%,46.8742%] }
+			{ _NAME "Slot 40"    _RANGE [47.6570%,48.0461%] }
+			{ _NAME "Slot 41"    _RANGE [48.8289%,49.2180%] }
+			{ _NAME "Slot 42"    _RANGE [50.0008%,50.3899%] }
+			{ _NAME "Slot 43"    _RANGE [51.1727%,51.5618%] }
+			{ _NAME "Slot 44"    _RANGE [52.3446%,52.7337%] }
+			{ _NAME "Slot 45"    _RANGE [53.5164%,53.9055%] }
+			{ _NAME "Slot 46"    _RANGE [54.6883%,55.0774%] }
+			{ _NAME "Slot 47"    _RANGE [55.8602%,56.2493%] }
+			{ _NAME "Slot 48"    _RANGE [57.0321%,57.4212%] }
+			{ _NAME "Slot 49"    _RANGE [58.2040%,58.5931%] }
+			{ _NAME "Slot 50"    _RANGE [59.3759%,59.7650%] }
+			{ _NAME "Slot 51"    _RANGE [60.5478%,60.9369%] }
+			{ _NAME "Slot 52"    _RANGE [61.7197%,62.1088%] }
+			{ _NAME "Slot 53"    _RANGE [62.8916%,63.2807%] }
+			{ _NAME "Slot 54"    _RANGE [64.0635%,64.4526%] }
+			{ _NAME "Slot 55"    _RANGE [65.2354%,65.6245%] }
+			{ _NAME "Slot 56"    _RANGE [66.4073%,66.7964%] }
+			{ _NAME "Slot 57"    _RANGE [67.5792%,67.9683%] }
+			{ _NAME "Slot 58"    _RANGE [68.7511%,69.1402%] }
+			{ _NAME "Slot 59"    _RANGE [69.9229%,70.3120%] }
+			{ _NAME "Slot 60"    _RANGE [71.0948%,71.4839%] }
+			{ _NAME "Slot 61"    _RANGE [72.2667%,72.6558%] }
+			{ _NAME "Slot 62"    _RANGE [73.4386%,73.8277%] }
+			{ _NAME "Slot 63"    _RANGE [74.6105%,74.9996%] }
+			{ _NAME "Slot 64"    _RANGE [75.7824%,76.1715%] }
+			{ _NAME "Slot 65"    _RANGE [76.9543%,77.3434%] }
+			{ _NAME "Slot 66"    _RANGE [78.1262%,78.5153%] }
+			{ _NAME "Slot 67"    _RANGE [79.2981%,79.6872%] }
+			{ _NAME "Slot 68"    _RANGE [80.4700%,80.8591%] }
+			{ _NAME "Slot 69"    _RANGE [81.6419%,82.0310%] }
+			{ _NAME "Slot 70"    _RANGE [82.8138%,83.2029%] }
+			{ _NAME "Slot 71"    _RANGE [83.9857%,84.3748%] }
+			{ _NAME "Slot 72"    _RANGE [85.1576%,85.5467%] }
+			{ _NAME "Slot 73"    _RANGE [86.3294%,86.7186%] }
+			{ _NAME "Slot 74"    _RANGE [87.5013%,87.8904%] }
+			{ _NAME "Slot 75"    _RANGE [88.6732%,89.0623%] }
+			{ _NAME "Slot 76"    _RANGE [89.8451%,90.2342%] }
+			{ _NAME "Slot 77"    _RANGE [91.0170%,91.4061%] }
+			{ _NAME "Slot 78"    _RANGE [92.1889%,92.5780%] }
+			{ _NAME "Slot 79"    _RANGE [93.3608%,93.7499%] }
+			{ _NAME "Slot 80"    _RANGE [94.5327%,94.9218%] }
+			{ _NAME "Slot 81"    _RANGE [95.7046%,96.0937%] }
+			{ _NAME "Slot 82"    _RANGE [96.8765%,97.2656%] }
+			{ _NAME "Slot 83"    _RANGE [98.0484%,98.4375%] }
+			{ _NAME "Slot 84"    _RANGE [99.2203%,99.6094%] }
+		}
+	}
+	{ _ATTRIBUT "PAN" _FEATURE "PAN/TILT" _PRESET "PAN/TILT" _ATT_LABEL "Pan" _FEA_LABEL "Pan/Tilt" _DEFAULT 50.0008% _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Position X" _RANGE [  0,255] _EFF VIDEO_POSITION _EFFSUB X _PHYS [   -2.00,    2.00] 			_CHANSET
+			{ _NAME "Min -2"     _RANGE [0.0000%,0.3891%] }
+			{ _NAME "Center 0"   _RANGE [50.0008%,50.3899%] }
+			{ _NAME "Max 2"      _RANGE [99.6109%,100.0000%] }
+		}
+	}
+	{ _ATTRIBUT "PAN" _FEATURE "PAN/TILT" _PRESET "PAN/TILT" _TYPE FINE }
+	{ _ATTRIBUT "TILT" _FEATURE "PAN/TILT" _PRESET "PAN/TILT" _ATT_LABEL "Tilt" _FEA_LABEL "Pan/Tilt" _DEFAULT 50.0008% _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Position Y" _RANGE [  0,255] _EFF VIDEO_POSITION _EFFSUB Y _PHYS [   -2.00,    2.00] 			_CHANSET
+			{ _NAME "Min -2"     _RANGE [0.0000%,0.3891%] }
+			{ _NAME "Center 0"   _RANGE [50.0008%,50.3899%] }
+			{ _NAME "Max 2"      _RANGE [99.6109%,100.0000%] }
+		}
+	}
+	{ _ATTRIBUT "TILT" _FEATURE "PAN/TILT" _PRESET "PAN/TILT" _TYPE FINE }
+	{ _ATTRIBUT "OVS_ROTATION" _FEATURE "PAN/TILT" _PRESET "PAN/TILT" _ATT_LABEL "Rotation" _FEA_LABEL "Pan/Tilt" _DEFAULT 50.0008% _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Rotation"   _RANGE [  0,255] _EFF VIDEO_ROTATION _EFFSUB Z _PHYS [ -180.00,  180.00] 			_CHANSET
+			{ _NAME "Min -180"   _RANGE [0.0000%,0.3891%] }
+			{ _NAME "Center 0"   _RANGE [50.0008%,50.3899%] }
+			{ _NAME "Max 180"    _RANGE [99.6109%,100.0000%] }
+		}
+	}
+	{ _ATTRIBUT "OVS_ROTATION" _FEATURE "PAN/TILT" _PRESET "PAN/TILT" _TYPE FINE }
+	{ _ATTRIBUT "OVS_SCALE_X" _FEATURE "SCALE" _PRESET "PAN/TILT" _ATT_LABEL "Scale X" _FEA_LABEL "Scale" _DEFAULT 10.0008% _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Scale X"    _RANGE [  0,255] _EFF VIDEO_SCALE _EFFSUB X _PHYS [    0.00,   10.00] 			_CHANSET
+			{ _NAME "Min 0"      _RANGE [0.0000%,0.3891%] }
+			{ _NAME "Home 1"     _RANGE [9.7658%,10.1549%] }
+			{ _NAME "Center 5"   _RANGE [50.0008%,50.3899%] }
+			{ _NAME "Max 10"     _RANGE [99.6109%,100.0000%] }
+		}
+	}
+	{ _ATTRIBUT "OVS_SCALE_X" _FEATURE "SCALE" _PRESET "PAN/TILT" _TYPE FINE }
+	{ _ATTRIBUT "OVS_SCALE_Y" _FEATURE "SCALE" _PRESET "PAN/TILT" _ATT_LABEL "Scale Y" _FEA_LABEL "Scale" _DEFAULT 10.0008% _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Scale Y"    _RANGE [  0,255] _EFF VIDEO_SCALE _EFFSUB Y _PHYS [    0.00,   10.00] 			_CHANSET
+			{ _NAME "Min 0"      _RANGE [0.0000%,0.3891%] }
+			{ _NAME "Home 1"     _RANGE [9.7658%,10.1549%] }
+			{ _NAME "Center 5"   _RANGE [50.0008%,50.3899%] }
+			{ _NAME "Max 10"     _RANGE [99.6109%,100.0000%] }
+		}
+	}
+	{ _ATTRIBUT "OVS_SCALE_Y" _FEATURE "SCALE" _PRESET "PAN/TILT" _TYPE FINE }
+}

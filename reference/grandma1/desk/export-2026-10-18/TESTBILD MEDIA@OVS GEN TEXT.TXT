@@ -1,0 +1,69 @@
+_FIXTURETYPE
+{
+	_NAME       "OVS Gen Text"
+	_MANUFAC    "testbild.media"
+	_SHORTNAME  "Gen Text"
+	_VERSION    1792350337
+	_COMMENT    "OpenVideoServer ovs.text, 15 channels. Patch in OVS to one generator instance in a slot, at the same address. Parameter 1 Cap height, Parameter 2 Stroke weight, Parameter 3 Tracking, Parameter 4 Alignment. Generated from the OVS fixture catalogue; reference/FIXTURES.md lists every value."
+	_BRIGHTMINW 5000.000000
+	_BRIGHTMAXW 5000.000000
+	_CHANTYPE
+	{ _ATTRIBUT "PARA_1" _FEATURE "OVS_PARAMETER" _PRESET "VIDEO" _ATT_LABEL "Parameter 1" _FEA_LABEL "OVS Parameter" _DEFAULT 10.1961% _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Cap height" _RANGE [  0,255] _EFF VIDEO_SCALE _EFFSUB ALL _PHYS [    4.00, 1024.00] 			_CHANSET
+			{ _NAME "Cap height 4" _RANGE [0.0000%,0.3891%] }
+			{ _NAME "Cap height 108" _RANGE [10.1564%,10.5455%] }
+			{ _NAME "Cap height 514.01" _RANGE [50.0008%,50.3899%] }
+			{ _NAME "Cap height 1024" _RANGE [99.6109%,100.0000%] }
+		}
+	}
+	{ _ATTRIBUT "PARA_1" _FEATURE "OVS_PARAMETER" _PRESET "VIDEO" _TYPE FINE }
+	{ _ATTRIBUT "PARA_2" _FEATURE "OVS_PARAMETER" _PRESET "VIDEO" _ATT_LABEL "Parameter 2" _FEA_LABEL "OVS Parameter" _DEFAULT 26.3157% _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Stroke weight" _RANGE [  0,255] _EFF VIDEO_SOUND_VOLUMEN_1 _PHYS [    0.02,    0.40] 			_CHANSET
+			{ _NAME "Stroke weight 0.02" _RANGE [0.0000%,0.3891%] }
+			{ _NAME "Stroke weight 0.12" _RANGE [26.1723%,26.5614%] }
+			{ _NAME "Stroke weight 0.21" _RANGE [50.0008%,50.3899%] }
+			{ _NAME "Stroke weight 0.4" _RANGE [99.6109%,100.0000%] }
+		}
+	}
+	{ _ATTRIBUT "PARA_2" _FEATURE "OVS_PARAMETER" _PRESET "VIDEO" _TYPE FINE }
+	{ _ATTRIBUT "PARA_3" _FEATURE "OVS_PARAMETER" _PRESET "VIDEO" _ATT_LABEL "Parameter 3" _FEA_LABEL "OVS Parameter" _DEFAULT 26.6667% _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Tracking"   _RANGE [  0,255] _EFF VIDEO_SOUND_VOLUMEN_1 _PHYS [   -0.20,    1.00] 			_CHANSET
+			{ _NAME "Tracking -0.2" _RANGE [0.0000%,0.3891%] }
+			{ _NAME "Tracking 0.12" _RANGE [26.5629%,26.9520%] }
+			{ _NAME "Tracking 0.4" _RANGE [50.0008%,50.3899%] }
+			{ _NAME "Tracking 1" _RANGE [99.6109%,100.0000%] }
+		}
+	}
+	{ _ATTRIBUT "PARA_3" _FEATURE "OVS_PARAMETER" _PRESET "VIDEO" _TYPE FINE }
+	{ _ATTRIBUT "PARA_4" _FEATURE "OVS_PARAMETER" _PRESET "VIDEO" _ATT_LABEL "Parameter 4" _FEA_LABEL "OVS Parameter" _DEFAULT 16.4065% _ETIME 0.000000 _SNAP YES 		_CHANFUNC
+		{ _NAME "Alignment"  _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] 			_CHANSET
+			{ _NAME "Centre"     _RANGE [0.0000%,33.5927%] }
+			{ _NAME "Left"       _RANGE [33.5943%,66.7964%] }
+			{ _NAME "Right"      _RANGE [66.7979%,100.0000%] }
+		}
+	}
+	{ _ATTRIBUT "_RED" _FEATURE "RGBX" _PRESET "COLOR" _ATT_LABEL "Red" _FEA_LABEL "RGBX" _DEFAULT 99.6109% _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Text Red"   _RANGE [  0,255] _EFF COLOR_MIX _EFFSUB RED _PHYS [    0.00,    1.00] }
+	}
+	{ _ATTRIBUT "_GREEN" _FEATURE "RGBX" _PRESET "COLOR" _ATT_LABEL "Green" _FEA_LABEL "RGBX" _DEFAULT 99.6109% _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Text Green" _RANGE [  0,255] _EFF COLOR_MIX _EFFSUB GREEN _PHYS [    0.00,    1.00] }
+	}
+	{ _ATTRIBUT "_BLUE" _FEATURE "RGBX" _PRESET "COLOR" _ATT_LABEL "Blue" _FEA_LABEL "RGBX" _DEFAULT 99.6109% _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Text Blue"  _RANGE [  0,255] _EFF COLOR_MIX _EFFSUB BLUE _PHYS [    0.00,    1.00] }
+	}
+	{ _ATTRIBUT "_ALPHA" _FEATURE "RGBX" _PRESET "COLOR" _ATT_LABEL "Alpha" _FEA_LABEL "RGBX" _DEFAULT 99.6109% _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Text Alpha" _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] }
+	}
+	{ _ATTRIBUT "OVS_BG_RED" _FEATURE "OVS_RGBX_BG" _PRESET "COLOR" _ATT_LABEL "BG Red" _FEA_LABEL "OVS BG RGBX" _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Background Red" _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] }
+	}
+	{ _ATTRIBUT "OVS_BG_GREEN" _FEATURE "OVS_RGBX_BG" _PRESET "COLOR" _ATT_LABEL "BG Green" _FEA_LABEL "OVS BG RGBX" _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Background Green" _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] }
+	}
+	{ _ATTRIBUT "OVS_BG_BLUE" _FEATURE "OVS_RGBX_BG" _PRESET "COLOR" _ATT_LABEL "BG Blue" _FEA_LABEL "OVS BG RGBX" _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Background Blue" _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] }
+	}
+	{ _ATTRIBUT "OVS_BG_ALPHA" _FEATURE "OVS_RGBX_BG" _PRESET "COLOR" _ATT_LABEL "BG Alpha" _FEA_LABEL "OVS BG RGBX" _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Background Alpha" _RANGE [  0,255] _EFF NONE _PHYS [    0.00,    1.00] }
+	}
+}

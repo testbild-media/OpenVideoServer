@@ -1,0 +1,22 @@
+_FIXTURETYPE
+{
+	_NAME       "OVS FX Shake"
+	_MANUFAC    "testbild.media"
+	_SHORTNAME  "FX Shake"
+	_VERSION    ORIGINAL
+	_COMMENT    "OpenVideoServer ovs.shake, 2 channels. Patch in OVS to one effect instance in a chain, at the same address. Parameter 1 Speed. Generated from the OVS fixture catalogue; reference/FIXTURES.md lists every value."
+	_BRIGHTMINW 5000.000000
+	_BRIGHTMAXW 5000.000000
+	_CHANTYPE
+	{ _ATTRIBUT "DIM" _FEATURE "DIMMER" _PRESET "DIMMER" _ATT_LABEL "Dim" _FEA_LABEL "Dimmer" _HIGHLITE 100.0000% _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Amount"     _RANGE [  0,255] _EFF DIMMER _PHYS [    0.00,    1.00] }
+	}
+	{ _ATTRIBUT "PARA_1" _FEATURE "OVS_PARAMETER" _PRESET "VIDEO" _ATT_LABEL "Parameter 1" _FEA_LABEL "OVS Parameter" _DEFAULT 38.2818% _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Speed"      _RANGE [  0,255] _EFF VIDEO_SPEED _PHYS [    0.50,   20.00] 			_CHANSET
+			{ _NAME "Speed 0.5"  _RANGE [0.0000%,0.3891%] }
+			{ _NAME "Speed 7.99" _RANGE [38.2818%,38.6709%] }
+			{ _NAME "Speed 10.29" _RANGE [50.0008%,50.3899%] }
+			{ _NAME "Speed 20"   _RANGE [99.6109%,100.0000%] }
+		}
+	}
+}

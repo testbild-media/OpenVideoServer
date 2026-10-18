@@ -6,13 +6,11 @@
 # PowerShell is the exception: it wants CRLF on Windows.
 *.ps1 text eol=crlf
 
-# So are the grandMA1 fixture types, which go onto a USB stick for a desk and
-# arrive with CRLF, which the desk takes.
-reference/grandma1/*.TXT text eol=crlf
-
-# The owner's desk export, byte for byte: a grandMA1 ends its lines with CR CR
-# LF, which git would otherwise rewrite.
-reference/grandma1/desk/* -text
+# The grandMA1 fixture types, and the owner's desk exports beside them, byte
+# for byte: a grandMA1 ends its lines with CR CR LF, which git would otherwise
+# rewrite, and these are written the way his desk writes them.
+reference/grandma1/*.TXT -text
+reference/grandma1/desk/** -text
 
 # Binary assets must never be touched.
 *.png binary

@@ -1,0 +1,24 @@
+_FIXTURETYPE
+{
+	_NAME       "OVS FX Invert"
+	_MANUFAC    "testbild.media"
+	_SHORTNAME  "FX Invert"
+	_VERSION    ORIGINAL
+	_COMMENT    "OpenVideoServer ovs.invert, 2 channels. Patch in OVS to one effect instance in a chain, at the same address. Parameter 1 Rate. Generated from the OVS fixture catalogue; reference/FIXTURES.md lists every value."
+	_BRIGHTMINW 5000.000000
+	_BRIGHTMAXW 5000.000000
+	_CHANTYPE
+	{ _ATTRIBUT "DIM" _FEATURE "DIMMER" _PRESET "DIMMER" _ATT_LABEL "Dim" _FEA_LABEL "Dimmer" _HIGHLITE 100.0000% _ETIME 0.000000 _SNAP YES 		_CHANFUNC
+		{ _NAME "Inverted"   _RANGE [  0,255] _EFF DIMMER _PHYS [    0.00,    1.00] 			_CHANSET
+			{ _NAME "Off"        _RANGE [0.0000%,0.3891%] }
+			{ _NAME "On"         _RANGE [99.6109%,100.0000%] }
+		}
+	}
+	{ _ATTRIBUT "PARA_1" _FEATURE "OVS_PARAMETER" _PRESET "VIDEO" _ATT_LABEL "Parameter 1" _FEA_LABEL "OVS Parameter" _ETIME -1.000000 		_CHANFUNC
+		{ _NAME "Rate"       _RANGE [  0,255] _EFF STROBE _EFFSUB STROBE_STROBE _PHYS [    0.00,   30.00] 			_CHANSET
+			{ _NAME "Rate 0"     _RANGE [0.0000%,0.3891%] }
+			{ _NAME "Rate 15.06" _RANGE [50.0008%,50.3899%] }
+			{ _NAME "Rate 30"    _RANGE [99.6109%,100.0000%] }
+		}
+	}
+}

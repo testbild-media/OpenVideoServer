@@ -30,11 +30,10 @@ fn every_committed_fixture_type_matches_the_published_personalities() {
                 path.display()
             )
         });
-        // Compared without line ends: git keeps these CRLF on checkout, and a
-        // checkout that did not would still be the same fixture type.
+        // Byte for byte, line ends included: git keeps these as they are
+        // (`-text`), and they end CR CR LF because the owner's desk does.
         assert_eq!(
-            committed.replace("\r\n", "\n"),
-            file.contents.replace("\r\n", "\n"),
+            committed, file.contents,
             "{} no longer matches what this build publishes; {REGENERATE}",
             file.file_name
         );
