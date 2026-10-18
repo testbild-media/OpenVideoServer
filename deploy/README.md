@@ -129,8 +129,9 @@ be able to make the second.
   an installer on a machine that has just been given a driver means to finish the
   job, while `apt upgrade` may be running unattended on the afternoon of one.
   `--no-reboot` declines it.
-- **It carries no NDI runtime today, which is a decision and not a
-  prohibition.** This said "and cannot — the licence does not let this project
+- **It carries the NDI runtime — from the first release after 0.2.41.** Every
+  package from 0.2.31 to 0.2.41 was built to carry it and did not; why is
+  below. This once said "and cannot — the licence does not let this project
   redistribute it", and that was wrong. The SDK licence grants, at §2a, "a
   nonexclusive royalty-free license … to distribute, only in accordance with
   the SDK Documentation requirements, object code included in the SDK solely as
@@ -174,6 +175,18 @@ be able to make the second.
 
   `NDI_RUNTIME_URL` overrides the address, for the day NDI moves the file — it
   has moved before — or to pin a version deliberately.
+
+  **0.2.31 to 0.2.41 shipped without it, with every step green.** The workflow
+  fetched the runtime and passed it on with `--ndi=`, and `package.sh` then set
+  its own default *after* reading the arguments, which threw the path away; the
+  build said "no NDI runtime named" in one line of its log and carried on.
+  Found on 2026-10-18 on a fresh location server whose renderer reported no
+  NDI. The default is now read before the arguments, and the release fails if
+  a runtime was fetched and is not in the `.deb` — asked of the package itself,
+  because asking each step whether it succeeded is what missed it.
+
+  A machine on one of those packages gets NDI by installing the next one; the
+  hand installation below is only for a machine that cannot.
 
   The library is deliberately **not** in this repository: it is public, and
   the SDK is confidential under 3a of the agreement. What may be distributed

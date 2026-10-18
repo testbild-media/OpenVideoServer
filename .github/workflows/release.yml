@@ -595,6 +595,22 @@ jobs:
           ls -l target/package/
           dpkg-deb --info target/package/*.deb
 
+      # **The runtime that was fetched has to be in what is published.** Every
+      # release from 0.2.31 to 0.2.41 fetched it, handed it to `package.sh`, and
+      # shipped without it — the script overwrote `--ndi=` with an empty
+      # default — and every step of every one of those runs was green. Asked of
+      # the package itself, so it catches that and anything else between the
+      # download and the `.deb`.
+      - name: Check the NDI runtime is in the package
+        if: steps.ndi.outputs.runtime != ''
+        run: |
+          if ! dpkg-deb -c target/package/*.deb | grep -q '/usr/lib/openvideoserver/libndi\.so'; then
+            echo "the NDI runtime was fetched and is not in the package" >&2
+            dpkg-deb -c target/package/*.deb | grep -iE 'ndi|openvideoserver/lib' | head -40 >&2
+            exit 1
+          fi
+          dpkg-deb -c target/package/*.deb | grep -iE 'libndi|/NDI-'
+
       # Kept whether or not this was a tag, so a `workflow_dispatch` run is
       # useful on its own.
       - name: Keep the package

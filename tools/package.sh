@@ -45,6 +45,14 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 build=yes
+# Before the arguments are read, so that `--ndi=` overrides the environment and
+# not the other way round. It was set after the loop until 2026-10-18, which
+# threw away every `--ndi=`: the release workflow fetched the runtime, handed it
+# over, and every package since the runtime was meant to be carried (0.2.31 to
+# 0.2.41) shipped without it, saying so in one line of a build log nobody
+# reads. Found on a fresh location server whose renderer reported no NDI. Why
+# there is a runtime to name at all is further down, where it is staged.
+ndi_runtime="${OVS_NDI_RUNTIME:-}"
 for argument in "$@"; do
   case "$argument" in
     --no-build) build=no ;;
@@ -98,8 +106,8 @@ staging="target/package/${package}_${version}_${architecture}"
 # the runtime belongs in the product it is bundled with, not loose in a source
 # tree. It is named at build time instead - by `--ndi=`, or `OVS_NDI_RUNTIME` -
 # so a build without one simply makes the package this project made before,
-# with no NDI and a line in the log saying so.
-ndi_runtime="${OVS_NDI_RUNTIME:-}"
+# with no NDI and a line in the log saying so. Both are read at the top, before
+# the arguments.
 
 ffmpeg_dir="$PWD/build/ffmpeg-server"
 if [ ! -f "$ffmpeg_dir/lib/libavcodec.so" ] && [ ! -f "$ffmpeg_dir/lib/libavcodec.so.61" ]; then
