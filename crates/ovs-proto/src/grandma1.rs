@@ -39,7 +39,7 @@
 //!   eight-bit step it falls in, on a sixteen-bit channel too.
 //! - Named values run in order of where they are on the channel.
 //! - A channel resting at nought has no `_DEFAULT`; one resting at the top is
-//!   `100.0000%`. A stepped one rests in the middle of its home's band, where
+//!   `100.0000%`, a colour as well as a dimmer. A stepped one rests in the middle of its home's band, where
 //!   the desk puts it when a named value is chosen as the default.
 //! - Per cent is the sixteen-bit value divided by 655.35 in single precision,
 //!   to four places: double precision prints four of the 205 values in his
@@ -1048,10 +1048,11 @@ fn channel_sets(
 /// desk put the master's freeze, tap and scale and the layer's slot when he
 /// chose a named value as the default: an edge is one value from the next
 /// step. A dimmer rests where its home is, so an effect's switch on the
-/// dimmer stays at nought and a group master finds it there, and a dimmer at
-/// full is the whole channel, `100.0000%`, as his desk writes Full. Anything
-/// else rests on its home — a colour at full is the top step, `99.6109%`, as
-/// his desk left every colour.
+/// dimmer stays at nought and a group master finds it there. Anything else
+/// rests on its home, and a channel at full is the whole channel,
+/// `100.0000%`, as his desk writes Full — a dimmer or a colour alike (owner,
+/// 2026-10-18: "default bei Farben auch 100% nicht 99.6109%.. das hatte ich
+/// bei den Dimmern schon immer geändert").
 fn default_of(channel: &PersonalityChannel, attribute: &Attribute) -> Option<u16> {
     let home = channel.home;
     let dimmer = attribute.effect == "DIMMER";
@@ -1069,7 +1070,7 @@ fn default_of(channel: &PersonalityChannel, attribute: &Attribute) -> Option<u16
             }
         }
         _ if channel.width > 1 => home,
-        _ if dimmer && home >= 255 => u16::MAX,
+        _ if home >= 255 => u16::MAX,
         _ => home << 8,
     };
     (rest != 0).then_some(rest)
@@ -2146,11 +2147,17 @@ mod tests {
         }
         // The middle of Black.
         assert!(named("OVS Layer").contains("_DEFAULT 0.7797%"));
-        // A colour at full is the top step, as his desk left every colour.
+        // A colour at full is Full too: "default bei Farben auch 100% nicht
+        // 99.6109%".
         assert!(named("OVS Gen Solid Colo")
-            .contains("_ATT_LABEL \"Red\" _FEA_LABEL \"RGBX\" _DEFAULT 99.6109%"));
+            .contains("_ATT_LABEL \"Red\" _FEA_LABEL \"RGBX\" _DEFAULT 100.0000%"));
         for file in fixture_files() {
             assert!(!file.contents.contains("_DEFAULT 0.0000%"), "{}", file.name);
+            assert!(
+                !file.contents.contains("_DEFAULT 99.6109%"),
+                "{}",
+                file.name
+            );
         }
     }
 

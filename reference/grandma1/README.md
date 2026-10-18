@@ -144,9 +144,9 @@ immer von bis Wert und kein einzelner Wert." So:
 
 **Where a channel rests.** Every channel's home is the fixture's default, so a
 freshly patched layer is visible, full size and upright, and a freshly patched
-effect changes nothing. The desk writes no default at nought; a dimmer at full
-is `100.0000%`; a step rests in the middle of its band, where his desk put the
-master's freeze, tap and scale and the layer's slot.
+effect changes nothing. The desk writes no default at nought; anything at full
+— a dimmer, a colour — is `100.0000%`; a step rests in the middle of its band,
+where his desk put the master's freeze, tap and scale and the layer's slot.
 
 **Where these differed from his export when they were made:**
 
@@ -157,6 +157,9 @@ master's freeze, tap and scale and the layer's slot.
   alignment rest in the middle of their bands** like the master's steps
   (24.9989% rather than 25.0004%, 16.7956% rather than 16.4065%). The same
   step either way.
+- **A colour at full rests at `100.0000%`**, not the `99.6109%` the export
+  still had: "default bei Farben auch 100% nicht 99.6109%.. das hatte ich bei
+  den Dimmern schon immer geändert."
 - `_VERSION` is `ORIGINAL`, as above.
 
 ## Every fixture
