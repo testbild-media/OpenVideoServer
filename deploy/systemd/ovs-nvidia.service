@@ -1,0 +1,67 @@
+[Unit]
+Description=OpenVideoServer: get the NVIDIA card ready before the renderer starts
+Documentation=https://github.com/testbild-media/OpenVideoServer
+
+# Two things the renderer cannot do for itself, because both need root and the
+# renderer is sandboxed so that it has nothing of the kind. Both found on the
+# location server on 2026-10-18, the first machine to drive a wall and the
+# System screen from one card.
+#
+# **The compute device.** NVDEC and NVENC are reached through CUDA, and CUDA
+# needs `/dev/nvidia-uvm`. Nothing creates it at boot: the module loads on
+# demand, and the node is made by `nvidia-modprobe`, which is setuid root for
+# exactly this. Until something asks, it is not there, and `cuInit` fails with
+# `CUDA_ERROR_UNKNOWN` -- every clip then decodes on the processor and every
+# preview is encoded in software, with one line in the renderer's log to say so.
+#
+# This used to be an `ExecStartPre=-` line in `ovs-renderer.service`, and it
+# never worked: it ran inside the renderer's sandbox, where `NoNewPrivileges=yes`
+# throws away the setuid bit and `ProtectKernelModules=yes` forbids loading a
+# module at all, and the leading `-` swallowed the failure. On the location
+# server the module was still not loaded 25 minutes after boot.
+#
+# Why not run it as root inside the renderer's own unit (`ExecStartPre=+`)?
+# **Not measured, so read this as the reason for being careful rather than as a
+# fact:** the renderer's device list names `char-nvidia-uvm`, and systemd turns
+# that name into a device number when it sets the unit's cgroup up, which is
+# before any of its commands run. If that is so, a module loaded by the unit's
+# own first command arrives too late for its own device list, and CUDA fails
+# the same way with the node sitting right there. A unit that has finished
+# before the renderer is even started cannot have that problem either way.
+#
+# **The clocks.** Driving displays through `VK_KHR_display`, with no X server
+# and no desktop asking for anything, the driver takes the card for idle: P8,
+# the graphics clock wandering between 210 and 435 MHz, `Idle` named as the
+# reason. The renderer's work then takes longer than a frame, the load rises,
+# the clock comes up, the load falls, the clock goes down again -- every eight
+# seconds, on the location server, the wall went from 60 frames a second to 41
+# and back, losing about fifteen frames a second in each trough and nearly four
+# thousand in its first ten minutes. With the floor locked at 1410 MHz the same
+# wall held 59.5 to 60.6 and lost none in the next twenty seconds, at 22 % load
+# and 26 W.
+#
+# **The floor is mine: two thirds of the card's own maximum** -- 1400 of
+# 2100 MHz on that card's RTX 3060 Ti, which the driver rounds to the 1410 that
+# was measured. A fraction rather than a number, because another card has
+# another maximum and a fixed figure would be somebody else's guess at it. The
+# ceiling is left at the maximum, so nothing that needs more is held back.
+#
+# On a machine without the NVIDIA tools -- an AMD or Intel one -- this is
+# skipped, not failed, and the renderer starts exactly as before.
+ConditionPathExists=/usr/bin/nvidia-modprobe
+Before=ovs-renderer.service
+
+[Service]
+Type=oneshot
+# Stays "active" once it has run, so a renderer that restarts does not ask for
+# it again: the module stays loaded, and the lock holds for as long as the
+# driver does (nvidia-persistenced keeps it loaded).
+RemainAfterExit=yes
+# `-u` loads the unified-memory module and makes its nodes, `-c 0` makes the
+# card's own. The leading `-` on each line keeps a refusal from failing the
+# boot or the other line; it is in the journal under this unit's name, which is
+# where somebody looks. A card that cannot lock its clocks -- some mobile parts
+# say so -- runs as it did before.
+ExecStart=-/usr/bin/nvidia-modprobe -u -c 0
+# `$$` is systemd's way of handing the shell a `$`.
+ExecStart=-/bin/sh -c 'max=$$(/usr/bin/nvidia-smi --query-gpu=clocks.max.graphics --format=csv,noheader,nounits | head -n 1); case "$$max" in ""|*[!0-9]*) echo "the card reports no maximum graphics clock to lock against: $$max" >&2; exit 1;; esac; exec /usr/bin/nvidia-smi --lock-gpu-clocks=$$((max * 2 / 3)),$$max'

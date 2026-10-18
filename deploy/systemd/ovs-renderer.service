@@ -3,12 +3,13 @@ Description=OpenVideoServer renderer (owns the GPU and the show outputs)
 Documentation=https://github.com/testbild-media/OpenVideoServer
 After=network-online.target
 
-# The NVIDIA compute device, made as root before this starts. Wanted rather
-# than required: on a machine with no NVIDIA card that unit is skipped, and the
-# renderer must start regardless. Why it is a unit of its own and not a line
-# here is in `ovs-nvidia-uvm.service`.
-Wants=ovs-nvidia-uvm.service
-After=ovs-nvidia-uvm.service
+# The NVIDIA card made ready as root before this starts: its compute device,
+# and its clocks kept out of idle. Wanted rather than required: on a machine
+# with no NVIDIA card that unit is skipped, and the renderer must start
+# regardless. Why it is a unit of its own and not lines here is in
+# `ovs-nvidia.service`.
+Wants=ovs-nvidia.service
+After=ovs-nvidia.service
 
 # Deliberately not ordered against ovsd. The renderer listens and the core
 # connects to it, so that ovsd stopping, crashing or being upgraded is a caller
@@ -27,8 +28,8 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=exec
-# The card's compute node is made before this starts, by
-# `ovs-nvidia-uvm.service` (see `Wants=` above). It used to be an
+# The card's compute node is made, and its clocks locked, before this starts,
+# by `ovs-nvidia.service` (see `Wants=` above). The node used to be an
 # `ExecStartPre=` here, which this unit's own sandbox stopped from doing
 # anything.
 
