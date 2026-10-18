@@ -34,15 +34,39 @@
 //!
 //! # How the controls are laid out on a desk
 //!
-//! Where a control is the same thing as one a lighting desk already knows, it
-//! takes that attribute, so the desk's own tools work on it: a dimmer is
-//! `DIM`, the first colour of a module is `RED`, `GREEN` and `BLUE` with the
-//! colour-mix effect (so the colour picker drives it), a layer's position,
-//! turn and size are `X POS`, `Z ROT` and `X SCALE` under `PAN/TILT` the way
-//! the media-server fixtures in the library have them, and a layer's slot is
-//! `SLOT` under `GOBO`, which is where those fixtures put the clip a layer
-//! plays. Everything else is named after the control and sits under `VIDEO`,
-//! grouped by the module it belongs to.
+//! The owner, 2026-10-18, after the first import: "Position X und Y könnten
+//! Pan und Tilt sein, damit man es mit dem Trackball am Pult bedienen kann.
+//! Amount könnte Dimmer sein, wenn nicht schon anderweitig benutzt, somit
+//! könnte man einen Groupmaster im Pult erstellen, der alle Amounts auf 0
+//! zieht" — and "Wenn du neue Attribute hinzufügst mach auch OVS Blur z.B.
+//! statt nur Blur".
+//!
+//! So **a control takes one of the desk's own attributes only where a tool of
+//! the desk answers to that attribute**, and then exactly as the library
+//! writes it:
+//!
+//! - `PAN` and `TILT`, for a layer's position: the trackball, and the desk's
+//!   position effects. High End's Showpix moves its picture the same way.
+//! - `DIM`, for every dimmer: the master's, a layer's, and in a module the
+//!   control that says how much of the module there is, with none of it at
+//!   zero — every `Amount`, and the four modules whose strength is another
+//!   control (`DIMMED`). The grand master, a group master, Highlight and
+//!   `At` act on it. A switch can be a dimmer: MA's own NonDim Switch is one.
+//! - `RED`, `GREEN` and `BLUE` with the colour-mix effect, for a module's
+//!   first colour: the colour picker.
+//!
+//! A layer's turn and size keep the `Z ROT`, `X SCALE` and `Y SCALE` the
+//! library's media servers give them, so they sit beside pan and tilt.
+//! **Everything else is ours, and says so**: an attribute is `OVS`, a short
+//! name of its module and the control, as in `OVS BLUR RADIUS`, in a group
+//! that is `OVS` and the module, as in `OVS BLUR`.
+//!
+//! An attribute of ours never means two things: `Saturation` is
+//! `OVS COLORIZE SAT` in one module and `OVS CC SATURATION` in another. A desk
+//! that keeps one list of attributes for a whole show — the owner: "Man kann
+//! auch eigene Attribute erstellen in der GMA" — would otherwise file both
+//! under whichever module it met first. Whether a grandMA1 does is not known
+//! here; names that cannot collide make it not matter.
 
 use ovs_types::config::fixtures::{definition, ColourPart, ParameterSlot};
 use ovs_types::config::{ParameterDefinition, ParameterKind};
@@ -236,6 +260,44 @@ struct Attribute {
     effect_sub: Option<&'static str>,
 }
 
+impl Attribute {
+    /// A channel no tool of the desk does anything particular with.
+    fn plain(
+        attribute: impl Into<String>,
+        feature: impl Into<String>,
+        preset: &'static str,
+        attribute_label: impl Into<String>,
+        feature_label: impl Into<String>,
+    ) -> Self {
+        Self {
+            attribute: attribute.into(),
+            feature: feature.into(),
+            preset,
+            attribute_label: attribute_label.into(),
+            feature_label: feature_label.into(),
+            effect: "NONE",
+            effect_sub: None,
+        }
+    }
+
+    /// The same channel, taken by one of the desk's tools.
+    fn for_the_desk(mut self, effect: &'static str, effect_sub: Option<&'static str>) -> Self {
+        self.effect = effect;
+        self.effect_sub = effect_sub;
+        self
+    }
+
+    /// The desk's dimmer, written as 490 fixtures of the library write it.
+    fn dimmer() -> Self {
+        Self::plain("DIM", "DIMMER", "DIMMER", "Dim", "Dimmer").for_the_desk("DIMMER", None)
+    }
+
+    /// One of the master's own controls.
+    fn master(attribute: &str, label: &str) -> Self {
+        Self::plain(attribute, "OVS MASTER", "CONTROL", label, "OVS Master")
+    }
+}
+
 /// Every channel's attribute, worked out together, because the first colour
 /// of a module is told apart from the others by being first.
 struct Layout {
@@ -292,97 +354,126 @@ fn slot_of(personality: &Personality, channel: &PersonalityChannel) -> Option<Pa
         .map(|defined| defined.parameter)
 }
 
-/// The fixed attributes of the two personalities the server publishes itself.
+/// The attributes of the two personalities the server publishes itself.
 ///
 /// By control name, so a control added to a later version of either finds no
 /// row here and is laid out like any other control rather than taking another
 /// one's attribute.
-const FIXED: [(&str, &str, &str, &str, &str, &str); 13] = [
-    // control, attribute, feature, preset, attribute label, feature label
-    ("master_dimmer", "DIM", "DIMMER", "DIMMER", "Dim", "Dimmer"),
-    (
-        "master_freeze",
-        "FREEZE",
-        "CONTROL",
-        "CONTROL",
-        "Freeze",
-        "Control",
-    ),
-    (
-        "master_tap_tempo",
-        "BPM TAP",
-        "SPEED",
-        "CONTROL",
-        "BPM Tap",
-        "Speed",
-    ),
-    (
-        "master_reset_phase",
-        "BPM SYNC",
-        "SPEED",
-        "CONTROL",
-        "BPM Sync",
-        "Speed",
-    ),
-    (
-        "master_speed_scale",
-        "BPM SCALE",
-        "SPEED",
-        "CONTROL",
-        "BPM Scale",
-        "Speed",
-    ),
-    (
-        "master_crossfader",
-        "CROSSFADE A/B",
-        "TRANSITION",
-        "VIDEO",
-        "Crossfade A/B",
-        "Transition",
-    ),
-    ("layer_opacity", "DIM", "DIMMER", "DIMMER", "Dim", "Dimmer"),
-    ("layer_slot", "SLOT", "MEDIA", "GOBO", "Slot", "Media"),
-    (
-        "layer_position_x",
-        "X POS",
-        "POSITION",
-        "PAN/TILT",
-        "X Pos",
-        "Position",
-    ),
-    (
-        "layer_position_y",
-        "Y POS",
-        "POSITION",
-        "PAN/TILT",
-        "Y Pos",
-        "Position",
-    ),
-    (
-        "layer_rotation",
-        "Z ROT",
-        "ROTATION",
-        "PAN/TILT",
-        "Z Rot",
-        "Rotation",
-    ),
-    (
-        "layer_scale_x",
-        "X SCALE",
-        "SCALE",
-        "PAN/TILT",
-        "X Scale",
-        "Scale",
-    ),
-    (
-        "layer_scale_y",
-        "Y SCALE",
-        "SCALE",
-        "PAN/TILT",
-        "Y Scale",
-        "Scale",
-    ),
+fn fixed(control: &str) -> Option<Attribute> {
+    let attribute = match control {
+        "master_dimmer" | "layer_opacity" => Attribute::dimmer(),
+        "master_freeze" => Attribute::master("OVS FREEZE", "Freeze"),
+        "master_tap_tempo" => Attribute::master("OVS BPM TAP", "BPM Tap"),
+        "master_reset_phase" => Attribute::master("OVS BPM SYNC", "BPM Sync"),
+        "master_speed_scale" => Attribute::master("OVS BPM SCALE", "BPM Scale"),
+        "master_crossfader" => Attribute::master("OVS CROSSFADE", "Crossfade A/B"),
+        "layer_slot" => Attribute::plain("OVS SLOT", "OVS LAYER", "GOBO", "Slot", "OVS Layer"),
+        // The trackball's. Up is up: a larger value moves the picture up the
+        // wall, as a larger tilt lifts a head.
+        "layer_position_x" => Attribute::plain("PAN", "PAN/TILT", "PAN/TILT", "Pan", "Pan/Tilt")
+            .for_the_desk("PAN", None),
+        "layer_position_y" => Attribute::plain("TILT", "PAN/TILT", "PAN/TILT", "Tilt", "Pan/Tilt")
+            .for_the_desk("TILT", None),
+        "layer_rotation" => Attribute::plain("Z ROT", "ROTATION", "PAN/TILT", "Z Rot", "Rotation"),
+        "layer_scale_x" => Attribute::plain("X SCALE", "SCALE", "PAN/TILT", "X Scale", "Scale"),
+        "layer_scale_y" => Attribute::plain("Y SCALE", "SCALE", "PAN/TILT", "Y Scale", "Scale"),
+        _ => return None,
+    };
+    Some(attribute)
+}
+
+/// The controls other than an `Amount` that are their module's dimmer.
+///
+/// Each is how much of its module there is, and at its least the module does
+/// nothing at all, so a group master pulled to nought takes the module out of
+/// the picture and never puts something into it: blocks of one pixel, channels
+/// split by none, a trail no frames long, a picture not inverted.
+/// `pulling_a_dimmer_down_never_adds_an_effect` holds every one of them, and
+/// every `Amount`, to that.
+///
+/// Not here, because no single control of theirs is "none at zero": Colour
+/// Correct and RGB Correct (nought brightness is black), Crop (four edges) and
+/// Mirror (two axes).
+const DIMMED: [(&str, &str); 4] = [
+    ("ovs.pixelate", "block_px"),
+    ("ovs.rgb_split", "offset_px"),
+    ("ovs.echo", "length_s"),
+    ("ovs.invert", "on"),
 ];
+
+fn is_dimmer(type_id: &str, key: &str) -> bool {
+    key == "amount" || DIMMED.contains(&(type_id, key))
+}
+
+/// A module's name inside an attribute's: short, because `OVS`, the module and
+/// the control have eighteen characters between them. A module not listed is
+/// its own name, and a test says when that no longer fits.
+fn module_code(type_id: &str) -> Option<&'static str> {
+    Some(match type_id {
+        "ovs.colour_correct" => "CC",
+        "ovs.edges" => "EDGE",
+        "ovs.rgb_correct" => "RGBC",
+        "ovs.rgb_split" => "SPLIT",
+        "ovs.solid_colour" => "SOLID",
+        "ovs.tv_glitch" => "TVG",
+        _ => return None,
+    })
+}
+
+/// The controls whose own name is too long to follow `OVS` and their module.
+const SHORTER: [(&str, &str, &str); 16] = [
+    ("ovs.colorize", "saturation", "SAT"),
+    ("ovs.edges", "width_px", "WIDTH"),
+    ("ovs.grid", "line_px", "WIDTH"),
+    ("ovs.mirror", "horizontal", "HORIZ"),
+    ("ovs.mirror", "vertical", "VERT"),
+    ("ovs.rgb_correct", "lift_r", "R BLACK"),
+    ("ovs.rgb_correct", "lift_g", "G BLACK"),
+    ("ovs.rgb_correct", "lift_b", "B BLACK"),
+    ("ovs.rgb_correct", "gain_r", "R WHITE"),
+    ("ovs.rgb_correct", "gain_g", "G WHITE"),
+    ("ovs.rgb_correct", "gain_b", "B WHITE"),
+    ("ovs.shape", "shape", "TYPE"),
+    ("ovs.text", "cap_px", "HEIGHT"),
+    ("ovs.text", "weight", "WEIGHT"),
+    ("ovs.tv_glitch", "roll", "ROLL"),
+    ("ovs.tv_glitch", "vertical_hold", "OUT SYNC"),
+];
+
+/// A colour other than a module's first: the short name its attributes carry,
+/// and its group with that group's label.
+///
+/// A background is one thing in every module that has one, so it is one group
+/// with one set of attributes, wherever it is patched.
+fn second_colour(type_id: &str, key: &str, name: &str) -> (String, String, String) {
+    match (type_id, key) {
+        (_, "background_colour") => (
+            "BG".to_owned(),
+            "OVS BACKGROUND".to_owned(),
+            "OVS Background".to_owned(),
+        ),
+        ("ovs.gradient", "colour_b") => (
+            "TO".to_owned(),
+            "OVS GRADIENT TO".to_owned(),
+            "OVS Gradient To".to_owned(),
+        ),
+        _ => (
+            upper(name),
+            format!("OVS {}", upper(name)),
+            field(&format!("OVS {name}")),
+        ),
+    }
+}
+
+/// A personality's module, as its group is named: `Blur`, or `Master` for the
+/// one whose name is already "OVS Master".
+fn module_name(personality: &Personality) -> String {
+    personality
+        .name
+        .strip_prefix("OVS ")
+        .unwrap_or(&personality.name)
+        .to_owned()
+}
 
 /// Works out where one channel sits.
 fn attribute_of(
@@ -392,78 +483,78 @@ fn attribute_of(
     first_colour: Option<&'static str>,
     parameters: &'static [ParameterDefinition],
 ) -> Attribute {
-    if let Some(&(_, attribute, feature, preset, attribute_label, feature_label)) =
-        FIXED.iter().find(|row| row.0 == channel.control)
-    {
-        let dimmer = attribute == "DIM";
-        return Attribute {
-            attribute: attribute.to_owned(),
-            feature: feature.to_owned(),
-            preset,
-            attribute_label: attribute_label.to_owned(),
-            feature_label: feature_label.to_owned(),
-            effect: if dimmer { "DIMMER" } else { "NONE" },
-            effect_sub: None,
-        };
+    if let Some(attribute) = fixed(&channel.control) {
+        return attribute;
     }
 
-    let module = field(&personality.name);
-    let plugin = match slot {
+    let type_id = personality.type_id.as_str();
+    let module = module_name(personality);
+    let group = format!("OVS {}", upper(&module));
+    let group_label = field(&format!("OVS {module}"));
+
+    let Some(parameter) = (match slot {
         Some(ParameterSlot::Effect(parameter) | ParameterSlot::Generator(parameter)) => {
             Some(parameter)
         }
         _ => None,
+    }) else {
+        // A control of the server's own that `fixed` does not know yet.
+        return Attribute::plain(
+            format!("OVS {}", upper(&channel.name)),
+            group,
+            "CONTROL",
+            field(&channel.name),
+            group_label,
+        );
     };
 
-    if let Some(parameter) = plugin {
-        if let Some(part) = parameter.component {
-            let name = parameters
-                .iter()
-                .find(|defined| defined.key == parameter.key)
-                .map_or(parameter.key, |defined| defined.name);
-            // The first colour is the desk's own: RED, GREEN and BLUE with the
-            // colour-mix effect, which is what puts it under the picker.
-            if first_colour == Some(parameter.key) {
-                let (attribute, effect, effect_sub) = match part {
-                    ColourPart::Red => ("RED", "COLOR_MIX", Some("RED")),
-                    ColourPart::Green => ("GREEN", "COLOR_MIX", Some("GREEN")),
-                    ColourPart::Blue => ("BLUE", "COLOR_MIX", Some("BLUE")),
-                    ColourPart::Alpha => ("ALPHA", "NONE", None),
-                };
-                return Attribute {
-                    attribute: attribute.to_owned(),
-                    feature: "RGB".to_owned(),
-                    preset: "COLOR",
-                    attribute_label: part.label().to_owned(),
-                    feature_label: "RGB".to_owned(),
-                    effect,
-                    effect_sub,
-                };
-            }
-            // A second colour has its own name. Two sets of RED in one
-            // fixture would be one attribute twice.
-            return Attribute {
-                attribute: field(&format!("{name} {}", part.label())).to_uppercase(),
-                feature: field(name).to_uppercase(),
-                preset: "COLOR",
-                attribute_label: field(&format!("{name} {}", part.label())),
-                feature_label: field(name),
-                effect: "NONE",
-                effect_sub: None,
-            };
-        }
+    if is_dimmer(type_id, parameter.key) {
+        return Attribute::dimmer();
     }
 
-    // Everything else: named after itself, grouped by its module.
-    Attribute {
-        attribute: field(&channel.name).to_uppercase(),
-        feature: module.to_uppercase(),
-        preset: if plugin.is_some() { "VIDEO" } else { "CONTROL" },
-        attribute_label: field(&channel.name),
-        feature_label: module,
-        effect: "NONE",
-        effect_sub: None,
+    let name = parameters
+        .iter()
+        .find(|defined| defined.key == parameter.key)
+        .map_or(parameter.key, |defined| defined.name);
+
+    if let Some(part) = parameter.component {
+        // The first colour is the desk's own: RED, GREEN and BLUE with the
+        // colour-mix effect, which is what puts it under the picker.
+        if first_colour == Some(parameter.key) {
+            let rgb = |attribute, label| Attribute::plain(attribute, "RGB", "COLOR", label, "RGB");
+            return match part {
+                ColourPart::Red => rgb("RED", "R").for_the_desk("COLOR_MIX", Some("RED")),
+                ColourPart::Green => rgb("GREEN", "G").for_the_desk("COLOR_MIX", Some("GREEN")),
+                ColourPart::Blue => rgb("BLUE", "B").for_the_desk("COLOR_MIX", Some("BLUE")),
+                // The picker has no alpha; ours sits beside the three it does.
+                ColourPart::Alpha => rgb("OVS ALPHA", "Alpha"),
+            };
+        }
+        // A second colour has its own name. Two sets of RED in one fixture
+        // would be one attribute twice.
+        let (short, group, group_label) = second_colour(type_id, parameter.key, name);
+        return Attribute::plain(
+            format!("OVS {short} {}", upper(part.label())),
+            group,
+            "COLOR",
+            field(&format!("{name} {}", part.label())),
+            group_label,
+        );
     }
+
+    // Everything else: ours, named after its module and itself.
+    let code = module_code(type_id).map_or_else(|| upper(&module), str::to_owned);
+    let control = SHORTER
+        .iter()
+        .find(|(module, key, _)| *module == type_id && *key == parameter.key)
+        .map_or_else(|| upper(name), |(_, _, short)| (*short).to_owned());
+    Attribute::plain(
+        format!("OVS {code} {control}"),
+        group,
+        "VIDEO",
+        field(&channel.name),
+        group_label,
+    )
 }
 
 /// Writes one channel, and its fine half when it has one.
@@ -704,6 +795,14 @@ fn field(name: &str) -> String {
         .to_owned()
 }
 
+/// A name in the capitals an attribute or a group is written in.
+///
+/// Not cut to the field: an attribute cut short could become another one, and
+/// a test says when a name no longer fits instead.
+fn upper(name: &str) -> String {
+    ascii(name).to_uppercase()
+}
+
 /// Only what a grandMA1 text file can carry.
 ///
 /// The library is ASCII bar ten files, and those ten are one manufacturer's
@@ -730,7 +829,7 @@ fn padded(quoted: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeMap, BTreeSet};
 
     use super::*;
 
@@ -915,7 +1014,198 @@ mod tests {
         assert!(grid.contains("_ATTRIBUT \"RED\" _FEATURE \"RGB\" _PRESET \"COLOR\""));
         assert!(grid.contains("_EFF COLOR_MIX _EFFSUB RED"));
         assert_eq!(grid.matches("_ATTRIBUT \"RED\"").count(), 1);
-        assert!(grid.contains("_ATTRIBUT \"BACKGROUND RED\""), "{grid}");
+        assert!(
+            grid.contains("_ATTRIBUT \"OVS BG RED\" _FEATURE \"OVS BACKGROUND\" _PRESET \"COLOR\""),
+            "{grid}"
+        );
+    }
+
+    #[test]
+    fn the_layer_moves_on_the_trackball() {
+        // The owner, 2026-10-18: "Position X und Y könnten Pan und Tilt sein,
+        // damit man es mit dem Trackball am Pult bedienen kann."
+        let layer = named("OVS Layer");
+        for (attribute, effect) in [("PAN", "PAN"), ("TILT", "TILT")] {
+            assert!(
+                layer.contains(&format!(
+                    "_ATTRIBUT \"{attribute}\" _FEATURE \"PAN/TILT\" _PRESET \"PAN/TILT\""
+                )),
+                "{layer}"
+            );
+            assert!(layer.contains(&format!(
+                "_ATTRIBUT \"{attribute}\" _FEATURE \"PAN/TILT\" _PRESET \"PAN/TILT\" _TYPE FINE"
+            )));
+            assert!(layer.contains(&format!("_EFF {effect} ")), "{layer}");
+        }
+        assert!(!layer.contains("X POS"), "{layer}");
+    }
+
+    #[test]
+    fn an_amount_is_the_dimmer_so_a_group_master_takes_effects_out() {
+        // "... somit könnte man einen Groupmaster im Pult erstellen, der alle
+        // Amounts auf 0 zieht, für komplett ohne Effekte."
+        for personality in catalogue().fixtures.iter().filter(|p| !retired(p)) {
+            let has_amount = parameters_of(personality)
+                .iter()
+                .any(|parameter| parameter.key == "amount" && parameter.dmx.is_some());
+            if has_amount {
+                let file = fixture_type(personality);
+                assert!(
+                    file.contains("_ATTRIBUT \"DIM\" _FEATURE \"DIMMER\" _PRESET \"DIMMER\""),
+                    "{} has an Amount and no dimmer",
+                    personality.type_id
+                );
+                assert!(file.contains("_EFF DIMMER"), "{}", personality.type_id);
+            }
+        }
+        for name in [
+            "OVS FX Pixelate",
+            "OVS FX RGB Split",
+            "OVS FX Echo",
+            "OVS FX Invert",
+            "OVS FX Invert v2",
+        ] {
+            assert!(named(name).contains("_ATTRIBUT \"DIM\""), "{name}");
+        }
+        for name in [
+            "OVS FX Colour Correct",
+            "OVS FX Crop",
+            "OVS FX Mirror",
+            "OVS FX RGB Correct",
+        ] {
+            assert!(!named(name).contains("_ATTRIBUT \"DIM\""), "{name}");
+        }
+    }
+
+    #[test]
+    fn pulling_a_dimmer_down_never_adds_an_effect() {
+        // A group master at nought must take a module out of the picture. A
+        // dimmer whose least were a look — nought brightness is black — would
+        // put one in.
+        for personality in catalogue().fixtures.iter().filter(|p| !retired(p)) {
+            let layout = Layout::of(personality);
+            for (channel, attribute) in personality.channels.iter().zip(&layout.attributes) {
+                if attribute.attribute != "DIM" {
+                    continue;
+                }
+                let Some(ParameterSlot::Effect(slot) | ParameterSlot::Generator(slot)) =
+                    slot_of(personality, channel)
+                else {
+                    continue;
+                };
+                let parameter = parameters_of(personality)
+                    .iter()
+                    .find(|parameter| parameter.key == slot.key)
+                    .expect("a dimmer is a parameter of its module");
+                match parameter.kind {
+                    ParameterKind::Number { min, default, .. } => {
+                        let at_zero = match channel.encoding {
+                            ChannelEncodingInfo::Ranged8 { min, .. }
+                            | ChannelEncodingInfo::Ranged16 { min, .. } => min,
+                            _ => panic!("{}: a numeric dimmer that is not a fader", slot.key),
+                        };
+                        assert!((at_zero - min).abs() < 1e-9, "{}", slot.key);
+                        // An amount of nought is none of the module; any other
+                        // dimmer's least is the default every module is
+                        // neutral at.
+                        assert!(
+                            if slot.key == "amount" {
+                                min == 0.0
+                            } else {
+                                (min - default).abs() < 1e-9
+                            },
+                            "{} {}: nought on the dimmer is {min}, not nothing",
+                            personality.type_id,
+                            slot.key
+                        );
+                    }
+                    ParameterKind::Toggle { default } => {
+                        assert!(!default, "{} {}", personality.type_id, slot.key);
+                    }
+                    _ => panic!(
+                        "{} {}: a dimmer that is a choice",
+                        personality.type_id, slot.key
+                    ),
+                }
+            }
+        }
+    }
+
+    /// The attributes and groups that are the desk's own, written as its
+    /// library writes them. Anything else is ours.
+    const DESK: [&str; 9] = [
+        "DIM", "PAN", "TILT", "RED", "GREEN", "BLUE", "Z ROT", "X SCALE", "Y SCALE",
+    ];
+    const DESK_GROUPS: [&str; 5] = ["DIMMER", "PAN/TILT", "RGB", "ROTATION", "SCALE"];
+
+    #[test]
+    fn everything_that_is_not_the_desks_own_says_ovs() {
+        // "Wenn du neue Attribute hinzufügst mach auch OVS Blur z.B. statt nur
+        // Blur."
+        for personality in catalogue().fixtures.iter().filter(|p| !retired(p)) {
+            for attribute in Layout::of(personality).attributes {
+                if !DESK.contains(&attribute.attribute.as_str()) {
+                    assert!(
+                        attribute.attribute.starts_with("OVS "),
+                        "{}: {}",
+                        personality.type_id,
+                        attribute.attribute
+                    );
+                }
+                if !DESK_GROUPS.contains(&attribute.feature.as_str()) {
+                    assert!(
+                        attribute.feature.starts_with("OVS ")
+                            && attribute.feature_label.starts_with("OVS "),
+                        "{}: {} / {}",
+                        personality.type_id,
+                        attribute.feature,
+                        attribute.feature_label
+                    );
+                }
+            }
+        }
+        let blur = named("OVS FX Blur");
+        assert!(
+            blur.contains(
+                "_ATTRIBUT \"OVS BLUR RADIUS\" _FEATURE \"OVS BLUR\" _PRESET \"VIDEO\" \
+                 _ATT_LABEL \"Radius\" _FEA_LABEL \"OVS Blur\""
+            ),
+            "{blur}"
+        );
+    }
+
+    #[test]
+    fn an_attribute_means_one_thing_in_every_file() {
+        // A desk that keeps one list of attributes for a show would file a
+        // second meaning under the first. `Saturation` is two controls in two
+        // modules, so it is two attributes.
+        let mut seen: BTreeMap<String, (String, &str, String, String, &str)> = BTreeMap::new();
+        let mut groups: BTreeMap<String, &str> = BTreeMap::new();
+        for personality in catalogue().fixtures.iter().filter(|p| !retired(p)) {
+            for attribute in Layout::of(personality).attributes {
+                let meaning = (
+                    attribute.feature.clone(),
+                    attribute.preset,
+                    attribute.attribute_label.clone(),
+                    attribute.feature_label.clone(),
+                    attribute.effect,
+                );
+                let first = seen
+                    .entry(attribute.attribute.clone())
+                    .or_insert_with(|| meaning.clone());
+                assert_eq!(
+                    *first, meaning,
+                    "{} in {} means something else elsewhere",
+                    attribute.attribute, personality.type_id
+                );
+                let preset = groups
+                    .entry(attribute.feature.clone())
+                    .or_insert(attribute.preset);
+                assert_eq!(*preset, attribute.preset, "{}", attribute.feature);
+            }
+        }
+        assert!(seen.contains_key("OVS COLORIZE SAT"));
+        assert!(seen.contains_key("OVS CC SATURATION"));
     }
 
     #[test]
@@ -936,7 +1226,7 @@ mod tests {
         let master = named("OVS Master");
         assert!(master.contains("\"0.125x\""), "{master}");
         assert!(master.contains("\"1x\""), "{master}");
-        assert!(master.contains("_ATTRIBUT \"BPM TAP\""));
+        assert!(master.contains("_ATTRIBUT \"OVS BPM TAP\" _FEATURE \"OVS MASTER\""));
         assert!(
             master.contains("{ _NAME \"Fire\" _RANGE [50.0008%,100.0000%] }"),
             "{master}"

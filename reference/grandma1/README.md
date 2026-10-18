@@ -41,20 +41,56 @@ more.
 
 ## Where things sit
 
-- **Dimmers** — the master dimmer and each layer's — are `DIM`.
-- **Layer position, turn and size** are `X POS`/`Y POS`, `Z ROT` and
-  `X SCALE`/`Y SCALE` under Pan/Tilt, as the media-server fixtures in MA's
-  library have them. Each carries named values for its bottom, centre, top
-  and home; home on the scales is exactly 1.
-- **Slot** is `SLOT` under Gobo, with `Black` and `Slot 1` to `Slot 84` as
-  named values at the exact DMX bands the server reads.
-- **The first colour of a module** is `RED`/`GREEN`/`BLUE` with the colour-mix
-  effect, so the desk's colour picker drives it; its alpha is `ALPHA`. A
-  second colour (a background, the far end of a gradient) is named after
-  itself, for example `BACKGROUND RED`.
-- **Choices and switches** snap, and every step is a named value with the
-  name the client shows.
-- Everything else is named after the control, under Video, grouped by module.
+A control takes one of the desk's own attributes only where a tool of the
+desk answers to it, and then exactly as MA's library writes it:
 
-Every channel's home is the fixture's default, so a freshly patched layer is
-visible, full size and upright.
+- **Layer position is `PAN` and `TILT`**, so the trackball moves a layer and
+  the desk's position effects (circles and the like) run on it. Pan is
+  across, tilt is up: a larger tilt moves the picture up the wall. If it goes
+  the wrong way on a desk, invert tilt in the patch.
+- **Every dimmer is `DIM`**: the master's, each layer's, and in a module the
+  control that says how much of it there is (below). The grand master, a
+  group master, Highlight and `At` all act on it.
+- **The first colour of a module is `RED`/`GREEN`/`BLUE`** with the colour-mix
+  effect, so the colour picker drives it.
+- **A layer's turn and size** are `Z ROT` and `X SCALE`/`Y SCALE` under
+  Pan/Tilt, as the library's media servers have them. Home on the scales is
+  exactly 1.
+
+**Everything else is ours and says so.** An attribute is `OVS`, the module and
+the control — `OVS BLUR RADIUS`, `OVS CC SATURATION` — in a group that is `OVS`
+and the module: `OVS BLUR`, `OVS COLOUR CORRECT`. The layer's slot is
+`OVS SLOT` under Gobo, with `Black` and `Slot 1` to `Slot 84` as named values
+at the exact bands the server reads. A module's alpha is `OVS ALPHA` beside its
+red, green and blue; a background is `OVS BG RED` and so on in
+`OVS BACKGROUND`, whichever generator it belongs to; the far end of a gradient
+is `OVS TO RED` in `OVS GRADIENT TO`. No attribute of ours means two things in
+two modules, so a show that keeps one list of attributes cannot mix them up.
+
+Choices and switches snap, and every step is a named value with the name the
+client shows. Every channel's home is the fixture's default, so a freshly
+patched layer is visible, full size and upright, and a freshly patched effect
+changes nothing.
+
+## A group master for the effects
+
+Every module that has an `Amount` has it as its dimmer, and four more have
+their strength there:
+
+| Module | Its dimmer | At nought |
+|---|---|---|
+| Blur, Colorize, Edges, Mask, TV Glitch, Noise | Amount | none of it |
+| Pixelate | Block size | blocks of one pixel |
+| RGB Split | Offset | no split |
+| Echo | Length | no trail |
+| Invert | Inverted (a switch, on from half up) | not inverted |
+
+So a group of the effect fixtures on a group master takes them all out of the
+picture at nought — and puts each back where it was programmed as it comes
+up. Colour Correct, RGB Correct, Crop and Mirror have no dimmer, because none
+of their controls is "nothing" at nought (no brightness is black); a group
+master does not reach them.
+
+**The grand master reaches these dimmers too.** Pulling it down to fade a show
+out also pulls the effects' amounts down on the way, and Blackout takes them to
+nought with everything else.
