@@ -22,6 +22,8 @@ import type {
   ShowExport,
   OutputConfig,
   Piece,
+  SetLockRequest,
+  SetLockResponse,
   SetSlotRequest,
   ConnectorInfo,
   DisplayMode,
@@ -95,6 +97,8 @@ export class Session {
   #connection: Connection | null = null;
   #view: ShowView = emptyView();
   #status: ConnectionStatus = { state: 'offline' };
+  /** Whether the account signed in may administer the server. */
+  #mayAdminister = false;
 
   /**
    * Files on their way into the library.
@@ -156,6 +160,13 @@ export class Session {
     const api = new ServerApi(serverOrigin(address), this.environment.fetch);
     await api.logIn(username, password);
     this.#api = api;
+    // Whether to offer the lock on an effect or a generator at all. Asked once
+    // per sign-in, because a role is changed by signing in again; a server
+    // that cannot say is one this client offers nothing it may refuse.
+    this.#mayAdminister = await api
+      .whoAmI()
+      .then((me) => me?.account?.role === 'admin')
+      .catch(() => false);
 
     this.#connection = new Connection({
       url: api.realtimeUrl(),
@@ -175,7 +186,7 @@ export class Session {
           this.listener.status(status);
         },
         state: (state) => {
-          this.#view = toView(state);
+          this.#view = toView(state, this.#mayAdminister);
           // **The ceiling comes from the show, not from this laptop.** It is a
           // property of the wall the material is for, so every client uploading
           // to this server agrees about it without anybody being told twice.
@@ -202,6 +213,7 @@ export class Session {
     // token is forgotten here either way.
     void api?.logOut().catch(() => undefined);
 
+    this.#mayAdminister = false;
     this.#view = emptyView();
     this.#status = { state: 'offline' };
   }
@@ -534,6 +546,11 @@ export class Session {
     order: readonly string[],
   ): Promise<Answer<OrderEffectsResponse>> {
     return this.#answer((api) => api.orderEffects(showId, layerId, slotIndex, order));
+  }
+
+  /** Locks one effect or generator where it is, or unlocks it. Administrators only. */
+  setLock(showId: string, request: SetLockRequest): Promise<Answer<SetLockResponse>> {
+    return this.#answer((api) => api.setLock(showId, request));
   }
 
   /** Sets how many banks of twelve one layer's matrix shows. */

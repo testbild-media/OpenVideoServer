@@ -8,7 +8,14 @@
 // process through structured clone, which does not carry a `Map`; and a view
 // that is computed once, here, is a view the tests can check without a browser.
 
-import type { OutputConfig, ParameterValue, Piece, Transform2D } from '@ovs/schema';
+import type {
+  DeskControls,
+  LayerControl,
+  OutputConfig,
+  ParameterValue,
+  Piece,
+  Transform2D,
+} from '@ovs/schema';
 
 import type {
   BlendMode,
@@ -55,6 +62,45 @@ export interface EffectView {
    * which is where every effect starts and where a restart returns it to.
    */
   live: Record<string, ParameterValue>;
+  /**
+   * The parameters a lighting console holds on this effect right now.
+   *
+   * Empty while the DMX switch is off, and for an effect nothing is patched
+   * to. A held parameter is shown and not offered: the server refuses a
+   * client moving it (owner, 2026-10-19).
+   */
+  held: string[];
+  /**
+   * Whether an administrator has locked this effect where it is.
+   *
+   * Locked is not held: its values follow the patch like any other effect's,
+   * and switching it on or off is everybody's. What a lock takes away is
+   * removing it, moving it and putting it in another order.
+   */
+  locked: boolean;
+}
+
+/**
+ * What a lighting console holds on a layer right now.
+ *
+ * All false while the DMX switch is off, and on a layer nothing is patched to.
+ * The bus, the blend mode, the transport and whether the layer is on are not
+ * here, because no desk has a channel for them.
+ */
+export interface LayerHeld {
+  opacity: boolean;
+  /** False on a layer whose slots are set to GUI, whatever is patched. */
+  slot: boolean;
+  /** Position, scale and rotation, which a desk drives together. */
+  transform: boolean;
+}
+
+/** What a lighting console holds on the master right now. The tempo never is. */
+export interface MasterHeld {
+  dimmer: boolean;
+  crossfader: boolean;
+  speedScale: boolean;
+  freeze: boolean;
 }
 
 /**
@@ -185,12 +231,15 @@ export interface LayerView {
   /**
    * Whether a slot may be chosen here at all.
    *
-   * False on a layer the show hands to a console (owner, 2026-10-16). The
-   * matrix then shows the slots and refuses to switch them, rather than
-   * sending a selection the server will turn down: a picture that is easy to
-   * press by accident is the reason the setting exists.
+   * False while a patched console holds the layer's slot (owner, 2026-10-16
+   * and 2026-10-19). The matrix then shows the slots and refuses to switch
+   * them, rather than sending a selection the server will turn down: a
+   * picture that is easy to press by accident is the reason the setting
+   * exists.
    */
   mayChooseSlot: boolean;
+  /** What a lighting console holds on this layer right now. */
+  held: LayerHeld;
   /**
    * Where the layer's picture sits.
    *
@@ -247,6 +296,8 @@ export interface MasterView {
    * Off is somebody having taken it by hand.
    */
   dmxEnabled: boolean;
+  /** What a lighting console holds on the master right now. */
+  held: MasterHeld;
 }
 
 /**
@@ -288,6 +339,14 @@ export interface ShowView {
   /** The slices and the outputs they land on, for the work area's SLICES tab. */
   mapping: MappingView;
   renderer: { state: string; reason: string | null };
+  /**
+   * Whether the account this client signed in as may administer the server.
+   *
+   * What decides whether the lock on an effect or a generator is offered at
+   * all. The server decides whether a lock is taken; this only stops a button
+   * being drawn that it would refuse.
+   */
+  mayAdminister: boolean;
 }
 
 /** An empty view: connected to nothing. */
@@ -303,13 +362,32 @@ export function emptyView(): ShowView {
     layers: [],
     mapping: { outputs: [], pieces: [] },
     renderer: { state: 'stopped', reason: null },
+    mayAdminister: false,
   };
 }
 
+/**
+ * What a desk holds right now: the patch's reading, while the switch is on.
+ *
+ * Read from the server rather than worked out from the fixtures here, and
+ * combined with the switch in one place, so that every control asks the same
+ * question the server does.
+ */
+function heldNow(state: ShowState): DeskControls {
+  const driving = state.master?.dmx_enabled ?? true;
+  return driving ? state.desk : {};
+}
+
 /** Arranges the mirror for the window. */
-export function toView(state: ShowState): ShowView {
+export function toView(state: ShowState, mayAdminister = false): ShowView {
   const show = state.show;
   const configured = new Map((show?.layers ?? []).map((layer) => [layer.id, layer]));
+  const desk = heldNow(state);
+  const deskEffects = desk.effects ?? {};
+  const deskGenerators = desk.generators ?? {};
+  const deskMaster = new Set(desk.master ?? []);
+  const effectOf = (effect: Parameters<typeof toEffect>[0]): EffectView =>
+    toEffect(effect, state.effects, deskEffects[effect.id] ?? []);
 
   const layers: LayerView[] = [];
   for (const live of layersInOrder(state)) {
@@ -339,10 +417,14 @@ export function toView(state: ShowState): ShowView {
       // The live one. A server older than this sends none, and what it was
       // doing then is what the document says.
       blendMode: live.blend_mode ?? layer.blend_mode,
-      // Absent on a document written before the setting existed, and on one
-      // from a server older than it — both of which let the client choose, as
-      // they always did.
-      mayChooseSlot: (layer.slot_control ?? 'either') !== 'desk_only',
+      // The server's reading of the patch and the switch, not the setting on
+      // its own: a layer set to DMX with nothing patched is chosen here.
+      mayChooseSlot: !holdsLayer(desk, layer.id, 'slot'),
+      held: {
+        opacity: holdsLayer(desk, layer.id, 'opacity'),
+        slot: holdsLayer(desk, layer.id, 'slot'),
+        transform: holdsLayer(desk, layer.id, 'transform'),
+      },
       activeSlot: live.active_slot,
       trigger: live.trigger,
       defaults: {
@@ -354,7 +436,7 @@ export function toView(state: ShowState): ShowView {
       // `serde` default is. A show written before layers had a bank count
       // reads as one bank and still shows every slot it has.
       banks: layer.banks ?? 1,
-      effects: layer.effects.map((effect) => toEffect(effect, state.effects)),
+      effects: layer.effects.map(effectOf),
       slots: layer.slots
         .slice()
         .sort((a, b) => a.index - b.index)
@@ -378,8 +460,13 @@ export function toView(state: ShowState): ShowView {
                     slot.source.instance_id === undefined
                       ? {}
                       : (state.generators.get(slot.source.instance_id) ?? {}),
+                  held:
+                    slot.source.instance_id === undefined
+                      ? []
+                      : (deskGenerators[slot.source.instance_id] ?? []),
+                  locked: slot.source.locked ?? false,
                 },
-          effects: slot.effects.map((effect) => toEffect(effect, state.effects)),
+          effects: slot.effects.map(effectOf),
           active: slot.index === live.active_slot,
           playbackMode: slot.playback_mode,
           speed: slot.speed ?? 1,
@@ -412,6 +499,12 @@ export function toView(state: ShowState): ShowView {
           // those was driving from the desk.
           dmxEnabled: state.master.dmx_enabled ?? true,
           freeze: state.master.freeze,
+          held: {
+            dimmer: deskMaster.has('dimmer'),
+            crossfader: deskMaster.has('crossfader'),
+            speedScale: deskMaster.has('speed_scale'),
+            freeze: deskMaster.has('freeze'),
+          },
         }
       : null,
     masterDefaults: show
@@ -429,7 +522,13 @@ export function toView(state: ShowState): ShowView {
       state: renderer?.state ?? 'stopped',
       reason: renderer && 'reason' in renderer ? renderer.reason : null,
     },
+    mayAdminister,
   };
+}
+
+/** Whether a desk holds one control of one layer, in what `heldNow` says. */
+function holdsLayer(desk: DeskControls, layerId: string, control: LayerControl): boolean {
+  return (desk.layers?.[layerId] ?? []).includes(control);
 }
 
 /**
@@ -448,9 +547,11 @@ function toEffect(
     id: string;
     type_id: string;
     enabled: boolean;
+    locked?: boolean;
     parameters?: Record<string, ParameterValue>;
   },
   live: ReadonlyMap<string, Record<string, ParameterValue>>,
+  held: readonly string[],
 ): EffectView {
   return {
     id: effect.id,
@@ -458,5 +559,8 @@ function toEffect(
     enabled: effect.enabled,
     parameters: effect.parameters ?? {},
     live: live.get(effect.id) ?? {},
+    held: [...held],
+    // Absent from a document nobody has locked anything in.
+    locked: effect.locked ?? false,
   };
 }

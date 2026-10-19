@@ -70,7 +70,21 @@ const CONTROLS = [
   // Not the bus it is already on: a command that would move nothing is not
   // sent, on purpose, so pressing the lit pad proves nothing either way.
   { what: 'a bus pad', selector: '.routes .route:not(.on)', sends: 'set_layer' },
-  { what: 'a slot pad', selector: '.pad:not(.empty)', sends: 'select_slot' },
+  // On a layer whose slots are the client's: the stub's sixth is a desk's.
+  { what: 'a slot pad', selector: '.slots:not(.desk) .pad:not(.empty)', sends: 'select_slot' },
+  // --- what a lighting console holds (owner, 2026-10-19) ---
+  //
+  // The other half of this file's question: a control a desk holds must *not*
+  // act. Each of these fails when the control is offered after all, and when
+  // the screen stops marking it — a selector that matches nothing is MISSING.
+  {
+    what: "a held layer's pad",
+    selector: '.slots.desk .pad:not(.empty)',
+    sends: 'select_slot',
+    expect: 'nothing',
+  },
+  { what: "a held layer's opacity", selector: '.layer-opacity.desk input', expect: 'held' },
+  { what: 'a held crossfader', selector: '.desk > #crossfader', expect: 'held' },
   // --- a slot's own settings, which is where the newest controls are ---
   {
     what: "a slot's speed pad",
@@ -170,6 +184,32 @@ const CONTROLS = [
     // The only red thing on the row, which is how it says it edits the show.
     selector: '.options-column .work-row-head button.danger',
     call: 'removeEffect',
+    open: '.options-subject button',
+  },
+  // A locked effect: its ✕ is not offered, and neither is the fader a desk
+  // holds on it. The lock itself is, to an administrator.
+  {
+    what: 'remove a locked effect',
+    selector: '.options-column details.work-row:has(.lock-mark) .work-row-head button.danger',
+    open: '.options-subject button',
+    expect: 'held',
+  },
+  {
+    what: 'a fader the desk holds',
+    selector: '.options-column details.work-row:has(.lock-mark) .live-fact.desk input',
+    open: '.options-subject button',
+    expect: 'held',
+  },
+  {
+    what: 'unlock an effect',
+    selector: '.options-column details.work-row:has(.lock-mark) button[title^="Let "]',
+    call: 'setLock',
+    open: '.options-subject button',
+  },
+  {
+    what: 'lock an effect',
+    selector: '.options-column details.work-row:not(:has(.lock-mark)) button[title^="Lock "]',
+    call: 'setLock',
     open: '.options-subject button',
   },
   // --- IO mapping, rebuilt on 2026-09-25 and so the part least proved ---
@@ -320,6 +360,13 @@ async function press(win, control) {
   if (state.missing) {
     return { verdict: 'MISSING', detail: 'no such control on the screen' };
   }
+  // A control a desk holds has to be shown and not offered. Offered is the
+  // failure here, the opposite of every other probe.
+  if (control.expect === 'held') {
+    return state.disabled
+      ? { verdict: 'held', detail: 'shown and not offered' }
+      : { verdict: 'OFFERED', detail: 'a control the desk holds can be pressed' };
+  }
   if (state.disabled) {
     return { verdict: 'skipped', detail: 'disabled, and says so' };
   }
@@ -365,6 +412,14 @@ async function press(win, control) {
   const names = after
     .map((entry) => (entry.call === 'run' ? `run:${entry.args[0]?.do}` : entry.call))
     .join(', ');
+
+  // A pad a desk holds is still a button — it says why it will not act — so
+  // it is pressed, and what it must produce is nothing.
+  if (control.expect === 'nothing') {
+    return reached
+      ? { verdict: 'SENT', detail: `a press the desk holds sent ${names}` }
+      : { verdict: 'refuses', detail: names === '' ? 'nothing sent' : names };
+  }
 
   return reached
     ? { verdict: 'sends', detail: names }
@@ -507,7 +562,7 @@ app.whenReady().then(async () => {
   let dead = bad;
   for (const control of CONTROLS) {
     const result = await press(win, control);
-    if (result.verdict === 'DEAD' || result.verdict === 'MISSING' || result.verdict === 'BROKEN') {
+    if (['DEAD', 'MISSING', 'BROKEN', 'OFFERED', 'SENT'].includes(result.verdict)) {
       dead += 1;
     }
     const pad = control.what.padEnd(22, ' ');

@@ -1,6 +1,16 @@
 // Generated from the OpenVideoServer shared schema. Do not edit by hand.
 // Regenerate with: npm run generate --workspace @ovs/schema
 /**
+ * A layer control a desk can hold.
+ */
+export type LayerControl = 'opacity' | 'slot' | 'transform';
+/**
+ * A master control a desk can hold.
+ *
+ * The tempo is not here, and that is the owner's rule rather than a gap: a tap counts from wherever it comes, the client's or the desk's.
+ */
+export type MasterControl = 'dimmer' | 'crossfader' | 'speed_scale' | 'freeze';
+/**
  * A typed parameter value for an effect or generator instance.
  */
 export type ParameterValue =
@@ -142,8 +152,12 @@ export type ShowId = string;
  * **It exists because the two fight.** On his rig the FX layer is driven entirely from the desk, slots included, while layers 1 to 6 have their slots picked in the client — people who are not lighting operators simply press the picture they want, which turned out to be the practical thing in the room. A console holding its slot channel at a value re-sends it forty-four times a second, so without this the desk wins every time and the button somebody just pressed comes undone under their hand.
  *
  * This is only about *choosing a slot*. Everything else a console does to such a layer — the dimmer, the transform, the effects — is untouched, which is the whole point: he wants to transform these layers from the desk and only not to select on them.
+ *
+ * **One or the other, never both** (owner, 2026-10-19: "Pro Layer Slot entweder DMX oder GUI, nicht beides!"). There used to be a third setting that let either choose, and it was the default; the two fought exactly as described above. A document that still says `either`, `client_only` or `desk_only` reads as the one of these two it meant.
+ *
+ * [`Dmx`](Self::Dmx) does not by itself take the slots away from the client. It hands them to a desk *when one is patched to this layer and the DMX switch is on*; until then nothing drives them but the client, which is why it can be the default (see [`crate::control`]).
  */
-export type SlotControl = 'either' | 'client_only' | 'desk_only';
+export type SlotControl = 'dmx' | 'gui';
 /**
  * The direction a source's timeline advances in.
  */
@@ -177,6 +191,12 @@ export type SourceRef =
        */
       instance_id?: GeneratorInstanceId;
       kind: 'generator';
+      /**
+       * Whether an administrator has locked this generator in its slot.
+       *
+       * A locked generator cannot be taken out of its slot or replaced by anybody, and only an administrator can lock or unlock one; see [`crate::control`]. Left out of a document when it is not locked.
+       */
+      locked?: boolean;
       /**
        * Generator parameters as defined by its manifest.
        */
@@ -271,6 +291,14 @@ export type UploadCeiling = 'SOURCE' | '2160P' | '1080P' | '720P';
  */
 export interface StateSnapshot {
   /**
+   * What the open show's patch gives a lighting console.
+   *
+   * Held only while [`MasterLive::dmx_enabled`] is on; with it off the client has the whole show. A client reads the two together and greys out exactly what the server would refuse, rather than reading fixture personalities itself — a second reading of those would be the one that went out of date (owner's rule, 2026-10-19; see `ovs_types::control`).
+   *
+   * Changes only with the show, so it travels with the show: here and in [`StateChange::ShowLoaded`].
+   */
+  desk?: DeskControls;
+  /**
    * What a control source has done to the effects since the show opened.
    *
    * Here rather than only in the updates that follow, because a client that joins mid-show has to see the effects that are already moved. Without it a late client would draw every effect control at its configured value while the wall showed something else.
@@ -312,6 +340,37 @@ export interface StateSnapshot {
    * The loaded show, or `None` when the server has none open.
    */
   show?: Show | null;
+}
+/**
+ * What the patch gives a lighting console, before the DMX switch is read.
+ *
+ * Sent to every client beside the show, so that a client greys out exactly what the server would refuse rather than working it out again from the fixture personalities — a second copy of this reading would be the one that went out of date the day a personality grew a channel.
+ *
+ * Every entry is held **only while the DMX switch is on**. With it off the client has the whole show, and nothing here is consulted.
+ */
+export interface DeskControls {
+  /**
+   * The parameters a desk drives on each patched effect, by manifest key.
+   */
+  effects?: {
+    [k: string]: string[];
+  };
+  /**
+   * The parameters a desk drives on each patched generator, by manifest key.
+   */
+  generators?: {
+    [k: string]: string[];
+  };
+  /**
+   * The layer controls each patched layer fixture drives, by layer.
+   */
+  layers?: {
+    [k: string]: LayerControl[];
+  };
+  /**
+   * The master controls a patched master fixture drives.
+   */
+  master?: MasterControl[];
 }
 /**
  * The live state of one layer.
@@ -420,7 +479,9 @@ export interface MasterLive {
    *
    * Off is the operator taking the show by hand: Art-Net and sACN keep arriving, the status keeps saying what is on the wire, and **nothing they carry changes anything**. The show holds whatever it had, which is the same behaviour as a desk that has stopped sending — loss is a hold, not a blackout — and Live Mode drives it instead (owner, 2026-09-23).
    *
-   * Live rather than configuration: it is a thing somebody does in the middle of a night that has gone wrong, and a show that opened with its console ignored would be a worse surprise than the one it solved.
+   * **The one switch between the desk and the client** (owner, 2026-10-19). On, whatever a patched fixture has a channel for is the desk's and the client cannot move it; off, the client has everything. See [`crate::control`].
+   *
+   * The server's rather than a show's: opening another show leaves it as it is, and a restart brings it back as it was.
    */
   dmx_enabled?: boolean;
   /**
@@ -624,7 +685,7 @@ export interface Layer {
   /**
    * Who may choose this layer's slot.
    *
-   * Absent from a document written before the setting existed, which reads as [`SlotControl::Either`] — exactly what such a show did.
+   * Absent from a document written before the setting existed, which reads as [`SlotControl::Dmx`]: a desk patched to the layer chose its slots then too.
    */
   slot_control?: SlotControl & string;
   /**
@@ -642,12 +703,20 @@ export interface Layer {
 export interface EffectInstance {
   /**
    * Whether this effect contributes to the chain.
+   *
+   * Everybody's to change, locked or not (owner, 2026-10-19).
    */
   enabled: boolean;
   /**
    * Stable identifier of this instance.
    */
   id: EffectInstanceId;
+  /**
+   * Whether an administrator has locked this effect where it is.
+   *
+   * A locked effect cannot be removed, moved or put in another order by anybody, and only an administrator can lock or unlock one; see [`crate::control`]. Left out of a document when it is not locked, so a show nobody has locked anything in reads exactly as it did before.
+   */
+  locked?: boolean;
   /**
    * Parameter values as declared by the manifest.
    */

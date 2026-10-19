@@ -10,6 +10,7 @@
 //! PUT    /shows/{id}/layers/{l}/banks                  how much matrix it shows
 //! PUT    /shows/{id}/layers/{l}/slots/{n}/settings     everything but its source
 //! PUT    /shows/{id}/mapping                          the outputs and their pieces
+//! PUT    /shows/{id}/lock                             lock or unlock, administrators only
 //! ```
 //!
 //! # Why these are not saves
@@ -45,15 +46,16 @@ use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use axum::Json;
 use ovs_proto::http::{
-    AddEffectRequest, AddEffectResponse, AssignSlotRequest, AssignSlotResponse,
-    OrderEffectsRequest, OrderEffectsResponse, SetBanksRequest, SetMappingRequest, SetSlotRequest,
+    AddEffectRequest, AddEffectResponse, AssignSlotRequest, AssignSlotResponse, LockTarget,
+    OrderEffectsRequest, OrderEffectsResponse, SetBanksRequest, SetLockRequest, SetLockResponse,
+    SetMappingRequest, SetSlotRequest,
 };
 use ovs_types::config::{EffectInstance, Layer, Show, Slot, SourceRef};
 use ovs_types::id::{EffectInstanceId, LayerId, ShowId};
 use ovs_types::time::Timestamp;
 
 use crate::server::app_state::AppState;
-use crate::server::auth_routes::authenticate;
+use crate::server::auth_routes::{administer, authenticate};
 use crate::server::error::{ApiFailure, ApiResult};
 use crate::state::AuthoritativeState;
 
@@ -147,6 +149,11 @@ fn store(
     show.assign_missing_ids();
     show.adopt_one_of_each();
 
+    // **A locked effect or generator stays where it is**, whoever asks
+    // (owner, 2026-10-19): taking an effect off, putting a chain in order or
+    // filling a pad has to leave everything locked where it was.
+    crate::server::show_routes::hold_to_the_rules(state, &show)?;
+
     let show_id = show.id;
     let updated_at = state.with_database(|database| database.save_show(&show))?;
 
@@ -198,9 +205,16 @@ pub async fn assign(
         state.with_database(|database| database.load_media_item(*media_item_id))?;
     }
 
+    // A source arrives unlocked, whatever it says: a lock is the lock
+    // request's to set, and an administrator's.
+    let mut source = request.source;
+    if let SourceRef::Generator { locked, .. } = &mut source {
+        *locked = false;
+    }
+
     let mut show = document(&state, target.show_id)?;
     let replaced = layer_of(&mut show, target.layer_id)?
-        .assign_slot(target.slot_index, request.source)
+        .assign_slot(target.slot_index, source)
         .map_err(|error| ApiFailure::bad_request("invalid_slot", error.to_string()))?;
 
     let updated_at = store(&state, show, |_| {})?;
@@ -631,6 +645,70 @@ pub async fn set_mapping(
         updated_at,
         replaced: None,
     }))
+}
+
+// --- the lock ------------------------------------------------------------------
+
+/// Locks one effect or generator where it is, or unlocks it.
+///
+/// **An administrator's, and the only way a lock changes** (owner,
+/// 2026-10-19). Everything else that writes a show carries the locks it finds
+/// ([`ovs_types::control::carry_locks`]), so this is where one is put on and
+/// the one place it comes off. Done with a show running, from where the effect
+/// is seen, like every other edit here: nothing restarts.
+///
+/// # Errors
+///
+/// Forbidden for an account that may not administer, and not found when the
+/// open show has no such effect or generator.
+pub async fn set_lock(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(show_id): Path<String>,
+    Json(request): Json<SetLockRequest>,
+) -> ApiResult<Json<SetLockResponse>> {
+    administer(&state, &headers)?;
+    let show_id: ShowId = parse_id(&show_id)?;
+
+    let mut show = document(&state, show_id)?;
+    let lock: Option<&mut bool> = match request.target {
+        LockTarget::Effect { effect_instance_id } => show
+            .layers
+            .iter_mut()
+            .flat_map(|layer| {
+                layer.effects.iter_mut().chain(
+                    layer
+                        .slots
+                        .iter_mut()
+                        .flat_map(|slot| slot.effects.iter_mut()),
+                )
+            })
+            .find(|effect| effect.id == effect_instance_id)
+            .map(|effect| &mut effect.locked),
+        LockTarget::Generator {
+            generator_instance_id,
+        } => show
+            .layers
+            .iter_mut()
+            .flat_map(|layer| layer.slots.iter_mut())
+            .find_map(|slot| match &mut slot.source {
+                SourceRef::Generator {
+                    instance_id,
+                    locked,
+                    ..
+                } if *instance_id == generator_instance_id => Some(locked),
+                _ => None,
+            }),
+    };
+    let Some(lock) = lock else {
+        return Err(ApiFailure::not_found(
+            "the open show has no such effect or generator to lock",
+        ));
+    };
+    *lock = request.locked;
+
+    let updated_at = store(&state, show, |_| {})?;
+    Ok(Json(SetLockResponse { updated_at }))
 }
 
 /// Removes one instance from a chain, or says it was not in it.

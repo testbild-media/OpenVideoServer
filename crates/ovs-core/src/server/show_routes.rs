@@ -282,6 +282,18 @@ pub async fn save(
         ));
     }
 
+    // The editor's door, and the one that could do anything: a document sent
+    // whole could remove a locked effect, unlock one, or rewrite a value the
+    // desk is driving. It carries the locks the show already has — a lock has
+    // a request of its own — and is held to the same rules as every other
+    // door here.
+    state.with_state(|current| {
+        if let Some(stored) = current.show().filter(|stored| stored.id == show.id) {
+            ovs_types::control::carry_locks(stored, &mut show);
+        }
+    });
+    hold_to_the_rules(&state, &show)?;
+
     let updated_at = state.with_database(|database| database.save_show(&show))?;
 
     // The running state follows the document.
@@ -298,6 +310,25 @@ pub async fn save(
     }
 
     Ok(Json(SaveShowResponse { updated_at }))
+}
+
+/// Holds an edit of the open show to the lock and to what a desk holds.
+///
+/// Measured against the running copy, which is the stored one: only the open
+/// show can be edited at all. See [`ovs_types::control::check_edit`].
+///
+/// # Errors
+///
+/// `409 locked` for something locked being removed, moved or reordered, and
+/// `409 held_by_desk` for a value a desk is driving.
+pub(crate) fn hold_to_the_rules(state: &AppState, after: &Show) -> ApiResult<()> {
+    state.with_state(|current| {
+        let Some(before) = current.show().filter(|show| show.id == after.id) else {
+            return Ok(());
+        };
+        ovs_types::control::check_edit(before, after, current.desk_holds())
+            .map_err(ApiFailure::from)
+    })
 }
 
 /// Stores what is on stage into the open show.

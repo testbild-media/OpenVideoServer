@@ -419,6 +419,36 @@ body {
   background: var(--bad);
 }
 
+/* Held by the lighting console (owner, 2026-10-19): shown, and not offered.
+   Green, because green is the DMX lamp's colour — the desk driving — and a
+   dashed edge rather than a dimmed one, because the value under it is real and
+   has to stay readable from across a room. The DMX switch is how to take it. */
+
+.desk {
+  outline: 1px dashed var(--live);
+  outline-offset: -1px;
+  cursor: not-allowed;
+}
+
+.desk input,
+.desk select,
+.desk button,
+.desk .pad {
+  cursor: not-allowed;
+}
+
+/* An effect or a generator an administrator has locked where it is. */
+
+.lock-mark {
+  padding: 0 5px;
+  border: 1px solid var(--waiting);
+  border-radius: 3px;
+  color: var(--waiting);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
 /* The master row: one line under the layers, above the preview. Everything
    that is one per show and nothing that is not (owner, 2026-09-23). It was a
    tall band at the top with the clock in the title bar, which was two places

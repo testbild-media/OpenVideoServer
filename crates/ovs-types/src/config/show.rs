@@ -1007,6 +1007,7 @@ mod tests {
                 instance_id: crate::id::GeneratorInstanceId::new(),
                 type_id: "ovs.solid_colour".to_owned(),
                 version: 1,
+                locked: false,
                 parameters: crate::config::slot::ParameterMap::new(),
             },
             playback_mode: crate::config::slot::PlaybackMode::Loop,
@@ -1111,6 +1112,7 @@ mod tests {
                 instance_id: crate::id::GeneratorInstanceId::new(),
                 type_id: "ovs.strobe".to_owned(),
                 version: 2,
+                locked: false,
                 parameters: crate::config::slot::ParameterMap::new(),
             },
         ));

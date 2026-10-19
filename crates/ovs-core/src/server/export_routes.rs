@@ -149,6 +149,17 @@ pub async fn import(
     show.adopt_one_of_each();
     show.validate().map_err(ApiFailure::invalid)?;
 
+    // A package of a show this server already has replaces it, which makes
+    // this a door into the document like a save is. It carries the locks the
+    // stored show has and is held to them, so that a locked effect cannot be
+    // taken out by exporting the show, editing the file and bringing it back.
+    // A show this server has never had keeps the locks its package carries:
+    // they are part of what was exported.
+    if let Ok(stored) = state.with_database(|database| database.load_show(show.id)) {
+        ovs_types::control::carry_locks(&stored, &mut show);
+        ovs_types::control::check_edit(&stored, &show, None)?;
+    }
+
     let mut relinked = Vec::new();
     let mut missing = Vec::new();
 

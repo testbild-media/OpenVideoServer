@@ -85,9 +85,13 @@ pub struct MasterLive {
     /// hold, not a blackout — and Live Mode drives it instead (owner,
     /// 2026-09-23).
     ///
-    /// Live rather than configuration: it is a thing somebody does in the
-    /// middle of a night that has gone wrong, and a show that opened with
-    /// its console ignored would be a worse surprise than the one it solved.
+    /// **The one switch between the desk and the client** (owner,
+    /// 2026-10-19). On, whatever a patched fixture has a channel for is the
+    /// desk's and the client cannot move it; off, the client has everything.
+    /// See [`crate::control`].
+    ///
+    /// The server's rather than a show's: opening another show leaves it as it
+    /// is, and a restart brings it back as it was.
     #[serde(default = "yes")]
     pub dmx_enabled: bool,
 }
@@ -131,35 +135,47 @@ impl MasterLive {
         }
     }
 
-    /// Builds the master state a renderer restart or server reboot starts from.
+    /// Builds the master state a server restart, or reopening a show, starts
+    /// from.
     ///
-    /// Live state is deliberately not restored as show state. A dimmer or
-    /// crossfader position that is hours old is not a safe thing to put back on
-    /// stage after a reboot, and an operator cannot predict it. The show
-    /// defaults can be read off the show, so that is what a restart returns to.
+    /// **Exactly what it was** (owner, 2026-10-19: "Nach neustart den
+    /// kompletten status, so wie er war"). That reverses what this did until
+    /// then, which was to put the show's own defaults back and keep only the
+    /// tempo, on the argument that a dimmer hours old is not a safe thing to
+    /// put on stage. The owner's answer is that it is the thing he left there,
+    /// whether the desk put it there or the client did — and that a server
+    /// which came back somewhere else is the one an operator cannot predict.
+    /// The consequence is worth saying plainly: a show left with the master
+    /// at zero comes back black.
     ///
-    /// The one thing carried across is the BPM value, because an operator who has
-    /// tapped a tempo expects it to survive a renderer restart mid-show. Its
-    /// *phase* is not carried across: the clock starts a fresh epoch, so the
-    /// first beat after a restart is a known point rather than an extrapolation
-    /// from a clock that was not running.
+    /// A snapshot written before the whole master was kept carries only the
+    /// tempo, and gets what that build would have done with it. With no
+    /// snapshot at all, the show's defaults.
     ///
-    /// As soon as Art-Net or sACN is received again, the console takes over.
+    /// The clock's *phase* is not carried across: it starts a fresh epoch, so
+    /// the first beat after a restart is a known point rather than an
+    /// extrapolation from a clock that was not running.
+    ///
+    /// [`dmx_enabled`](Self::dmx_enabled) comes back on here, and is not this
+    /// method's to decide: the switch belongs to the server rather than to a
+    /// show, and whoever loads the show puts the server's back over it.
     #[must_use]
     pub fn on_restart(config: &MasterConfig, snapshot: Option<&LiveSnapshot>) -> Self {
-        let mut master = Self {
-            dimmer: config.default_dimmer,
-            crossfader: config.default_crossfader,
-            bpm: snapshot
-                .and_then(|snapshot| snapshot.bpm)
-                .unwrap_or(config.default_bpm),
-            speed_scale: config.default_speed_scale,
-            freeze: false,
-            // A restart puts the console back in charge. Coming up ignoring
-            // it would be a server that looks broken to whoever is at the
-            // desk, and the reason it was switched off belongs to a night
-            // that has already ended.
-            dmx_enabled: true,
+        let mut master = match snapshot.and_then(|snapshot| snapshot.master) {
+            Some(master) => Self {
+                dmx_enabled: true,
+                ..master
+            },
+            None => Self {
+                dimmer: config.default_dimmer,
+                crossfader: config.default_crossfader,
+                bpm: snapshot
+                    .and_then(|snapshot| snapshot.bpm)
+                    .unwrap_or(config.default_bpm),
+                speed_scale: config.default_speed_scale,
+                freeze: false,
+                dmx_enabled: true,
+            },
         };
         master.clamp_in_place();
         master
@@ -346,20 +362,44 @@ impl LayerLive {
         self.active_slot == 0
     }
 
-    /// Builds the live state a layer starts from after a restart.
+    /// Builds the live state a layer starts from after a restart, or when its
+    /// show is opened again.
     ///
-    /// The selected slot is restored, because an operator expects the show to
-    /// come back showing the clips it was showing. Everything a console drives
-    /// returns to the layer's configured defaults rather than to whatever the
-    /// console last sent, for the reasons in [`MasterLive::on_restart`].
+    /// Exactly what it was, for the reasons in [`MasterLive::on_restart`]: the
+    /// slot it was on, its opacity and transform, its bus and blend mode,
+    /// whether it was on, and what its playhead was doing. A slot that has
+    /// since been emptied comes back black rather than as a pad showing its
+    /// placeholder.
+    ///
+    /// A snapshot written before the whole layer was kept carries only the
+    /// slot, and everything else comes from the layer's configured defaults,
+    /// which is what that build did.
     ///
     /// The timeline is not part of this type: playback restarts from the
     /// beginning of the clip.
     #[must_use]
     pub fn on_restart(layer: &Layer, snapshot: Option<&LiveSnapshot>) -> Self {
+        let still_there =
+            |index: &u16| *index == Layer::BLACK_SLOT_INDEX || layer.slot(*index).is_some();
+
+        if let Some(kept) = snapshot.and_then(|snapshot| snapshot.layer(layer.id)) {
+            let mut live = Self {
+                layer_id: layer.id,
+                active_slot: Some(kept.active_slot)
+                    .filter(still_there)
+                    .unwrap_or(Layer::BLACK_SLOT_INDEX),
+                // A restored slot is not a trigger, and the counter means
+                // nothing but that it moved.
+                trigger: 0,
+                ..*kept
+            };
+            live.clamp_in_place();
+            return live;
+        }
+
         let restored_slot = snapshot
             .and_then(|snapshot| snapshot.selected_slot(layer.id))
-            .filter(|index| *index == Layer::BLACK_SLOT_INDEX || layer.slot(*index).is_some())
+            .filter(still_there)
             .unwrap_or(Layer::BLACK_SLOT_INDEX);
 
         let mut live = Self {
@@ -418,27 +458,23 @@ impl LayerLive {
     }
 }
 
-/// The small amount of live state that survives a restart.
+/// The live state of a show, kept so that a restart brings it back.
 ///
-/// Stored separately from the show, never inside it. Restoring a selected
-/// slot therefore does not write live state into show configuration, and the
-/// separation is preserved: nothing here is a
-/// [`crate::config`] type and nothing here reaches the show writer.
+/// Stored separately from the show, never inside it. Restoring it therefore
+/// does not write live state into show configuration, and the separation is
+/// preserved: nothing here is a [`crate::config`] type and nothing here reaches
+/// the show writer.
 ///
-/// Everything a lighting console drives is deliberately absent. See
-/// [`MasterLive::on_restart`] for why.
+/// **All of it** (owner, 2026-10-19: "Nach neustart den kompletten status, so
+/// wie er war"): the master, every layer, and every value a control source has
+/// put on an effect or a generator, whether a desk sent it or the client did.
+/// Until then this held only the tempo and the selected slots, on the
+/// argument that anything a console drives is unsafe to put back hours later;
+/// [`MasterLive::on_restart`] says why that was reversed.
 ///
-/// [`EffectOverrides`] are absent for that reason too, and the reason is worth
-/// being explicit about because they are the newest thing it applies to. The two
-/// values that *are* here are here because an operator cannot get them back from
-/// the show: nothing else records which slot was showing, and a tapped tempo
-/// exists nowhere but in the tapping. A live effect value is not in that class —
-/// the configured value is in the show, an operator can read it there, and it
-/// is the look the show was built with. Bringing back a blur radius somebody
-/// pushed during the last number, hours later, on the first frame after a
-/// reboot, would be exactly the unpredictable opening state the restart
-/// rule exists to
-/// prevent.
+/// `bpm` and `selected_slots` are still written, and still read from a
+/// snapshot that has nothing else, so that the first restart after an update
+/// comes back where the previous build would have.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct LiveSnapshot {
     /// The master BPM in effect when the snapshot was taken.
@@ -452,6 +488,21 @@ pub struct LiveSnapshot {
     /// for a layer nobody had selected anything on.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub selected_slots: BTreeMap<LayerId, u16>,
+    /// The whole master as it was.
+    ///
+    /// Its DMX switch is written down and not read back from here: the switch
+    /// is the server's, not the show's, and is kept on its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub master: Option<MasterLive>,
+    /// Every layer as it was, keyed by layer.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub layers: BTreeMap<LayerId, LayerLive>,
+    /// What a control source had done to the effects.
+    #[serde(default, skip_serializing_if = "EffectOverrides::is_empty")]
+    pub effects: EffectOverrides,
+    /// What a control source had done to the generators.
+    #[serde(default, skip_serializing_if = "GeneratorOverrides::is_empty")]
+    pub generators: GeneratorOverrides,
 }
 
 impl LiveSnapshot {
@@ -463,7 +514,16 @@ impl LiveSnapshot {
     /// Returns the slot a layer was showing, if the snapshot has one for it.
     #[must_use]
     pub fn selected_slot(&self, layer_id: LayerId) -> Option<u16> {
-        self.selected_slots.get(&layer_id).copied()
+        self.layers
+            .get(&layer_id)
+            .map(|layer| layer.active_slot)
+            .or_else(|| self.selected_slots.get(&layer_id).copied())
+    }
+
+    /// Returns the whole of a layer as it was, if the snapshot kept it.
+    #[must_use]
+    pub fn layer(&self, layer_id: LayerId) -> Option<&LayerLive> {
+        self.layers.get(&layer_id)
     }
 
     /// Drops entries for layers that no longer exist in the show.
@@ -471,8 +531,9 @@ impl LiveSnapshot {
     /// A snapshot outlives the show edits made while the server was down, so
     /// it can name layers that have since been deleted.
     pub fn retain_known_layers(&mut self, layers: &[Layer]) {
-        self.selected_slots
-            .retain(|layer_id, _| layers.iter().any(|layer| layer.id == *layer_id));
+        let known = |layer_id: &LayerId| layers.iter().any(|layer| layer.id == *layer_id);
+        self.selected_slots.retain(|layer_id, _| known(layer_id));
+        self.layers.retain(|layer_id, _| known(layer_id));
     }
 }
 
@@ -643,7 +704,9 @@ mod tests {
     }
 
     #[test]
-    fn a_restart_carries_the_bpm_value_but_not_the_rest() {
+    fn a_snapshot_from_before_the_whole_master_was_kept_carries_the_tempo() {
+        // What the build before 2026-10-19 wrote. The first restart after an
+        // update comes back where that build would have.
         let config = show_master();
         let snapshot = LiveSnapshot {
             bpm: Some(174.0),
@@ -658,16 +721,32 @@ mod tests {
     }
 
     #[test]
-    fn a_show_left_mid_crossfade_does_not_come_back_mid_crossfade() {
-        // The failure this prevents: rebooting hours later and the stage coming
-        // up at whatever fader position the console happened to leave behind.
-        let config = MasterConfig {
-            default_crossfader: 0.0,
-            ..show_master()
+    fn a_show_left_mid_crossfade_comes_back_mid_crossfade() {
+        // The owner, 2026-10-19: "Nach neustart den kompletten status, so wie
+        // er war" — this test used to say the opposite.
+        let left = MasterLive {
+            dimmer: 0.0,
+            crossfader: 0.5,
+            bpm: 174.0,
+            speed_scale: 2.0,
+            freeze: true,
+            dmx_enabled: false,
         };
-        let restarted = MasterLive::on_restart(&config, Some(&LiveSnapshot::default()));
-        assert_eq!(restarted.crossfader, 0.0);
-        assert_eq!(restarted.bus_gains(CrossfaderCurve::Linear), (1.0, 0.0));
+        let snapshot = LiveSnapshot {
+            master: Some(left),
+            ..LiveSnapshot::default()
+        };
+        let restarted = MasterLive::on_restart(&show_master(), Some(&snapshot));
+
+        assert_eq!(restarted.crossfader, 0.5);
+        assert_eq!(restarted.dimmer, 0.0, "left black, comes back black");
+        assert_eq!(restarted.bpm, 174.0);
+        assert_eq!(restarted.speed_scale, 2.0);
+        assert!(restarted.freeze);
+        assert!(
+            restarted.dmx_enabled,
+            "the switch is the server's, and whoever loads the show puts it back"
+        );
     }
 
     #[test]
@@ -687,10 +766,58 @@ mod tests {
             MasterLive::on_restart(&show_master(), Some(&too_fast)).bpm,
             MAX_BPM
         );
+
+        let corrupt = LiveSnapshot {
+            master: Some(MasterLive {
+                dimmer: f32::NAN,
+                bpm: 100_000.0,
+                ..MasterLive::default()
+            }),
+            ..LiveSnapshot::default()
+        };
+        let restarted = MasterLive::on_restart(&show_master(), Some(&corrupt));
+        assert_eq!(restarted.dimmer, 1.0, "corrupt state never blacks out");
+        assert_eq!(restarted.bpm, MAX_BPM);
     }
 
     #[test]
-    fn a_restart_restores_the_selected_slot_but_not_console_driven_values() {
+    fn a_restart_brings_the_whole_layer_back() {
+        let mut layer = Layer::new("Layer 1", 0);
+        layer
+            .slots
+            .push(crate::config::Slot::media(3, crate::id::MediaItemId::new()));
+
+        let left = LayerLive {
+            layer_id: layer.id,
+            active_slot: 3,
+            trigger: 41,
+            opacity: 0.25,
+            transform: Transform2D {
+                x: 120.0,
+                ..Transform2D::IDENTITY
+            },
+            blend_mode: BlendMode::Add,
+            route: Route::B,
+            transport: Transport::Paused,
+            enabled: false,
+        };
+        let mut snapshot = LiveSnapshot::default();
+        snapshot.layers.insert(layer.id, left);
+
+        let restarted = LayerLive::on_restart(&layer, Some(&snapshot));
+        assert_eq!(
+            restarted,
+            LayerLive { trigger: 0, ..left },
+            "everything but the trigger count, which means nothing but that it moved"
+        );
+
+        // And a slot that has been emptied since comes back black.
+        layer.slots.clear();
+        assert!(LayerLive::on_restart(&layer, Some(&snapshot)).is_black());
+    }
+
+    #[test]
+    fn a_snapshot_from_before_the_whole_layer_was_kept_restores_the_slot() {
         let mut layer = Layer::new("Layer 1", 0);
         layer.default_opacity = 0.8;
         layer.route = Route::B;

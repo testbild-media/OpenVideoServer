@@ -221,6 +221,7 @@ impl Harness {
             instance_id: ovs_types::id::GeneratorInstanceId::nil(),
             type_id: "ovs.gradient".to_owned(),
             version: 1,
+            locked: false,
             parameters,
         };
         layer.slots.push(slot);
@@ -1249,10 +1250,11 @@ async fn an_operator_can_put_an_effect_back_the_way_the_show_was_built() {
 }
 
 #[tokio::test]
-async fn reopening_the_show_gives_the_configured_effect_value_back() {
-    // The promise a live control makes. Nothing that happened during the show
-    // reaches the show, so the next time it opens it is the value it was set
-    // up with.
+async fn a_restart_brings_a_live_effect_value_back_without_writing_it_into_the_show() {
+    // Two promises. The owner's of 2026-10-19 — "Nach neustart den kompletten
+    // status, so wie er war" — that the value pushed during the show is there
+    // after a restart; and the older one, still kept, that nothing that
+    // happened during the show reaches the document.
     let harness = Harness::start().await;
     let blur = harness.open_show_with_a_blur();
     harness
@@ -1262,8 +1264,8 @@ async fn reopening_the_show_gives_the_configured_effect_value_back() {
         )
         .await;
 
-    // Exactly what a restart does: the show as it stands, plus the small
-    // snapshot that survives one.
+    // Exactly what a restart does: the show as it stands, plus the snapshot
+    // that survives one.
     harness.state.mutate_state(|current| {
         let show = current.show().expect("open").clone();
         let snapshot = current.live_snapshot();
@@ -1271,7 +1273,10 @@ async fn reopening_the_show_gives_the_configured_effect_value_back() {
         ((), Some(change))
     });
 
-    assert_eq!(harness.live_effect_value(blur, "radius_px"), None);
+    assert_eq!(
+        harness.live_effect_value(blur, "radius_px"),
+        Some(ParameterValue::Float(40.0))
+    );
     assert_eq!(
         harness.configured_effect_value("radius_px"),
         Some(ParameterValue::Float(8.0))

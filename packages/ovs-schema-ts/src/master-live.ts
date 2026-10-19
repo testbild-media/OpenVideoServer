@@ -23,7 +23,9 @@ export interface MasterLive {
    *
    * Off is the operator taking the show by hand: Art-Net and sACN keep arriving, the status keeps saying what is on the wire, and **nothing they carry changes anything**. The show holds whatever it had, which is the same behaviour as a desk that has stopped sending — loss is a hold, not a blackout — and Live Mode drives it instead (owner, 2026-09-23).
    *
-   * Live rather than configuration: it is a thing somebody does in the middle of a night that has gone wrong, and a show that opened with its console ignored would be a worse surprise than the one it solved.
+   * **The one switch between the desk and the client** (owner, 2026-10-19). On, whatever a patched fixture has a channel for is the desk's and the client cannot move it; off, the client has everything. See [`crate::control`].
+   *
+   * The server's rather than a show's: opening another show leaves it as it is, and a restart brings it back as it was.
    */
   dmx_enabled?: boolean;
   /**

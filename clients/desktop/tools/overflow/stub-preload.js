@@ -41,6 +41,10 @@ const slot = (index) => ({
             caption: { type: 'text', value: 'WERKHALLE' },
           },
           live: { colour: { type: 'color', value: [0, 0.25, 1, 1] } },
+          // Nothing patched to it and nobody has locked it, so every probe
+          // below can press its controls.
+          held: [],
+          locked: false,
         }
       : { kind: 'media', mediaItemId: 'MEDIA' + index },
   // A beat-locked slot on a four-minute clip, which is what the rate note is
@@ -61,6 +65,8 @@ const slot = (index) => ({
       enabled: true,
       parameters: { brightness: { type: 'float', value: 0.25 } },
       live: {},
+      held: [],
+      locked: false,
     },
   ],
 });
@@ -80,6 +86,11 @@ const layer = (id, order) => ({
   activeSlot: 1,
   trigger: 1,
   banks: 2,
+  // **The sixth is a desk's** (owner, 2026-10-19): patched, with DMX on, so
+  // its opacity, slots and placement are shown and not offered. The others are
+  // nobody's but the client's, so every probe that presses a layer still can.
+  mayChooseSlot: order !== 6,
+  held: { opacity: order === 6, slot: order === 6, transform: order === 6 },
   defaults: { enabled: true, route: 'A', opacity: 1 },
   // **Two, and the second one switched off.** Two because a chain of one
   // cannot be reordered -- both arrows are disabled, rightly, and pressing one
@@ -95,6 +106,8 @@ const layer = (id, order) => ({
       enabled: true,
       parameters: { brightness: { type: 'float', value: -0.5 } },
       live: {},
+      held: [],
+      locked: false,
     },
     {
       id: 'FX' + order + 'B',
@@ -103,6 +116,21 @@ const layer = (id, order) => ({
       enabled: false,
       parameters: {},
       live: { brightness: { type: 'float', value: 0.75 } },
+      held: [],
+      locked: false,
+    },
+    // **Locked, and its brightness a desk's** (owner, 2026-10-19). Last, so
+    // that moving the first one down still has somewhere to go; and so that
+    // the probes can ask that its ✕ and its held fader are not offered.
+    {
+      id: 'FX' + order + 'C',
+      typeId: 'ovs.colour_correct',
+      version: 1,
+      enabled: true,
+      parameters: {},
+      live: { brightness: { type: 'float', value: 0.1 } },
+      held: ['brightness'],
+      locked: true,
     },
   ],
   slots: [slot(1), slot(2), slot(13)],
@@ -120,6 +148,8 @@ const view = {
     speedScale: 1,
     freeze: false,
     dmxEnabled: true,
+    // A master fixture holding the crossfader and nothing the probes press.
+    held: { dimmer: false, crossfader: true, speedScale: false, freeze: false },
   },
   masterDefaults: {
     bpm: 120,
@@ -165,6 +195,8 @@ const view = {
     ],
   },
   renderer: { state: 'running', reason: null },
+  // An administrator, so the lock is offered and can be pressed.
+  mayAdminister: true,
 };
 
 const item = (n) => ({
@@ -411,6 +443,7 @@ const CALLS = [
   'saveShow',
   'setBanks',
   'setDmxProtocols',
+  'setLock',
   'setMapping',
   'setSlot',
   'setTestPattern',

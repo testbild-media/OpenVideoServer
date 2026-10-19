@@ -15,6 +15,8 @@ import type {
   ImportShowResponse,
   AddEffectResponse,
   OrderEffectsResponse,
+  SetLockRequest,
+  SetLockResponse,
   AssignSlotResponse,
   OutputConfig,
   Piece,
@@ -148,6 +150,12 @@ export interface OvsBridge {
     slotIndex: number | null,
     order: readonly string[],
   ): Promise<Answer<OrderEffectsResponse>>;
+  /**
+   * Locks one effect or generator where it is, or unlocks it.
+   *
+   * Administrators only, and the only way a lock changes (owner, 2026-10-19).
+   */
+  setLock(showId: string, request: SetLockRequest): Promise<Answer<SetLockResponse>>;
   /**
    * Puts a mapping on the wall without saving the show.
    *
@@ -418,6 +426,7 @@ const bridge: OvsBridge = {
     ipcRenderer.invoke('ovs:remove-effect', showId, layerId, slotIndex, effectInstanceId),
   orderEffects: (showId, layerId, slotIndex, order) =>
     ipcRenderer.invoke('ovs:order-effects', showId, layerId, slotIndex, order),
+  setLock: (showId, request) => ipcRenderer.invoke('ovs:set-lock', showId, request),
   setBanks: (showId, layerId, banks) =>
     ipcRenderer.invoke('ovs:set-banks', showId, layerId, banks),
   showFolders: () => ipcRenderer.invoke('ovs:show-folders'),

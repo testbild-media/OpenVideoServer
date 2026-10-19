@@ -125,33 +125,37 @@ pub enum BlendMode {
 /// a layer — the dimmer, the transform, the effects — is untouched, which is
 /// the whole point: he wants to transform these layers from the desk and only
 /// not to select on them.
+///
+/// **One or the other, never both** (owner, 2026-10-19: "Pro Layer Slot
+/// entweder DMX oder GUI, nicht beides!"). There used to be a third setting
+/// that let either choose, and it was the default; the two fought exactly as
+/// described above. A document that still says `either`, `client_only` or
+/// `desk_only` reads as the one of these two it meant.
+///
+/// [`Dmx`](Self::Dmx) does not by itself take the slots away from the client.
+/// It hands them to a desk *when one is patched to this layer and the DMX
+/// switch is on*; until then nothing drives them but the client, which is why
+/// it can be the default (see [`crate::control`]).
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum SlotControl {
-    /// Both may. What every show written before this field did, and so the
-    /// default: adding the setting must not change a single existing show.
+    /// A patched console chooses, while DMX is on. The default.
     #[default]
-    Either,
-    /// The client only. A console's slot channel is read and ignored here.
-    ClientOnly,
-    /// A console only. The client's slot buttons are refused on this layer, so
-    /// nobody takes a desk-driven layer off its cue by pressing a picture.
-    DeskOnly,
+    #[serde(alias = "either", alias = "desk_only")]
+    Dmx,
+    /// The client chooses, always. A console's slot channel is read and
+    /// ignored here, and everything else it drives on the layer still moves.
+    #[serde(alias = "client_only")]
+    Gui,
 }
 
 impl SlotControl {
     /// Whether a console may select a slot on a layer set this way.
     #[must_use]
     pub const fn desk_may_select(self) -> bool {
-        matches!(self, Self::Either | Self::DeskOnly)
-    }
-
-    /// Whether a client may select a slot on a layer set this way.
-    #[must_use]
-    pub const fn client_may_select(self) -> bool {
-        matches!(self, Self::Either | Self::ClientOnly)
+        matches!(self, Self::Dmx)
     }
 }
 
@@ -198,7 +202,8 @@ pub struct Layer {
     /// Who may choose this layer's slot.
     ///
     /// Absent from a document written before the setting existed, which reads
-    /// as [`SlotControl::Either`] — exactly what such a show did.
+    /// as [`SlotControl::Dmx`]: a desk patched to the layer chose its slots then
+    /// too.
     #[serde(default)]
     pub slot_control: SlotControl,
     /// Effects applied to the whole layer, in chain order.
@@ -274,7 +279,7 @@ impl Layer {
             blend_mode: BlendMode::default(),
             slots: Vec::new(),
             banks: 1,
-            slot_control: SlotControl::Either,
+            slot_control: SlotControl::Dmx,
             effects: Vec::new(),
         }
     }
@@ -508,6 +513,31 @@ mod tests {
         assert!(Route::A.is_crossfaded());
         assert!(Route::B.is_crossfaded());
         assert!(!Route::M.is_crossfaded());
+    }
+
+    #[test]
+    fn a_slot_is_chosen_by_one_side_and_the_old_settings_say_which() {
+        // The owner, 2026-10-19: "entweder DMX oder GUI, nicht beides!"
+        assert_eq!(
+            serde_json::to_string(&SlotControl::Dmx).expect("ok"),
+            "\"dmx\""
+        );
+        assert_eq!(
+            serde_json::to_string(&SlotControl::Gui).expect("ok"),
+            "\"gui\""
+        );
+        for (written, meant) in [
+            ("\"either\"", SlotControl::Dmx),
+            ("\"desk_only\"", SlotControl::Dmx),
+            ("\"client_only\"", SlotControl::Gui),
+        ] {
+            assert_eq!(
+                serde_json::from_str::<SlotControl>(written).expect("an older document"),
+                meant,
+                "{written}"
+            );
+        }
+        assert_eq!(Layer::new("Layer 1", 0).slot_control, SlotControl::Dmx);
     }
 
     #[test]

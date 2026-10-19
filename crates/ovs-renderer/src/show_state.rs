@@ -335,6 +335,7 @@ impl SharedShowState {
                 layers,
                 effects,
                 generators,
+                ..
             } => {
                 // Everything at once, because a show load replaces
                 // everything. The live state travels with the show rather
@@ -846,6 +847,7 @@ mod tests {
             layers: Vec::new(),
             effects: Default::default(),
             generators: Default::default(),
+            desk: Default::default(),
             renderer: RendererStatus::Running,
         }
     }
@@ -956,6 +958,7 @@ mod tests {
                 layers: Vec::new(),
                 effects: EffectOverrides::new(),
                 generators: Default::default(),
+                desk: Default::default(),
             }
         ));
 
@@ -1088,6 +1091,7 @@ mod tests {
                 }],
                 effects: EffectOverrides::new(),
                 generators: Default::default(),
+                desk: Default::default(),
             }
         ));
 

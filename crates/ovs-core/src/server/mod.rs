@@ -151,6 +151,8 @@ pub fn router(state: AppState) -> Router {
         )
         // The mapping, while an operator watches the wall it is about.
         .route("/shows/{show_id}/mapping", put(show_edits::set_mapping))
+        // An administrator locking an effect or a generator where it is.
+        .route("/shows/{show_id}/lock", put(show_edits::set_lock))
         .route(
             "/shows/{show_id}/layers/{layer_id}/effects",
             post(show_edits::add_layer_effect),

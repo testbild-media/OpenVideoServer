@@ -26,6 +26,12 @@ export type SourceRef =
       instance_id?: GeneratorInstanceId;
       kind: 'generator';
       /**
+       * Whether an administrator has locked this generator in its slot.
+       *
+       * A locked generator cannot be taken out of its slot or replaced by anybody, and only an administrator can lock or unlock one; see [`crate::control`]. Left out of a document when it is not locked.
+       */
+      locked?: boolean;
+      /**
        * Generator parameters as defined by its manifest.
        */
       parameters?: {

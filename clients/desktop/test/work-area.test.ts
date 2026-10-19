@@ -690,6 +690,8 @@ describe('dragging a clip onto a pad', () => {
       version,
       parameters: {},
       live: {},
+      held: [],
+      locked: false,
     });
     expect(
       dropOnPad({
@@ -760,6 +762,8 @@ describe('dragging a clip onto a pad', () => {
       version: 1,
       parameters: {},
       live: {},
+      held: [],
+      locked: false,
     });
     expect(wireSource(tile.source)).toEqual({
       kind: 'generator',
@@ -813,6 +817,8 @@ describe('dragging a clip onto a pad', () => {
       version: 1,
       parameters: {},
       live: {},
+      held: [],
+      locked: false,
     });
     expect(wire).toEqual({ kind: 'generator', type_id: 'ovs.solid_colour', version: 1 });
   });

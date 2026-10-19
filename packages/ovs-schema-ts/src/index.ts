@@ -205,6 +205,8 @@ export type {
 } from './server-hello.js';
 export type {
   ServerMessage,
+  LayerControl,
+  MasterControl,
   RendererStatus,
   StateChange,
   DmxProtocol,
@@ -212,6 +214,7 @@ export type {
   OutputDepth,
   DecodeDepth,
   TestPatternMode,
+  DeskControls,
   ClockTelemetry,
   DmxTelemetry,
   UniverseTelemetry,
@@ -230,6 +233,13 @@ export type {
 export type {
   SetConnectorRoleRequest,
 } from './set-connector-role.js';
+export type {
+  LockTarget,
+  SetLockRequest,
+} from './set-lock-request.js';
+export type {
+  SetLockResponse,
+} from './set-lock-response.js';
 export type {
   SetMappingRequest,
 } from './set-mapping-request.js';

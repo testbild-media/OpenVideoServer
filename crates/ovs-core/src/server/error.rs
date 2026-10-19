@@ -178,6 +178,21 @@ impl From<StateError> for ApiFailure {
     }
 }
 
+/// Turns a refused show edit into something a client can act on.
+///
+/// Each with a code of its own, because a client answers them differently: a
+/// locked effect says who can unlock it, and a value the desk holds says how
+/// to get it back.
+impl From<ovs_types::control::EditRefusal> for ApiFailure {
+    fn from(refusal: ovs_types::control::EditRefusal) -> Self {
+        use ovs_types::control::EditRefusal;
+        match refusal {
+            EditRefusal::Locked(message) => Self::conflict("locked", message),
+            EditRefusal::HeldByDesk(message) => Self::conflict("held_by_desk", message),
+        }
+    }
+}
+
 /// What every handler returns.
 pub type ApiResult<T> = Result<T, ApiFailure>;
 

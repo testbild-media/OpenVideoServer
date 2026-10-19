@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SetLockResponse",
+  "description": "Result of locking or unlocking.",
+  "type": "object",
+  "required": [
+    "updated_at"
+  ],
+  "properties": {
+    "updated_at": {
+      "description": "When the server recorded the edit.",
+      "type": "integer",
+      "format": "int64"
+    }
+  }
+}

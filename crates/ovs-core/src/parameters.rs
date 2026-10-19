@@ -278,14 +278,14 @@ fn apply_plugin(
 
 /// Who may choose this layer's slot, as the open show says.
 ///
-/// [`SlotControl::Either`] for a layer this show does not have: the state
+/// [`SlotControl::Dmx`] for a layer this show does not have: the state
 /// refuses such a selection on its own, and answering "nobody may" here would
 /// turn a clear refusal into a value that silently did nothing.
 fn slot_control(state: &AuthoritativeState, layer_id: LayerId) -> SlotControl {
     state
         .show()
         .and_then(|show| show.layers.iter().find(|layer| layer.id == layer_id))
-        .map_or(SlotControl::Either, |layer| layer.slot_control)
+        .map_or(SlotControl::Dmx, |layer| layer.slot_control)
 }
 
 /// What one parameter of one plugin instance is worth now.
@@ -357,6 +357,7 @@ mod tests {
             instance_id,
             type_id: type_id.to_owned(),
             version: 1,
+            locked: false,
             parameters: ParameterMap::new(),
         };
         layer.slots.push(slot);
@@ -778,7 +779,7 @@ mod tests {
     #[test]
     fn a_console_cannot_select_on_a_layer_whose_slots_are_the_clients() {
         let (mut state, layer_id) = show();
-        set_control(&mut state, layer_id, SlotControl::ClientOnly);
+        set_control(&mut state, layer_id, SlotControl::Gui);
 
         let before = state.layer(layer_id).expect("the layer").active_slot;
         let moved = apply(
@@ -804,7 +805,7 @@ mod tests {
     #[test]
     fn the_rest_of_the_console_still_reaches_such_a_layer() {
         let (mut state, layer_id) = show();
-        set_control(&mut state, layer_id, SlotControl::ClientOnly);
+        set_control(&mut state, layer_id, SlotControl::Gui);
 
         let moved = apply(
             &mut state,
@@ -827,7 +828,7 @@ mod tests {
         // The control first: `set_control` reloads the show, and loading one
         // puts every layer back on its opening slot — so a slot chosen before
         // it would be undone, which is exactly what caught this test out.
-        set_control(&mut state, layer_id, SlotControl::ClientOnly);
+        set_control(&mut state, layer_id, SlotControl::Gui);
         // Then on a slot, put there as the client would.
         state.select_slot(layer_id, 1).expect("the slot exists");
 
@@ -844,9 +845,13 @@ mod tests {
         );
     }
 
-    /// The default is unchanged behaviour, which is what every saved show has.
+    /// A layer that says nothing is a DMX layer, and takes the console's slot.
+    ///
+    /// Which is what every show written before the setting did, and what the
+    /// owner chose as the default for a new layer (2026-10-19): until a desk is
+    /// patched to it, nothing drives its slots but the client anyway.
     #[test]
-    fn a_layer_that_says_nothing_still_takes_the_consoles_slot() {
+    fn a_layer_that_says_nothing_takes_the_consoles_slot() {
         let (mut state, layer_id) = show();
         assert_eq!(
             state
@@ -857,8 +862,7 @@ mod tests {
                 .find(|layer| layer.id == layer_id)
                 .expect("the layer")
                 .slot_control,
-            SlotControl::Either,
-            "adding the setting must not change a single existing show"
+            SlotControl::Dmx,
         );
 
         let moved = apply(
@@ -867,21 +871,6 @@ mod tests {
             ChannelValue::Index(1),
         );
         assert!(moved.is_some(), "the console selects as it always did");
-        assert_eq!(state.layer(layer_id).expect("the layer").active_slot, 1);
-    }
-
-    /// And a desk-driven layer takes the console's slot as well.
-    #[test]
-    fn a_desk_driven_layer_takes_the_consoles_slot() {
-        let (mut state, layer_id) = show();
-        set_control(&mut state, layer_id, SlotControl::DeskOnly);
-
-        let moved = apply(
-            &mut state,
-            Parameter::LayerSlot { layer_id },
-            ChannelValue::Index(1),
-        );
-        assert!(moved.is_some());
         assert_eq!(state.layer(layer_id).expect("the layer").active_slot, 1);
     }
 }

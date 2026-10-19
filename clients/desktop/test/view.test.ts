@@ -215,34 +215,81 @@ describe('the view', () => {
   });
 });
 
-describe("who may choose a layer's slot", () => {
-  // The owner, 2026-10-16: "Layer Slotauswahl, pro Layer von DMX oder GUI
-  // abschaltbar, also das nur eins schalten kann." The client half of that is
-  // one flag on the view, and the matrix refuses a press when it is false.
+describe('what a lighting console holds', () => {
+  // The owner, 2026-10-19: with DMX on, whatever a patched fixture drives is
+  // the desk's and the client cannot move it; with it off, the client has the
+  // whole show. The server reads the patch and sends what it found; the view
+  // joins that to the switch, and every control reads the view.
 
-  it('lets the client choose when the show says nothing', () => {
-    // Which is every show written before the setting existed. Adding it must
-    // not take a slot button away from anybody.
+  /** A show whose upper layer, master and effect a desk has been patched to. */
+  function patched(dmxEnabled: boolean): ReturnType<typeof emptyState> {
+    const state = loaded();
+    const upper = state.show!.layers.find((layer) => layer.id === 'upper')!;
+    upper.effects = [
+      { id: 'BLUR', type_id: 'ovs.blur', version: 1, enabled: true, locked: true },
+    ];
+    state.master = { ...state.master!, dmx_enabled: dmxEnabled };
+    state.desk = {
+      master: ['dimmer', 'crossfader'],
+      layers: { upper: ['opacity', 'slot', 'transform'] },
+      effects: { BLUR: ['radius_px'] },
+    };
+    return state;
+  }
+
+  it('lets the client choose a slot when nothing is patched', () => {
+    // A layer set to DMX with no desk patched to it is the client's, which is
+    // why DMX can be the default.
     const view = toView(loaded());
     for (const layer of view.layers) {
       expect(layer.mayChooseSlot).toBe(true);
+      expect(layer.held).toEqual({ opacity: false, slot: false, transform: false });
     }
   });
 
-  it('lets the client choose when the show says either or client only', () => {
-    for (const control of ['either', 'client_only'] as const) {
-      const state = loaded();
-      state.show!.layers[0]!.slot_control = control;
-      expect(toView(state).layers.find((each) => each.id === 'upper')?.mayChooseSlot).toBe(true);
-    }
-  });
-
-  it("does not when the layer is a console's", () => {
-    const state = loaded();
-    state.show!.layers[0]!.slot_control = 'desk_only';
-    const view = toView(state);
-    expect(view.layers.find((each) => each.id === 'upper')?.mayChooseSlot).toBe(false);
-    // And only that layer: the setting is per layer, which is the whole point.
+  it('holds what the patch drives while DMX is on, and only on that layer', () => {
+    const view = toView(patched(true));
+    const upper = view.layers.find((each) => each.id === 'upper')!;
+    expect(upper.mayChooseSlot).toBe(false);
+    expect(upper.held).toEqual({ opacity: true, slot: true, transform: true });
     expect(view.layers.find((each) => each.id === 'lower')?.mayChooseSlot).toBe(true);
+
+    expect(view.master?.held).toEqual({
+      dimmer: true,
+      crossfader: true,
+      speedScale: false,
+      freeze: false,
+    });
+    expect(upper.effects[0]?.held).toEqual(['radius_px']);
+  });
+
+  it('gives the client everything back when DMX is switched off', () => {
+    const view = toView(patched(false));
+    const upper = view.layers.find((each) => each.id === 'upper')!;
+    expect(upper.mayChooseSlot).toBe(true);
+    expect(upper.held).toEqual({ opacity: false, slot: false, transform: false });
+    expect(view.master?.held.dimmer).toBe(false);
+    expect(upper.effects[0]?.held).toEqual([]);
+  });
+
+  it('carries the lock, which is not the same as being held', () => {
+    // Locked is about removing and moving; its values still follow the patch.
+    const upper = toView(patched(false)).layers.find((each) => each.id === 'upper')!;
+    expect(upper.effects[0]?.locked).toBe(true);
+    expect(upper.effects[0]?.held).toEqual([]);
+  });
+
+  it('takes the desk from the snapshot the server sends', () => {
+    const state = emptyState();
+    apply(state, {
+      type: 'snapshot',
+      sequence: 1,
+      show: show(),
+      master: { bpm: 128, crossfader: 0, dimmer: 1, freeze: false, speed_scale: 1 },
+      layers: [live('upper'), live('lower')],
+      desk: { layers: { upper: ['slot'] } },
+      renderer: { state: 'running' },
+    } satisfies ServerMessage);
+    expect(toView(state).layers.find((each) => each.id === 'upper')?.mayChooseSlot).toBe(false);
   });
 });

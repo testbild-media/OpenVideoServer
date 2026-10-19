@@ -13,6 +13,7 @@
 //! while any update is missing.
 
 use ovs_types::config::{ParameterMap, Show};
+use ovs_types::control::DeskControls;
 use ovs_types::id::EffectInstanceId;
 use ovs_types::live::{EffectOverrides, GeneratorOverrides, LayerLive, MasterLive};
 use ovs_types::telemetry::{RendererStatus, ServerTelemetry};
@@ -194,6 +195,18 @@ pub struct StateSnapshot {
     /// The same as [`effects`](Self::effects), for the other kind of module.
     #[serde(default, skip_serializing_if = "GeneratorOverrides::is_empty")]
     pub generators: GeneratorOverrides,
+    /// What the open show's patch gives a lighting console.
+    ///
+    /// Held only while [`MasterLive::dmx_enabled`] is on; with it off the
+    /// client has the whole show. A client reads the two together and greys
+    /// out exactly what the server would refuse, rather than reading fixture
+    /// personalities itself — a second reading of those would be the one that
+    /// went out of date (owner's rule, 2026-10-19; see `ovs_types::control`).
+    ///
+    /// Changes only with the show, so it travels with the show: here and in
+    /// [`StateChange::ShowLoaded`].
+    #[serde(default, skip_serializing_if = "DeskControls::is_empty")]
+    pub desk: DeskControls,
     /// What the renderer is doing.
     pub renderer: RendererStatus,
 }
@@ -226,17 +239,22 @@ pub enum StateChange {
         /// What a control source has done to the effects of the show now
         /// loaded.
         ///
-        /// Empty, always, because opening a show returns every effect to the
-        /// values it was configured with. It is sent rather than
-        /// assumed for the same reason `master` and `layers` are: the restart
-        /// policy lives in the core, and a peer that cleared its own copy would
-        /// be a second implementation of it that has to agree with the server's
-        /// forever.
+        /// What they were when the show was last open, since 2026-10-19: a
+        /// show comes back the way it was left, effects included. It is sent
+        /// rather than worked out for the same reason `master` and `layers`
+        /// are: the restart policy lives in the core, and a peer that derived
+        /// its own copy would be a second implementation of it that has to
+        /// agree with the server's forever.
         #[serde(default, skip_serializing_if = "EffectOverrides::is_empty")]
         effects: EffectOverrides,
         /// What a control source has done to the generators of the show now
         /// open.
         generators: GeneratorOverrides,
+        /// What the patch of the show now in effect gives a lighting console.
+        ///
+        /// See [`StateSnapshot::desk`].
+        #[serde(default, skip_serializing_if = "DeskControls::is_empty")]
+        desk: DeskControls,
     },
     /// Master live state changed.
     MasterChanged {
@@ -460,6 +478,7 @@ mod tests {
             layers: Vec::new(),
             effects: EffectOverrides::new(),
             generators: GeneratorOverrides::new(),
+            desk: Default::default(),
             renderer: RendererStatus::Running,
         }
     }

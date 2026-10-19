@@ -98,8 +98,12 @@ export type Route = 'A' | 'B' | 'M';
  * **It exists because the two fight.** On his rig the FX layer is driven entirely from the desk, slots included, while layers 1 to 6 have their slots picked in the client — people who are not lighting operators simply press the picture they want, which turned out to be the practical thing in the room. A console holding its slot channel at a value re-sends it forty-four times a second, so without this the desk wins every time and the button somebody just pressed comes undone under their hand.
  *
  * This is only about *choosing a slot*. Everything else a console does to such a layer — the dimmer, the transform, the effects — is untouched, which is the whole point: he wants to transform these layers from the desk and only not to select on them.
+ *
+ * **One or the other, never both** (owner, 2026-10-19: "Pro Layer Slot entweder DMX oder GUI, nicht beides!"). There used to be a third setting that let either choose, and it was the default; the two fought exactly as described above. A document that still says `either`, `client_only` or `desk_only` reads as the one of these two it meant.
+ *
+ * [`Dmx`](Self::Dmx) does not by itself take the slots away from the client. It hands them to a desk *when one is patched to this layer and the DMX switch is on*; until then nothing drives them but the client, which is why it can be the default (see [`crate::control`]).
  */
-export type SlotControl = 'either' | 'client_only' | 'desk_only';
+export type SlotControl = 'dmx' | 'gui';
 /**
  * The direction a source's timeline advances in.
  */
@@ -133,6 +137,12 @@ export type SourceRef =
        */
       instance_id?: GeneratorInstanceId;
       kind: 'generator';
+      /**
+       * Whether an administrator has locked this generator in its slot.
+       *
+       * A locked generator cannot be taken out of its slot or replaced by anybody, and only an administrator can lock or unlock one; see [`crate::control`]. Left out of a document when it is not locked.
+       */
+      locked?: boolean;
       /**
        * Generator parameters as defined by its manifest.
        */
@@ -421,7 +431,7 @@ export interface Layer {
   /**
    * Who may choose this layer's slot.
    *
-   * Absent from a document written before the setting existed, which reads as [`SlotControl::Either`] — exactly what such a show did.
+   * Absent from a document written before the setting existed, which reads as [`SlotControl::Dmx`]: a desk patched to the layer chose its slots then too.
    */
   slot_control?: SlotControl & string;
   /**
@@ -468,12 +478,20 @@ export interface Transform2D {
 export interface EffectInstance {
   /**
    * Whether this effect contributes to the chain.
+   *
+   * Everybody's to change, locked or not (owner, 2026-10-19).
    */
   enabled: boolean;
   /**
    * Stable identifier of this instance.
    */
   id: EffectInstanceId;
+  /**
+   * Whether an administrator has locked this effect where it is.
+   *
+   * A locked effect cannot be removed, moved or put in another order by anybody, and only an administrator can lock or unlock one; see [`crate::control`]. Left out of a document when it is not locked, so a show nobody has locked anything in reads exactly as it did before.
+   */
+  locked?: boolean;
   /**
    * Parameter values as declared by the manifest.
    */

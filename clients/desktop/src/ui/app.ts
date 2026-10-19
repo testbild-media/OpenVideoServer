@@ -296,6 +296,14 @@ function drawView(next: ShowView): void {
     void editor.catchUpWithTheServer();
   }
 
+  // The DMX switch, or the patch, moved what a desk holds: the editor's
+  // effect controls are drawn from it, so they are drawn again.
+  const held = heldSignature(next);
+  if (held !== lastHeld) {
+    lastHeld = held;
+    editor.draw();
+  }
+
   const renderer = next.renderer;
   ui.renderer.textContent = `Renderer: ${renderer.state}${renderer.reason ? ` — ${renderer.reason}` : ''}`;
   ui.renderer.className = `pill ${renderer.state}`;
@@ -380,7 +388,43 @@ const editor = new EditorPanel({
   ovs,
   note,
   liveShowId: () => view?.showId ?? null,
+  deskHolds: (instanceId) => deskHolds(view, instanceId),
 });
+
+/**
+ * What a desk holds on one effect or generator of the open show, from the view.
+ *
+ * The view has the server's own reading of the patch joined to the DMX
+ * switch, so the editor greys out exactly what the live screen does.
+ */
+function deskHolds(shown: ShowView | null, instanceId: string): readonly string[] {
+  for (const layer of shown?.layers ?? []) {
+    for (const effect of [...layer.effects, ...layer.slots.flatMap((slot) => slot.effects)]) {
+      if (effect.id === instanceId) {
+        return effect.held;
+      }
+    }
+    for (const slot of layer.slots) {
+      if (slot.source.kind === 'generator' && slot.source.instanceId === instanceId) {
+        return slot.source.held;
+      }
+    }
+  }
+  return [];
+}
+
+/** What a desk holds, as one string, so the editor redraws only when it changes. */
+function heldSignature(shown: ShowView): string {
+  return JSON.stringify([
+    shown.master?.dmxEnabled ?? true,
+    shown.layers.map((layer) => [
+      layer.effects.map((effect) => effect.held),
+      layer.slots.map((slot) => slot.effects.map((effect) => effect.held)),
+    ]),
+  ]);
+}
+
+let lastHeld = '';
 
 /**
  * Media.

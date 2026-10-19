@@ -3066,6 +3066,7 @@ mod tests {
             layers: vec![live],
             effects: Default::default(),
             generators: Default::default(),
+            desk: Default::default(),
             renderer: RendererStatus::Running,
         }));
 
@@ -3194,6 +3195,7 @@ mod tests {
             layers: Vec::new(),
             effects: Default::default(),
             generators: Default::default(),
+            desk: Default::default(),
             renderer: RendererStatus::Running,
         }));
         state.set_test_pattern(TestPatternMode::Outputs, None);
@@ -3242,6 +3244,7 @@ mod tests {
             layers: Vec::new(),
             effects: Default::default(),
             generators: Default::default(),
+            desk: Default::default(),
             renderer: RendererStatus::Running,
         }));
         state.set_test_pattern(TestPatternMode::Composition, None);
@@ -3273,6 +3276,7 @@ mod tests {
             layers: Vec::new(),
             effects: Default::default(),
             generators: Default::default(),
+            desk: Default::default(),
             renderer: RendererStatus::Running,
         }));
         state.set_test_pattern(TestPatternMode::Composition, None);
@@ -4332,6 +4336,7 @@ mod tests {
             layers: Vec::new(),
             effects: Default::default(),
             generators: Default::default(),
+            desk: Default::default(),
             renderer: RendererStatus::Running,
         }));
         state.set_connected(true);

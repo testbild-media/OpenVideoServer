@@ -557,6 +557,14 @@ export function dropOnPad(candidate: DropCandidate): DropVerdict {
   if (sameSource(candidate.holding, candidate.dropping)) {
     return { do: 'nothing' };
   }
+  // The server refuses it whoever asks (owner, 2026-10-19), so asking first
+  // would be asking a question whose only answer is no.
+  if (candidate.holding.kind === 'generator' && candidate.holding.locked) {
+    return {
+      do: 'refuse',
+      because: `${candidate.holdingName} is locked in this slot; an administrator has to unlock it first.`,
+    };
+  }
   return { do: 'ask', replacing: candidate.holdingName };
 }
 
@@ -642,6 +650,9 @@ export function generatorTiles(catalogue: Catalogue): GeneratorTile[] {
         version: generator.version,
         parameters: {},
         live: {},
+        // Not on a pad yet, so nothing holds it and nobody has locked it.
+        held: [],
+        locked: false,
       },
     }))
     .sort((one, other) => one.name.localeCompare(other.name));
@@ -843,6 +854,8 @@ export interface GeneratorLine {
    * anything to put back. The generator twin of [`EffectLine.moved`].
    */
   moved: boolean;
+  /** Whether an administrator has locked it in its slot. */
+  locked: boolean;
   parameters: EffectParameter[];
 }
 
@@ -878,10 +891,16 @@ export function generatorLines(
         // what the manifest declares, what the show set, what a control
         // source has moved and which of those is in force (owner, 2026-09-23 —
         // generators get no separate special solution).
+        locked: slot.source.locked,
         parameters:
           module === null
             ? []
-            : moduleParameters(module, slot.source.parameters, slot.source.live),
+            : moduleParameters(
+                module,
+                slot.source.parameters,
+                slot.source.live,
+                slot.source.held,
+              ),
       });
     }
   }
@@ -919,6 +938,13 @@ export interface EffectParameter {
   moved: boolean;
   /** Whether the show set it, as opposed to taking the published default. */
   set: boolean;
+  /**
+   * Whether a lighting console holds it right now.
+   *
+   * Shown and not offered while it is (owner, 2026-10-19): the server refuses
+   * a client moving it, and the way to take it by hand is the DMX switch.
+   */
+  held: boolean;
 }
 
 /** One effect instance of a chain, and what its parameters are doing. */
@@ -938,6 +964,8 @@ export interface EffectLine {
    * anything to put back.
    */
   moved: boolean;
+  /** Whether an administrator has locked it where it is. */
+  locked: boolean;
   parameters: EffectParameter[];
 }
 
@@ -1016,6 +1044,7 @@ function effectLine(effect: EffectView, catalogue: Catalogue): EffectLine {
     // and an operator who cannot see that it is there cannot know to take it
     // off before the show is edited under it.
     moved: Object.keys(effect.live).length > 0,
+    locked: effect.locked,
     parameters: module === null ? [] : effectParameters(module, effect),
   };
 }
@@ -1032,7 +1061,7 @@ function effectLine(effect: EffectView, catalogue: Catalogue): EffectLine {
  * map can hold one the server accepted anyway.
  */
 export function effectParameters(module: Module, effect: EffectView): EffectParameter[] {
-  return moduleParameters(module, effect.parameters, effect.live);
+  return moduleParameters(module, effect.parameters, effect.live, effect.held);
 }
 
 /**
@@ -1047,6 +1076,7 @@ export function moduleParameters(
   module: Module,
   configuredValues: Record<string, ParameterValue>,
   liveValues: Record<string, ParameterValue>,
+  held: readonly string[] = [],
 ): EffectParameter[] {
   return module.parameters.map((parameter) => {
     const configured = parameterValue(module, configuredValues, parameter.key);
@@ -1061,6 +1091,7 @@ export function moduleParameters(
       configuredText: parameterText(parameter, configured),
       moved: liveValues[parameter.key] !== undefined,
       set: configuredValues[parameter.key] !== undefined,
+      held: held.includes(parameter.key),
     };
   });
 }

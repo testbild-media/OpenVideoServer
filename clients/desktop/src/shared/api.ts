@@ -30,6 +30,9 @@ import type {
   FixtureCatalogueResponse,
   GeneratorCatalogueResponse,
   LoginResponse,
+  SetLockRequest,
+  SetLockResponse,
+  WhoAmIResponse,
   MediaItem,
   FileShowRequest,
   MediaListItem,
@@ -237,6 +240,16 @@ export class ServerApi {
     }
   }
 
+  /**
+   * The account this session belongs to, and its role.
+   *
+   * Asked so that an interface offers the lock on an effect only to somebody
+   * the server will let lock one. The server still decides.
+   */
+  whoAmI(): Promise<WhoAmIResponse> {
+    return this.#request('GET', '/auth/me');
+  }
+
   // --- the server ----------------------------------------------------------
 
   status(): Promise<StatusResponse> {
@@ -412,6 +425,16 @@ export class ServerApi {
   ): Promise<OrderEffectsResponse> {
     const body: OrderEffectsRequest = { order: [...order] };
     return this.#request('PUT', `${this.#chainPath(showId, layerId, slotIndex)}/order`, body);
+  }
+
+  /**
+   * Locks one effect or generator where it is, or unlocks it.
+   *
+   * An administrator's, and the only way a lock changes: a show sent whole
+   * carries the locks it already has (`SetLockRequest`).
+   */
+  setLock(showId: string, request: SetLockRequest): Promise<SetLockResponse> {
+    return this.#request('PUT', `/shows/${encodeURIComponent(showId)}/lock`, request);
   }
 
   /** The chain a slot has, or the layer's own when no slot is named. */

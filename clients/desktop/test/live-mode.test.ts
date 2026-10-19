@@ -166,6 +166,7 @@ function master(overrides: Partial<MasterView> = {}): MasterView {
     speedScale: 1,
     freeze: false,
     dmxEnabled: true,
+    held: { dimmer: false, crossfader: false, speedScale: false, freeze: false },
     ...overrides,
   };
 }

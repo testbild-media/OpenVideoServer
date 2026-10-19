@@ -512,6 +512,48 @@ pub struct OrderEffectsResponse {
     pub updated_at: Timestamp,
 }
 
+/// What a lock is put on: one effect, or one generator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum LockTarget {
+    /// One effect instance, on a layer or on a slot.
+    Effect {
+        /// The instance.
+        effect_instance_id: EffectInstanceId,
+    },
+    /// One generator instance, in its slot.
+    Generator {
+        /// The instance.
+        generator_instance_id: ovs_types::id::GeneratorInstanceId,
+    },
+}
+
+/// Locks one effect or generator where it is, or unlocks it.
+///
+/// **Administrators only, and the only way a lock changes** (owner,
+/// 2026-10-19). A locked effect or generator cannot be removed, moved or put in
+/// another order by anybody, an administrator included; unlocking is this
+/// request, made deliberately, before any of those. A show sent whole carries
+/// the locks it already has whatever its copy says, so an editor's draft from
+/// before a lock cannot undo one by being saved.
+///
+/// What it is doing is not locked: its values follow the patch like any other
+/// module's, and switching an effect on or off stays everybody's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct SetLockRequest {
+    /// What to lock or unlock.
+    pub target: LockTarget,
+    /// Locked, or not.
+    pub locked: bool,
+}
+
+/// Result of locking or unlocking.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct SetLockResponse {
+    /// When the server recorded the edit.
+    pub updated_at: Timestamp,
+}
+
 /// Sets how many banks of twelve a layer's matrix shows.
 ///
 /// Its own request because an operator asks for a bank in order to put

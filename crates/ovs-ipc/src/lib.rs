@@ -561,6 +561,7 @@ mod tests {
             layers: Vec::new(),
             effects: Default::default(),
             generators: Default::default(),
+            desk: Default::default(),
             renderer: RendererStatus::Running,
         }
     }

@@ -62,8 +62,9 @@ function layer(overrides: Partial<LayerView> = {}): LayerView {
     name: 'Layer 1',
     banks: 1,
     enabled: true,
-    // The default everywhere: a layer says nothing and the client may choose.
+    // The default everywhere: nothing is patched and the client may choose.
     mayChooseSlot: true,
+    held: { opacity: false, slot: false, transform: false },
     transport: 'playing',
     route: 'A',
     blendMode: 'normal',
@@ -194,7 +195,16 @@ describe('the playhead bar', () => {
     // 0 is permanently black on every layer and holds no clip.
     const generated: SlotView = {
       ...slot(3),
-      source: { kind: 'generator', instanceId: 'GENERATOR-1', live: {}, typeId: 'ovs.solid', version: 1, parameters: {} },
+      source: {
+        kind: 'generator',
+        instanceId: 'GENERATOR-1',
+        live: {},
+        typeId: 'ovs.solid',
+        version: 1,
+        parameters: {},
+        held: [],
+        locked: false,
+      },
     };
     const sample = samplePlayhead(playhead(), 1_000);
     expect(at(sample, 1_000, layer({ slots: [generated] }))).toBeNull();

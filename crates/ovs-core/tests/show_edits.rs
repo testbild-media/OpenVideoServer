@@ -861,6 +861,7 @@ async fn a_generator_dropped_on_a_pad_is_given_an_identity_on_disk() {
                 instance_id: ovs_types::id::GeneratorInstanceId::nil(),
                 type_id: "ovs.solid_colour".to_owned(),
                 version: 1,
+                locked: false,
                 parameters: ovs_types::config::slot::ParameterMap::new(),
             },
         )

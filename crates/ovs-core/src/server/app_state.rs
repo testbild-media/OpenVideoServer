@@ -1162,11 +1162,10 @@ impl AppState {
 
     /// Writes what a restart should restore, if anything has changed.
     ///
-    /// Returns true when something was written. The snapshot is narrow by
-    /// design — the BPM value and the selected slot per layer, nothing a console
-    /// drives — so it changes rarely, and writing it only when it has
-    /// changed keeps a show that is running quietly from touching the disk at
-    /// all.
+    /// Returns true when something was written. The snapshot is the whole live
+    /// state (owner, 2026-10-19), so it changes whenever anything on stage
+    /// does; writing it only when it has changed keeps a show that is running
+    /// quietly from touching the disk at all.
     ///
     /// Called on a timer and at every point where the open show is about to
     /// stop being the open show. Writing it on every state change instead

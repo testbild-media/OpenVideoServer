@@ -969,6 +969,7 @@ impl Playback {
             type_id,
             version,
             parameters,
+            ..
         } = &slot.source
         else {
             return false;
@@ -2491,6 +2492,7 @@ mod tests {
             instance_id: ovs_types::id::GeneratorInstanceId::new(),
             type_id: "ovs.solid_colour".to_owned(),
             version: 1,
+            locked: false,
             parameters: ovs_types::config::ParameterMap::from([(
                 "colour".to_owned(),
                 ovs_types::config::ParameterValue::Color(colour),
@@ -2510,6 +2512,7 @@ mod tests {
             instance_id: ovs_types::id::GeneratorInstanceId::new(),
             type_id: "ovs.strobe".to_owned(),
             version: 1,
+            locked: false,
             parameters: ovs_types::config::ParameterMap::from([(
                 "hz".to_owned(),
                 ovs_types::config::ParameterValue::Float(1.0),
@@ -2647,6 +2650,7 @@ mod tests {
             instance_id: ovs_types::id::GeneratorInstanceId::new(),
             type_id: "third.party.plasma".to_owned(),
             version: 1,
+            locked: false,
             parameters: ovs_types::config::ParameterMap::new(),
         });
         let mut compositor = HeadlessCompositor::sized(SizePx::new(32, 32));
@@ -2724,6 +2728,7 @@ mod tests {
             instance_id: ovs_types::id::GeneratorInstanceId::new(),
             type_id: "ovs.countdown".to_owned(),
             version: 1,
+            locked: false,
             parameters: ovs_types::config::ParameterMap::from([(
                 "from_trigger".to_owned(),
                 ovs_types::config::ParameterValue::Bool(from_trigger),
@@ -2809,6 +2814,7 @@ mod tests {
             instance_id: ovs_types::id::GeneratorInstanceId::new(),
             type_id: "ovs.clock".to_owned(),
             version: 1,
+            locked: false,
             parameters: ovs_types::config::ParameterMap::new(),
         });
         let mut compositor = HeadlessCompositor::sized(SizePx::new(32, 32));

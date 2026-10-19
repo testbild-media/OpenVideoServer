@@ -22,6 +22,9 @@ const STARTUP_POLICY: &str = "startup_policy";
 /// The key previews are stored under.
 const PREVIEWS_ENABLED: &str = "previews_enabled";
 
+/// The key the DMX switch in Live is stored under.
+const DMX_ENABLED: &str = "dmx_enabled";
+
 /// The key connector roles are stored under.
 const CONNECTOR_ROLES: &str = "connector_roles";
 
@@ -165,6 +168,29 @@ impl Database {
     /// Returns an error if the write fails.
     pub fn set_dmx_protocols(&mut self, protocols: DmxProtocols) -> Result<()> {
         self.set_setting("dmx_protocols", &protocols)
+    }
+
+    /// Whether the DMX switch in Live was on when it was last pressed.
+    ///
+    /// The one switch between the desk and the client (owner, 2026-10-19), and
+    /// the server's rather than a show's: a restart brings it back as it was
+    /// left. On when it has never been pressed, because a server is normally
+    /// driven from the desk.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the stored value cannot be decoded.
+    pub fn dmx_enabled(&self) -> Result<bool> {
+        Ok(self.setting(DMX_ENABLED)?.unwrap_or(true))
+    }
+
+    /// Records the DMX switch.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the write fails.
+    pub fn set_dmx_enabled(&mut self, enabled: bool) -> Result<()> {
+        self.set_setting(DMX_ENABLED, &enabled)
     }
 
     /// Returns whether the renderer should produce previews.
@@ -479,6 +505,19 @@ mod tests {
             role: Role::Operator,
             ..admin(username)
         }
+    }
+
+    #[test]
+    fn the_dmx_switch_comes_back_as_it_was_left() {
+        let mut database = Database::open_in_memory().expect("opens");
+        assert!(
+            database.dmx_enabled().expect("reads"),
+            "a server nobody has touched is driven from the desk"
+        );
+        database.set_dmx_enabled(false).expect("writes");
+        assert!(!database.dmx_enabled().expect("reads"));
+        database.set_dmx_enabled(true).expect("writes");
+        assert!(database.dmx_enabled().expect("reads"));
     }
 
     #[test]

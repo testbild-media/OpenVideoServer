@@ -65,10 +65,11 @@ const DRM_SYSFS: &str = "/sys/class/drm";
 
 /// How often what a restart should restore is written to the database.
 ///
-/// Long enough that a show running quietly is not touching the disk; short
-/// enough that a power cut costs an operator one slot change rather than an
-/// evening's worth. Nothing is written when nothing has changed, so on a still
-/// show this costs a comparison.
+/// Long enough that a desk riding a fader at 44 Hz costs one small write every
+/// five seconds rather than one per frame; short enough that a power cut costs
+/// an operator five seconds of the show rather than an evening's worth. Nothing
+/// is written when nothing has changed, so on a still show this costs a
+/// comparison.
 const SNAPSHOT_INTERVAL: Duration = Duration::from_secs(5);
 
 /// How often the machine's own state is sampled.
@@ -458,6 +459,24 @@ fn sweep_the_store(state: &AppState) {
 }
 
 fn restore_startup_show(state: &AppState) -> Result<(), Box<dyn std::error::Error>> {
+    // The DMX switch first, as it was left (owner, 2026-10-19). It is the
+    // server's rather than a show's, so it is put back whether or not there is
+    // a show to open, and opening one leaves it as it is.
+    match state.with_database(|database| database.dmx_enabled()) {
+        Ok(enabled) => {
+            state.mutate_state(|current| {
+                let change = current.update_master(|master| master.dmx_enabled = enabled);
+                ((), change)
+            });
+            if !enabled {
+                tracing::info!(
+                    "DMX was switched off in Live when this server stopped, and still is"
+                );
+            }
+        }
+        Err(error) => tracing::warn!("the DMX switch could not be read, so it is on: {error}"),
+    }
+
     // Before the policy is read, because it decides *which* show to open and
     // this decides whether there is one to open at all. A failure here is not
     // a reason to refuse to start: a server with no show is what this build

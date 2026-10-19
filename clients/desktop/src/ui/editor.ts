@@ -130,12 +130,22 @@ export interface EditorDeps {
    * still something to say before somebody presses Save during a night.
    */
   liveShowId: () => string | null;
+  /**
+   * The parameters a lighting console holds right now on one effect of the
+   * open show, by instance.
+   *
+   * From the live view, which has the server's own reading of the patch and
+   * the DMX switch. Empty while DMX is off and for anything nothing is patched
+   * to (owner, 2026-10-19).
+   */
+  deskHolds: (instanceId: string) => readonly string[];
 }
 
 export class EditorPanel {
   readonly #ovs: OvsBridge;
   readonly #note: (message: string) => void;
   readonly #liveShowId: () => string | null;
+  readonly #deskHolds: (instanceId: string) => readonly string[];
 
   #draft: Draft | null = null;
   /** The show LOAD has been offered for once and is waiting to be confirmed. */
@@ -250,6 +260,7 @@ export class EditorPanel {
     this.#ovs = deps.ovs;
     this.#note = deps.note;
     this.#liveShowId = deps.liveShowId;
+    this.#deskHolds = deps.deskHolds;
 
     this.#mapping = new MappingPanel({
       show: () => this.#draft?.show ?? null,
@@ -1656,7 +1667,12 @@ export class EditorPanel {
             title: 'one place towards the back of the composite',
           }),
           button('✕', () => this.#edit(removeLayer(show, layer.id)), {
-            title: 'remove this layer',
+            // A layer carrying something locked would take it with it, which
+            // the server refuses whoever asks (owner, 2026-10-19).
+            title: holdsLocked(layer)
+              ? 'Something on this layer is locked; an administrator has to unlock it first.'
+              : 'remove this layer',
+            disabled: holdsLocked(layer),
           }),
         );
 
@@ -1706,13 +1722,16 @@ export class EditorPanel {
     // included, while layers 1 to 6 have their slots pressed in the client by
     // people who are not lighting operators. Without this the console wins,
     // because it re-sends its slot channel forty-four times a second.
+    //
+    // **One or the other, never both** (owner, 2026-10-19). DMX is the default
+    // and hands the slots to a desk only while one is patched and DMX is on;
+    // GUI keeps them here whatever is patched.
     const slotControl = this.#select(
       [
-        { value: 'either', label: 'Client or console' },
-        { value: 'client_only', label: 'Client only' },
-        { value: 'desk_only', label: 'Console only' },
+        { value: 'dmx', label: 'DMX' },
+        { value: 'gui', label: 'GUI' },
       ],
-      layer.slot_control ?? 'either',
+      layer.slot_control ?? 'dmx',
       (value) =>
         this.#edit(
           setLayer(show, layer.id, {
@@ -1721,8 +1740,9 @@ export class EditorPanel {
         ),
     );
     slotControl.title =
-      'Who may choose which slot this layer plays. Everything else a console does to the layer — ' +
-      'the dimmer, the transform, the effects — is unaffected either way.';
+      'DMX: a console patched to this layer chooses its slot while DMX is on, and the GUI does when it is off or nothing is patched. ' +
+      'GUI: the slot is always chosen here and the console’s slot channel is ignored. ' +
+      'Everything else a console does to the layer is unaffected either way.';
 
     this.#ui.layerFields.replaceChildren(
       this.#field('Name', name, `${base}.name`),
@@ -1757,10 +1777,19 @@ export class EditorPanel {
       );
     }
 
-    for (const instance of effects) {
+    for (const [at, instance] of effects.entries()) {
       const block = make('div', 'effect');
       block.classList.toggle('off', !instance.enabled);
       const path = effectPath(show, chain, instance.id) ?? '';
+
+      // **Locked where it is** (owner, 2026-10-19): not removable, and neither
+      // it nor a neighbour moves across it. Switching it on or off stays
+      // everybody's, and the lock itself is set on the live screen by an
+      // administrator, because it is a request of its own rather than part of
+      // what Save sends.
+      const locked = instance.locked ?? false;
+      const lockedNote = 'Locked where it is; an administrator has to unlock it first.';
+      const neighbourLocked = (by: number): boolean => effects[at + by]?.locked === true;
 
       // Named and nothing more. The document's `version` is not shown, because
       // a module has none an operator could tell apart: "Es gibt kein Invert
@@ -1772,14 +1801,22 @@ export class EditorPanel {
           this.#edit(setEffectEnabled(show, chain, instance.id, value)),
         ),
         make('span', 'effect-name', published?.name ?? instance.type_id),
+      );
+      if (locked) {
+        head.append(make('span', 'lock-mark', 'LOCKED'));
+      }
+      head.append(
         button('▲', () => this.#edit(moveEffect(show, chain, instance.id, 'earlier')), {
-          title: 'one place earlier in the chain',
+          title: locked || neighbourLocked(-1) ? lockedNote : 'one place earlier in the chain',
+          disabled: locked || neighbourLocked(-1),
         }),
         button('▼', () => this.#edit(moveEffect(show, chain, instance.id, 'later')), {
-          title: 'one place later in the chain',
+          title: locked || neighbourLocked(1) ? lockedNote : 'one place later in the chain',
+          disabled: locked || neighbourLocked(1),
         }),
         button('✕', () => this.#edit(removeEffect(show, chain, instance.id)), {
-          title: 'remove this effect',
+          title: locked ? lockedNote : 'remove this effect',
+          disabled: locked,
         }),
       );
       block.append(head);
@@ -1788,11 +1825,20 @@ export class EditorPanel {
         if (published.description !== '') {
           block.append(make('p', 'hint', published.description));
         }
+        // What a desk is driving on this effect is shown and not offered,
+        // here as on the live screen: the server refuses a save that changes
+        // it while DMX is on.
+        const held = this.#draft?.show.id === this.#liveShowId() ? this.#deskHolds(instance.id) : [];
         block.append(
-          ...this.#parameters(published, instance.parameters, `${path}.parameters`, (key, value) =>
-            this.#edit(
-              setEffectParameter(show, this.#catalogue, chain, instance.id, key, value),
-            ),
+          ...this.#parameters(
+            published,
+            instance.parameters,
+            `${path}.parameters`,
+            (key, value) =>
+              this.#edit(
+                setEffectParameter(show, this.#catalogue, chain, instance.id, key, value),
+              ),
+            held,
           ),
         );
       } else {
@@ -1846,6 +1892,7 @@ export class EditorPanel {
     values: ParameterMap | undefined,
     basePath: string,
     onSet: (key: string, value: ParameterValue | null) => void,
+    held: readonly string[] = [],
   ): HTMLElement[] {
     return module.parameters.map((parameter) => {
       const current = parameterValue(module, values, parameter.key);
@@ -1853,6 +1900,26 @@ export class EditorPanel {
       const control = this.#parameterControl(parameter, current, (value) =>
         onSet(parameter.key, value),
       );
+      if (held.includes(parameter.key)) {
+        for (const input of control.querySelectorAll('input, select, textarea, button')) {
+          (input as HTMLInputElement).disabled = true;
+        }
+        if (
+          control instanceof HTMLInputElement ||
+          control instanceof HTMLSelectElement ||
+          control instanceof HTMLTextAreaElement
+        ) {
+          control.disabled = true;
+        }
+        control.classList.add('desk');
+        control.title = 'Driven by the lighting console while DMX is on. Switch DMX off in Live to change it here.';
+        return this.#field(
+          parameter.name,
+          control,
+          `${basePath}.${parameter.key}`,
+          make('span', 'when', 'DMX'),
+        );
+      }
       const extra = set
         ? button('Default', () => onSet(parameter.key, null), {
             title: 'back to what the effect was published with',
@@ -2111,4 +2178,16 @@ export class EditorPanel {
 /** A timestamp as a local date and time, or nothing when there is none. */
 function whenText(millis: number): string {
   return new Date(millis).toLocaleString();
+}
+
+/** Whether anything on a layer is locked: an effect on it or a slot, or a generator. */
+function holdsLocked(layer: Layer): boolean {
+  return (
+    layer.effects.some((effect) => effect.locked === true) ||
+    layer.slots.some(
+      (slot) =>
+        slot.effects.some((effect) => effect.locked === true) ||
+        (slot.source.kind === 'generator' && slot.source.locked === true),
+    )
+  );
 }

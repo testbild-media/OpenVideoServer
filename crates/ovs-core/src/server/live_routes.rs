@@ -24,6 +24,15 @@
 //! re-selecting the slot that is already running: neither is an error and
 //! neither puts anything on the update stream. The status code says "your
 //! instruction was carried out", not "something moved".
+//!
+//! # What a desk holds, a client cannot move
+//!
+//! The owner's rule (2026-10-19), and the server's to keep rather than the
+//! client's: with the DMX switch on, whatever a patched fixture has a channel
+//! for is refused here with `409 held_by_desk`, and the whole request with it,
+//! so a request naming one held value and one free one changes nothing at all.
+//! With the switch off there is nothing to refuse. The tempo, the beat reset
+//! and the switch itself are always the client's. See [`ovs_types::control`].
 
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -32,6 +41,8 @@ use ovs_proto::http::{
     SelectSlotRequest, TapTempoResponse, UpdateEffectRequest, UpdateLayerRequest,
     UpdateMasterRequest,
 };
+use ovs_types::config::ParameterMap;
+use ovs_types::control::{LayerControl, MasterControl};
 use ovs_types::id::{EffectInstanceId, GeneratorInstanceId, LayerId};
 
 use crate::server::app_state::AppState;
@@ -43,13 +54,26 @@ fn parse_id<T: std::str::FromStr>(raw: &str) -> ApiResult<T> {
         .map_err(|_| ApiFailure::bad_request("invalid_id", format!("{raw:?} is not a valid id")))
 }
 
+/// The refusal for something a lighting console holds.
+///
+/// Refused with a reason rather than ignored, because a client can say what
+/// happened and say how to get it back, and a console cannot.
+fn held_by_desk(what: &str) -> ApiFailure {
+    ApiFailure::conflict(
+        "held_by_desk",
+        format!(
+            "{what} is driven by the lighting console while DMX is on; \
+             switch DMX off in Live to change it here"
+        ),
+    )
+}
+
 /// Selects a slot on a layer.
 ///
 /// # Errors
 ///
 /// Returns [`ApiFailure`] when no show is open, when the layer or slot is not
-/// part of the one that is, or when the layer takes its slot from a console
-/// and not from here.
+/// part of the one that is, or when a lighting console holds the layer's slot.
 pub async fn select_slot(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -60,25 +84,15 @@ pub async fn select_slot(
     let layer_id: LayerId = parse_id(&layer_id)?;
 
     state.mutate_state(|current| {
-        // **The other half of the owner's switch** (2026-10-16). A layer set to
-        // take its slot from a console is one somebody is cueing from a desk,
-        // and the reason that setting exists at all is that a picture on a
-        // screen is easy to press by accident. Refused with a reason rather
-        // than ignored, because a client can say what happened and a console
-        // cannot.
-        let from_the_desk = current
-            .show()
-            .and_then(|show| show.layers.iter().find(|layer| layer.id == layer_id))
-            .is_some_and(|layer| !layer.slot_control.client_may_select());
-        if from_the_desk {
-            return (
-                Err(ApiFailure::bad_request(
-                    "slot_is_the_desks",
-                    "this layer takes its slot from a lighting console; \
-                     change that in the layer's settings to select here",
-                )),
-                None,
-            );
+        // A layer whose slot a patched desk is choosing is one somebody is
+        // cueing from that desk, and a picture on a screen is easy to press by
+        // accident. A layer set to GUI is never held, which is the owner's one
+        // exception to his own rule.
+        let held = current
+            .desk_holds()
+            .is_some_and(|desk| desk.holds_layer(layer_id, LayerControl::Slot));
+        if held {
+            return (Err(held_by_desk("this layer's slot")), None);
         }
         match current.select_slot(layer_id, request.slot_index) {
             Ok(change) => (Ok(()), change),
@@ -93,7 +107,10 @@ pub async fn select_slot(
 ///
 /// # Errors
 ///
-/// Returns [`ApiFailure`] when the layer is not part of the open show.
+/// Returns [`ApiFailure`] when the layer is not part of the open show, or when
+/// the request moves something a lighting console holds — its opacity or its
+/// transform. Its bus, blend mode, transport and whether it is on have no
+/// channel on any desk, and are always the client's.
 pub async fn update_layer(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -104,6 +121,18 @@ pub async fn update_layer(
     let layer_id: LayerId = parse_id(&layer_id)?;
 
     state.mutate_state(|current| {
+        if let Some(desk) = current.desk_holds() {
+            if request.opacity.is_some() && desk.holds_layer(layer_id, LayerControl::Opacity) {
+                return (Err(held_by_desk("this layer's dimmer")), None);
+            }
+            if request.transform.is_some() && desk.holds_layer(layer_id, LayerControl::Transform) {
+                return (
+                    Err(held_by_desk("this layer's position, scale and rotation")),
+                    None,
+                );
+            }
+        }
+
         let applied = current.update_layer(layer_id, |live| {
             if let Some(opacity) = request.opacity {
                 live.set_opacity(opacity);
@@ -147,12 +176,20 @@ pub async fn update_layer(
 /// being saved into a show is: a control that accepted a blur radius of four
 /// thousand would be a way to stop a show from a client.
 ///
+/// # What a desk holds
+///
+/// A parameter a patched desk drives is refused while DMX is on, and so is
+/// the whole request. A reset puts back only what is the client's: the
+/// desk's values stay where the desk put them, because a desk holding a fader
+/// still re-sends nothing until it moves, and an effect reset under it would
+/// sit at its configured value with the desk showing something else.
+///
 /// # Errors
 ///
 /// Returns [`ApiFailure`] when no show is open, when the effect instance is
-/// not part of the one that is, when this build does not publish that effect, or
-/// when a value is not one the effect declares. A refused request changes
-/// nothing.
+/// not part of the one that is, when this build does not publish that effect,
+/// when a value is not one the effect declares, or when a value is one a
+/// lighting console holds. A refused request changes nothing.
 pub async fn update_effect(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -163,8 +200,25 @@ pub async fn update_effect(
     let effect_instance_id: EffectInstanceId = parse_id(&effect_instance_id)?;
 
     state.mutate_state(|current| {
-        let applied =
-            current.set_effect_parameters(effect_instance_id, &request.overrides, request.reset);
+        let held: Vec<String> = current
+            .desk_holds()
+            .map(|desk| {
+                desk.effect_keys(effect_instance_id)
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let overrides = match keep_what_the_desk_holds(
+            &held,
+            &request.overrides,
+            request.reset,
+            current.effect(effect_instance_id),
+        ) {
+            Ok(overrides) => overrides,
+            Err(refusal) => return (Err(refusal), None),
+        };
+
+        let applied = current.set_effect_parameters(effect_instance_id, &overrides, request.reset);
 
         match applied {
             Ok(change) => (Ok(()), change),
@@ -191,8 +245,8 @@ pub async fn update_effect(
 ///
 /// Returns [`ApiFailure`] when no show is open, when the generator instance
 /// is not part of the one that is, when this build does not publish that
-/// generator, or when a value is not one it declares. A refused request changes
-/// nothing.
+/// generator, when a value is not one it declares, or when a value is one a
+/// lighting console holds. A refused request changes nothing.
 pub async fn update_generator(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -203,11 +257,26 @@ pub async fn update_generator(
     let generator_instance_id: GeneratorInstanceId = parse_id(&generator_instance_id)?;
 
     state.mutate_state(|current| {
-        let applied = current.set_generator_parameters(
-            generator_instance_id,
+        let held: Vec<String> = current
+            .desk_holds()
+            .map(|desk| {
+                desk.generator_keys(generator_instance_id)
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let overrides = match keep_what_the_desk_holds(
+            &held,
             &request.overrides,
             request.reset,
-        );
+            current.generator_overrides().get(&generator_instance_id),
+        ) {
+            Ok(overrides) => overrides,
+            Err(refusal) => return (Err(refusal), None),
+        };
+
+        let applied =
+            current.set_generator_parameters(generator_instance_id, &overrides, request.reset);
 
         match applied {
             Ok(change) => (Ok(()), change),
@@ -218,7 +287,39 @@ pub async fn update_generator(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// What a request for a plugin's live values becomes, given what a desk holds.
+///
+/// Refused when it names a held parameter. A reset keeps the held values that
+/// are there, so that only the client's half goes back to the show's.
+fn keep_what_the_desk_holds(
+    held: &[String],
+    requested: &ParameterMap,
+    reset: bool,
+    live: Option<&ParameterMap>,
+) -> ApiResult<ParameterMap> {
+    if let Some(key) = requested.keys().find(|key| held.contains(key)) {
+        return Err(held_by_desk(key));
+    }
+    let mut overrides = requested.clone();
+    if reset {
+        if let Some(live) = live {
+            for key in held {
+                if let Some(value) = live.get(key) {
+                    overrides.insert(key.clone(), value.clone());
+                }
+            }
+        }
+    }
+    Ok(overrides)
+}
+
 /// Changes part of the live master state.
+///
+/// # Errors
+///
+/// Returns [`ApiFailure`] when the request moves something a patched master
+/// fixture holds — the dimmer, the crossfader, the speed scale or freeze. The
+/// tempo is both sides' and the DMX switch is always the client's.
 pub async fn update_master(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -227,6 +328,31 @@ pub async fn update_master(
     authenticate(&state, &headers)?;
 
     state.mutate_state(|current| {
+        if let Some(desk) = current.desk_holds() {
+            for (asked, control, what) in [
+                (
+                    request.dimmer.is_some(),
+                    MasterControl::Dimmer,
+                    "the master dimmer",
+                ),
+                (
+                    request.crossfader.is_some(),
+                    MasterControl::Crossfader,
+                    "the crossfader",
+                ),
+                (
+                    request.speed_scale.is_some(),
+                    MasterControl::SpeedScale,
+                    "the speed scale",
+                ),
+                (request.freeze.is_some(), MasterControl::Freeze, "freeze"),
+            ] {
+                if asked && desk.holds_master(control) {
+                    return (Err(held_by_desk(what)), None);
+                }
+            }
+        }
+
         let change = current.update_master(|master| {
             if let Some(dimmer) = request.dimmer {
                 master.set_dimmer(dimmer);
@@ -247,8 +373,19 @@ pub async fn update_master(
                 master.dmx_enabled = enabled;
             }
         });
-        ((), change)
-    });
+        (Ok(()), change)
+    })?;
+
+    // The switch is the server's, and survives a restart as it was left
+    // (owner, 2026-10-19). Written now rather than with the live snapshot,
+    // because it is one deliberate press and not a value moving at 44 Hz.
+    // Not a refusal when it cannot be written: the switch has already moved on
+    // stage, and what is lost is only where a restart would put it.
+    if let Some(enabled) = request.dmx_enabled {
+        if let Err(error) = state.with_database(|database| database.set_dmx_enabled(enabled)) {
+            tracing::warn!("the DMX switch could not be kept for the next start: {error}");
+        }
+    }
 
     Ok(StatusCode::NO_CONTENT)
 }

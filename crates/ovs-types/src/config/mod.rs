@@ -63,14 +63,24 @@ pub struct EffectInstance {
     /// show saved while some effects had a second version.
     pub version: u32,
     /// Whether this effect contributes to the chain.
+    ///
+    /// Everybody's to change, locked or not (owner, 2026-10-19).
     pub enabled: bool,
+    /// Whether an administrator has locked this effect where it is.
+    ///
+    /// A locked effect cannot be removed, moved or put in another order by
+    /// anybody, and only an administrator can lock or unlock one; see
+    /// [`crate::control`]. Left out of a document when it is not locked, so a
+    /// show nobody has locked anything in reads exactly as it did before.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub locked: bool,
     /// Parameter values as declared by the manifest.
     #[serde(default, skip_serializing_if = "ParameterMap::is_empty")]
     pub parameters: ParameterMap,
 }
 
 impl EffectInstance {
-    /// Creates an enabled effect instance with no parameter overrides.
+    /// Creates an enabled, unlocked effect instance with no parameter overrides.
     #[must_use]
     pub fn new(type_id: impl Into<String>, version: u32) -> Self {
         Self {
@@ -78,6 +88,7 @@ impl EffectInstance {
             type_id: type_id.into(),
             version,
             enabled: true,
+            locked: false,
             parameters: ParameterMap::new(),
         }
     }

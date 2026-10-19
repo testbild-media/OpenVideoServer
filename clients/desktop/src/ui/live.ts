@@ -55,6 +55,7 @@ import type {
   ParameterValue,
   PlaybackDirection,
   PlaybackMode,
+  SetLockRequest,
   SetSlotRequest,
 } from '@ovs/schema';
 
@@ -488,6 +489,8 @@ interface SlotOptionNodes {
   beats: HTMLInputElement;
   beatsRow: HTMLElement;
   transform: TransformNodes;
+  /** Empties the pad, which a locked generator refuses. */
+  clear: HTMLButtonElement;
 }
 
 interface OptionNodes {
@@ -581,6 +584,27 @@ function pluginCommand(plugin: PluginRef, key: string, value: ParameterValue): L
 /** Putting one plugin instance back to what the show configured. */
 function pluginReset(plugin: PluginRef): LiveCommand {
   return plugin.of === 'effect' ? effectReset(plugin.id) : generatorReset(plugin.id);
+}
+
+/**
+ * What a control a lighting console holds says when it is pointed at.
+ *
+ * Shown and not offered (owner, 2026-10-19): the server refuses it, and the
+ * one way to take it by hand is the DMX switch, which is what this says.
+ */
+const DESK_HELD = 'Driven by the lighting console while DMX is on. Switch DMX off to change it here.';
+
+/**
+ * Marks a control as the desk's, or as this client's again.
+ *
+ * The class draws it; the title, when one is given, is what it says while it
+ * is held, and goes back to `otherwise` when it is not.
+ */
+function holdForDesk(node: HTMLElement, held: boolean, otherwise?: string): void {
+  node.classList.toggle('desk', held);
+  if (otherwise !== undefined) {
+    node.title = held ? DESK_HELD : otherwise;
+  }
 }
 
 /** The BROWSER tab's own nodes, which outlive a redraw so typing survives one. */
@@ -1325,6 +1349,30 @@ export class LivePanel {
     mark(this.#ui.dimmer, dimmer, 'the master dimmer');
     mark(this.#ui.speedScale, speedScale, 'the master speed scale');
 
+    // What a patched master fixture holds is shown and not offered while DMX
+    // is on (owner, 2026-10-19). The tempo is never held: a tap counts from
+    // either side.
+    const held = master?.held ?? {
+      dimmer: false,
+      crossfader: false,
+      speedScale: false,
+      freeze: false,
+    };
+    this.#ui.crossfader.disabled = !this.#connected || held.crossfader;
+    this.#ui.dimmer.disabled = !this.#connected || held.dimmer;
+    for (const [element, isHeld] of [
+      [this.#ui.crossfader.parentElement, held.crossfader],
+      [this.#ui.dimmer.parentElement, held.dimmer],
+      [this.#ui.speedScale, held.speedScale],
+    ] as const) {
+      if (element instanceof HTMLElement) {
+        holdForDesk(element, isHeld);
+      }
+    }
+    for (const step of this.#speedSteps.values()) {
+      step.disabled = !this.#connected || held.speedScale;
+    }
+
     const frozen = valueOf(freeze);
     this.#ui.freeze.classList.toggle('on', frozen === true);
     this.#ui.freeze.textContent = frozen === null ? 'FREEZE —' : 'FREEZE';
@@ -1334,12 +1382,17 @@ export class LivePanel {
     // which way the switch is, so the press was refused with a note — which
     // from the far side of a room is a button that does nothing. A server too
     // old to report it is the case this is really about.
-    this.#ui.freeze.disabled = !this.#connected || frozen === null;
+    this.#ui.freeze.disabled = !this.#connected || frozen === null || held.freeze;
     this.#ui.freeze.title =
       frozen === null
         ? 'This server has not said whether the output is frozen, so this cannot be switched.'
         : readingNote(freeze, 'whether the output is frozen');
     mark(this.#ui.freeze, freeze, 'whether the output is frozen');
+    if (held.freeze) {
+      holdForDesk(this.#ui.freeze, true, '');
+    } else {
+      this.#ui.freeze.classList.remove('desk');
+    }
 
     // The console's own switch. Lit green while the desk is driving, which is
     // nearly always; red and unmistakable while somebody has taken the show by
@@ -2070,9 +2123,16 @@ export class LivePanel {
     // On the bar rather than on the input, which is transparent and over the
     // whole of it: the border that shows pending and refused is the bar's.
     mark(row.opacityBar, opacity, 'this layer’s opacity');
-    row.opacityBar.title = `${readingNote(opacity, 'this layer’s opacity')} The show opens it at ${Math.round(
-      layer.defaults.opacity * 100,
-    )}%.`;
+    row.opacity.disabled = !this.#connected || layer.held.opacity;
+    holdForDesk(
+      row.opacityBar,
+      layer.held.opacity,
+      `${readingNote(opacity, 'this layer’s opacity')} The show opens it at ${Math.round(
+        layer.defaults.opacity * 100,
+      )}%.`,
+    );
+    // The pads as a strip: a desk holds the choosing, not any one pad.
+    holdForDesk(row.pads, layer.held.slot);
 
     this.#drawShowing(row, layer);
     // A row that has just been rebuilt has a bar with nothing in it, and the
@@ -2974,6 +3034,37 @@ export class LivePanel {
   }
 
   /**
+   * Locks one effect or generator where it is, or unlocks it.
+   *
+   * Offered to an administrator only (owner, 2026-10-19), and the server
+   * decides again. What the row looks like next comes back over the socket.
+   */
+  async #setLock(target: SetLockRequest['target'], locked: boolean): Promise<void> {
+    const showId = this.#view.showId;
+    if (showId === null) {
+      this.#note('No show is open, so there is nothing to lock.');
+      return;
+    }
+    const answer = await this.#ovs.setLock(showId, { target, locked });
+    if (!answer.ok) {
+      this.#note(answer.message);
+    }
+  }
+
+  /** The lock's own button, for an administrator. Null for anybody else. */
+  #lockButton(target: SetLockRequest['target'], locked: boolean, name: string): HTMLButtonElement | null {
+    if (!this.#view.mayAdminister) {
+      return null;
+    }
+    return button(locked ? 'Unlock' : 'Lock', () => void this.#setLock(target, !locked), {
+      className: 'small',
+      title: locked
+        ? `Let ${name} be removed and moved again.`
+        : `Lock ${name} where it is: nobody can remove it, move it or put it in another order until it is unlocked. Its values still follow the patch, and switching it on or off stays open to everybody.`,
+    });
+  }
+
+  /**
    * Changes how the clip in a layer's active slot runs.
    *
    * A document edit made from the live screen, like putting a source in a slot
@@ -3170,6 +3261,10 @@ export class LivePanel {
     const onAir = make('span', 'on-air', 'ON AIR');
     nodes.onAir.set(generatorKey(line), onAir);
     head.append(onAir);
+    if (line.locked) {
+      // Locked in its slot by an administrator (owner, 2026-10-19).
+      head.append(make('span', 'lock-mark', 'LOCKED'));
+    }
 
     // Only where there is an instance to name. A show this server has not
     // loaded has generators with no identity yet, and a "put back" naming one
@@ -3179,6 +3274,14 @@ export class LivePanel {
       const reset = button('Put back', () => this.#putPluginBack(plugin), { className: 'small' });
       nodes.resets.set(line.instanceId, reset);
       head.append(reset);
+      const lock = this.#lockButton(
+        { kind: 'generator', generator_instance_id: line.instanceId },
+        line.locked,
+        line.name,
+      );
+      if (lock !== null) {
+        head.append(lock);
+      }
     }
 
     if (!compact) {
@@ -3733,12 +3836,21 @@ export class LivePanel {
       beats,
       beatsRow,
       transform,
+      clear,
     };
   }
 
   /** Keeps the slot's controls showing what the document says. */
   #updateSlotOptions(nodes: SlotOptionNodes, slot: SlotView): void {
     const settable = (node: HTMLElement): boolean => document.activeElement !== node;
+
+    // A generator an administrator has locked in this pad stays in it (owner,
+    // 2026-10-19), and the server refuses emptying it whoever asks.
+    const locked = slot.source.kind === 'generator' && slot.source.locked;
+    nodes.clear.disabled = locked;
+    nodes.clear.title = locked
+      ? 'Locked in this pad; an administrator has to unlock it first.'
+      : 'take the source out of this pad, leaving it empty';
 
     // Not while it is being typed into: this panel is repainted on every
     // state the server sends, and a field reset under a hand is a name that
@@ -3836,6 +3948,13 @@ export class LivePanel {
   /** Keeps the layer's placement showing what the server says. */
   #updateOptions(nodes: OptionNodes, layer: LayerView): void {
     this.#showTransform(nodes.place, layer.transform, `layer.${layer.id}.transform`);
+    // A desk patched to the layer drives where its picture sits, all of it
+    // together, while DMX is on (owner, 2026-10-19).
+    const place = nodes.place;
+    for (const fader of [place.x, place.y, place.rotation, place.size, place.sizeX, place.sizeY]) {
+      fader.input.disabled = layer.held.transform;
+    }
+    holdForDesk(place.root, layer.held.transform, '');
   }
 
   /**
@@ -3946,6 +4065,11 @@ export class LivePanel {
     const head = make('summary', 'work-row-head');
     head.append(make('span', 'work-row-name', effect.name));
     head.append(make('span', 'work-row-where', effect.enabled ? 'on' : 'off — the chain skips it'));
+    if (effect.locked) {
+      // Locked by an administrator (owner, 2026-10-19): it stays where it is,
+      // and its values still follow the patch like any other effect's.
+      head.append(make('span', 'lock-mark', 'LOCKED'));
+    }
 
     // **Where it sits in the chain.** An effect chain is an order — a blur
     // before a colour shift is not the same picture as after it — and until now
@@ -3956,6 +4080,13 @@ export class LivePanel {
     // press says why by not moving. The order is read off the chain this row was
     // built from, which the panel rebuilds whenever it changes.
     const at = chain.effects.findIndex((each) => each.id === effect.id);
+    // A locked effect keeps its place, so neither it nor its neighbour may
+    // swap across it; the server refuses both, whoever asks.
+    const mayMove = (by: number): boolean => {
+      const other = chain.effects[at + by];
+      return at >= 0 && other !== undefined && !effect.locked && !other.locked;
+    };
+    const lockedNote = 'Locked where it is; an administrator has to unlock it first.';
     const move = (by: number): void => {
       const order = chain.effects.map((each) => each.id);
       const to = at + by;
@@ -3971,16 +4102,18 @@ export class LivePanel {
       order[to] = moved;
       void this.#orderEffects(chain, order);
     };
+    const lockedHere = (by: number): boolean =>
+      effect.locked || chain.effects[at + by]?.locked === true;
     head.append(
       button('▲', () => move(-1), {
         className: 'small',
-        title: 'one place earlier in the chain',
-        disabled: at <= 0,
+        title: lockedHere(-1) ? lockedNote : 'one place earlier in the chain',
+        disabled: !mayMove(-1),
       }),
       button('▼', () => move(1), {
         className: 'small',
-        title: 'one place later in the chain',
-        disabled: at < 0 || at >= chain.effects.length - 1,
+        title: lockedHere(1) ? lockedNote : 'one place later in the chain',
+        disabled: !mayMove(1),
       }),
     );
 
@@ -3994,10 +4127,19 @@ export class LivePanel {
       },
       {
         className: 'small danger',
-        title: `take ${effect.name} off this chain`,
+        title: effect.locked ? lockedNote : `take ${effect.name} off this chain`,
+        disabled: effect.locked,
       },
     );
     head.append(off);
+    const lock = this.#lockButton(
+      { kind: 'effect', effect_instance_id: effect.id },
+      effect.locked,
+      effect.name,
+    );
+    if (lock !== null) {
+      head.append(lock);
+    }
 
     const plugin: PluginRef = { of: 'effect', id: effect.id, name: effect.name };
     const reset = button('Put back', () => this.#putPluginBack(plugin), { className: 'small' });
@@ -4293,11 +4435,15 @@ export class LivePanel {
     const shown = valueOf(reading);
     setParameterInputs(node, shown, this.#holding === key);
     for (const input of node.inputs) {
-      input.disabled = !this.#connected;
+      input.disabled = !this.#connected || parameter.held;
     }
     node.value.textContent = parameterText(node.declared, shown);
     mark(node.inputs[0] ?? node.value, reading, `${plugin.name}’s ${parameter.name}`);
-    node.show.textContent = effectShowLine(parameter, reading);
+    node.show.textContent = parameter.held ? 'DMX' : effectShowLine(parameter, reading);
+    const line = node.value.closest('.live-fact');
+    if (line instanceof HTMLElement) {
+      holdForDesk(line, parameter.held, '');
+    }
     // The server's own sentence, against the control that caused it. It quotes
     // the manifest — "radius_px must be a number between 0 and 64" — and a
     // paraphrase would be a range this client made up.
@@ -4388,17 +4534,18 @@ export class LivePanel {
     if (layer === null) {
       return;
     }
-    // **This layer's slots are a console's** (owner, 2026-10-16). Refused here
-    // rather than by the server, so nothing is sent and nothing flashes as
-    // refused: the setting exists because a picture on a screen is easy to
-    // press by accident, and a press that travels and comes back rejected is
-    // still a press that looked like it did something.
+    // **This layer's slots are a console's** (owner, 2026-10-16 and
+    // 2026-10-19). Refused here as well as by the server, so nothing is sent
+    // and nothing flashes as refused: a picture on a screen is easy to press
+    // by accident, and a press that travels and comes back rejected is still a
+    // press that looked like it did something.
     //
     // Read from the current view rather than from whatever the pad was built
-    // with, because the setting can change while the matrix is on screen.
+    // with, because the patch and the switch can change while the matrix is on
+    // screen.
     if (!layer.mayChooseSlot) {
       this.#note(
-        `${layer.name} takes its slot from a lighting console — change that in Settings to select here`,
+        `${layer.name} takes its slot from the lighting console while DMX is on — switch DMX off to select here, or set its slots to GUI in Settings`,
       );
       return;
     }
@@ -4845,6 +4992,7 @@ function generatorsShape(lines: readonly GeneratorLine[], loaded: boolean): stri
       line.instanceId ?? 'no-instance',
       line.typeId,
       line.published ? 'published' : 'unpublished',
+      line.locked ? 'locked' : 'free',
       line.parameters.map((parameter) => parameter.key).join('+'),
     ].join(':'),
   );
@@ -4861,6 +5009,9 @@ function effectsShape(layerId: string, chains: readonly ChainLine[], loaded: boo
           effect.typeId,
           effect.published ? 'published' : 'unpublished',
           effect.enabled ? 'on' : 'off',
+          // The lock decides which of the row's buttons are offered, which is
+          // drawn when the row is built.
+          effect.locked ? 'locked' : 'free',
           effect.parameters.map((parameter) => parameter.key).join('+'),
         ].join(':'),
       ),

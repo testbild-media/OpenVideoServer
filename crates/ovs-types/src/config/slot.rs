@@ -101,6 +101,13 @@ pub enum SourceRef {
         type_id: String,
         /// Manifest version of that generator.
         version: u32,
+        /// Whether an administrator has locked this generator in its slot.
+        ///
+        /// A locked generator cannot be taken out of its slot or replaced by
+        /// anybody, and only an administrator can lock or unlock one; see
+        /// [`crate::control`]. Left out of a document when it is not locked.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        locked: bool,
         /// Generator parameters as defined by its manifest.
         #[serde(default, skip_serializing_if = "ParameterMap::is_empty")]
         parameters: ParameterMap,
@@ -562,6 +569,7 @@ mod tests {
                 instance_id: GeneratorInstanceId::new(),
                 type_id: "ovs.solid_colour".to_owned(),
                 version: 1,
+                locked: true,
                 parameters: ParameterMap::from([(
                     "colour".to_owned(),
                     ParameterValue::Color([1.0, 0.0, 0.0, 1.0]),

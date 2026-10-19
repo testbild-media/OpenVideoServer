@@ -11,6 +11,8 @@
 //! - [`config`] — persistent configuration. Written to disk, survives restarts.
 //! - [`live`] — live state. Driven by the operator, the clock or a lighting
 //!   console. Never persisted as show data.
+//! - [`control`] — which of those may change what: the desk, the client, an
+//!   administrator.
 //! - [`media`] — logical media items and their physical assets.
 //! - [`telemetry`] — measured server and output state.
 //! - [`version`] — versions of every contract that can outlive a build.
@@ -44,6 +46,7 @@ pub const BUILD_COMMIT: &str = env!("OVS_BUILD_COMMIT");
 
 pub mod account;
 pub mod config;
+pub mod control;
 pub mod depth;
 pub mod error;
 pub mod geometry;

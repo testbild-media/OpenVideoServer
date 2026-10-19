@@ -8,6 +8,7 @@
 
 import type {
   DmxProtocols,
+  SetLockRequest,
   TestPatternMode,
   ImportShowResponse,
   MediaManifestEntry,
@@ -380,6 +381,9 @@ function registerHandlers(): void {
       slotIndex: number | null,
       order: readonly string[],
     ) => session.orderEffects(showId, layerId, slotIndex, order),
+  );
+  ipcMain.handle('ovs:set-lock', (_event, showId: string, request: SetLockRequest) =>
+    session.setLock(showId, request),
   );
   ipcMain.handle('ovs:dmx-protocols', () => session.dmxProtocols());
   ipcMain.handle('ovs:dmx-set', (_event, protocols: DmxProtocols) =>

@@ -24,6 +24,7 @@ use ovs_types::config::slot::ParameterValue;
 use ovs_types::config::{
     effects, generators, Choice, EffectInstance, Layer, ParameterMap, Show, SourceRef,
 };
+use ovs_types::control::DeskControls;
 use ovs_types::id::{EffectInstanceId, GeneratorInstanceId, LayerId, ShowId};
 use ovs_types::live::{EffectOverrides, GeneratorOverrides, LayerLive, LiveSnapshot, MasterLive};
 use ovs_types::telemetry::RendererStatus;
@@ -132,6 +133,11 @@ pub struct AuthoritativeState {
     effects: EffectOverrides,
     /// What a control source has done to the generators, by instance.
     generators: GeneratorOverrides,
+    /// What the open show's patch gives a lighting console.
+    ///
+    /// Read once per document rather than per request: it changes when the
+    /// show does, and every live request from a client asks it.
+    desk: DeskControls,
 }
 
 impl Default for AuthoritativeState {
@@ -155,6 +161,7 @@ impl AuthoritativeState {
             clock: MasterClock::new(master.bpm, 4, Instant::now()),
             tap: TapTempo::new(),
             effects: EffectOverrides::new(),
+            desk: DeskControls::default(),
         }
     }
 
@@ -180,6 +187,25 @@ impl AuthoritativeState {
     #[must_use]
     pub const fn master(&self) -> &MasterLive {
         &self.master
+    }
+
+    /// What the open show's patch gives a lighting console, switch or no switch.
+    #[must_use]
+    pub const fn desk(&self) -> &DeskControls {
+        &self.desk
+    }
+
+    /// What a lighting console holds right now, so that a client may not move it.
+    ///
+    /// `None` while the DMX switch is off, which is the client holding the
+    /// whole show (owner, 2026-10-19; see [`ovs_types::control`]).
+    #[must_use]
+    pub const fn desk_holds(&self) -> Option<&DeskControls> {
+        if self.master.dmx_enabled {
+            Some(&self.desk)
+        } else {
+            None
+        }
     }
 
     /// Returns the global clock.
@@ -238,15 +264,17 @@ impl AuthoritativeState {
             layers: self.layers.values().copied().collect(),
             effects: self.effects.clone(),
             generators: self.generators.clone(),
+            desk: self.desk.clone(),
             renderer: self.renderer.clone(),
         }
     }
 
     /// Opens a show, applying the restart policy.
     ///
-    /// Live state comes from the show's defaults, not from whatever the
-    /// previous show was doing. The only things `snapshot` contributes are the
-    /// BPM value and the selected slot per layer.
+    /// Live state comes from `snapshot` — the show as it was when it was last
+    /// open, all of it (owner, 2026-10-19) — and from the show's defaults where
+    /// there is none. Never from whatever the previous show was doing, with one
+    /// exception: the DMX switch, which is the server's and stays as it is.
     pub fn load_show(
         &mut self,
         mut show: Show,
@@ -260,20 +288,27 @@ impl AuthoritativeState {
         // And one of each: a show saved while a module still had a second
         // version opens numbered as the module now is.
         show.adopt_one_of_each();
+        let dmx_enabled = self.master.dmx_enabled;
         self.master = MasterLive::on_restart(&show.master, snapshot);
+        self.master.dmx_enabled = dmx_enabled;
         self.layers = show
             .layers
             .iter()
             .map(|layer| (layer.id, LayerLive::on_restart(layer, snapshot)))
             .collect();
 
-        // Every effect returns to the values the show configured. There is no
-        // `on_restart` for these because there is nothing to restore from: live
-        // effect values are not in the snapshot, deliberately, for the reason
-        // written down on [`LiveSnapshot`]. A show opens looking the way it was
-        // built.
-        self.effects.clear();
-        self.generators.clear();
+        // What a control source had put on the effects and generators comes
+        // back too, as far as this show and this build can still take it: an
+        // instance the show no longer has, or a value its manifest now
+        // refuses, is dropped rather than restored as something nothing can
+        // draw.
+        self.effects = snapshot
+            .map(|snapshot| restorable_effects(&show, &snapshot.effects))
+            .unwrap_or_default();
+        self.generators = snapshot
+            .map(|snapshot| restorable_generators(&show, &snapshot.generators))
+            .unwrap_or_default();
+        self.desk = DeskControls::of(&show);
 
         // A fresh clock at the show's tempo. The phase deliberately starts at
         // zero: it is not restored across a load, so the first beat of a show is
@@ -290,8 +325,9 @@ impl AuthoritativeState {
             show: self.show.clone().map(Box::new),
             master: self.master,
             layers: self.layers.values().copied().collect(),
-            effects: EffectOverrides::new(),
-            generators: GeneratorOverrides::new(),
+            effects: self.effects.clone(),
+            generators: self.generators.clone(),
+            desk: self.desk.clone(),
         })
     }
 
@@ -408,6 +444,9 @@ impl AuthoritativeState {
         }
         self.layers = layers;
 
+        // A patch edit is a document edit, so this is where a fixture parked or
+        // patched starts or stops holding what it drives.
+        self.desk = DeskControls::of(&show);
         self.show = Some(show);
 
         self.emit(StateChange::ShowLoaded {
@@ -416,6 +455,7 @@ impl AuthoritativeState {
             layers: self.layers.values().copied().collect(),
             effects: self.effects.clone(),
             generators: self.generators.clone(),
+            desk: self.desk.clone(),
         })
     }
 
@@ -447,12 +487,15 @@ impl AuthoritativeState {
         self.show.take()?;
         self.layers.clear();
         self.effects.clear();
+        self.generators.clear();
+        self.desk = DeskControls::default();
         Some(self.emit(StateChange::ShowLoaded {
             show: None,
             master: self.master,
             layers: Vec::new(),
             effects: EffectOverrides::new(),
             generators: GeneratorOverrides::new(),
+            desk: DeskControls::default(),
         }))
     }
 
@@ -886,8 +929,10 @@ impl AuthoritativeState {
 
     /// Builds the snapshot to persist so a restart can restore what it should.
     ///
-    /// Deliberately narrow: the BPM value and the selected slot per layer, and
-    /// nothing a console drives.
+    /// All of it (owner, 2026-10-19): the master, every layer, every live
+    /// value on an effect or a generator. The tempo and the selected slots are
+    /// written the old way as well, which costs a few bytes and lets a build
+    /// from before this read what it left.
     #[must_use]
     pub fn live_snapshot(&self) -> LiveSnapshot {
         LiveSnapshot {
@@ -897,6 +942,10 @@ impl AuthoritativeState {
                 .iter()
                 .map(|(layer_id, live)| (*layer_id, live.active_slot))
                 .collect(),
+            master: Some(self.master),
+            layers: self.layers.clone(),
+            effects: self.effects.clone(),
+            generators: self.generators.clone(),
         }
     }
 
@@ -951,6 +1000,52 @@ fn generator_instance(
             } if *instance_id == generator_instance_id => Some((type_id.as_str(), parameters)),
             _ => None,
         })
+}
+
+/// The live effect values a snapshot kept that this show can still take.
+///
+/// An instance the show no longer has is dropped, and so is a value its
+/// manifest refuses — a build that has changed what an effect accepts must not
+/// be handed a value it would refuse from a client.
+fn restorable_effects(show: &Show, kept: &EffectOverrides) -> EffectOverrides {
+    let mut restored = EffectOverrides::new();
+    for (id, values) in kept {
+        let Some(manifest) =
+            effect_instance(show, *id).and_then(|instance| effects::manifest(&instance.type_id))
+        else {
+            continue;
+        };
+        let accepted: ParameterMap = values
+            .iter()
+            .filter(|(key, value)| manifest.refuse(key, value).is_none())
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        if !accepted.is_empty() {
+            restored.insert(*id, accepted);
+        }
+    }
+    restored
+}
+
+/// The same, for the generators.
+fn restorable_generators(show: &Show, kept: &GeneratorOverrides) -> GeneratorOverrides {
+    let mut restored = GeneratorOverrides::new();
+    for (id, values) in kept {
+        let Some(manifest) =
+            generator_instance(show, *id).and_then(|(type_id, _)| generators::manifest(type_id))
+        else {
+            continue;
+        };
+        let accepted: ParameterMap = values
+            .iter()
+            .filter(|(key, value)| manifest.refuse(key, value).is_none())
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        if !accepted.is_empty() {
+            restored.insert(*id, accepted);
+        }
+    }
+    restored
 }
 
 pub(crate) fn effect_instance(
@@ -1574,7 +1669,9 @@ mod tests {
     }
 
     #[test]
-    fn the_persisted_snapshot_carries_only_what_survives_a_restart() {
+    fn the_persisted_snapshot_carries_the_whole_live_state() {
+        // The owner, 2026-10-19: "Nach neustart den kompletten status, so wie
+        // er war." This test used to say the opposite.
         let mut state = AuthoritativeState::new();
         let show = show();
         let layer_id = show.layers[0].id;
@@ -1585,53 +1682,103 @@ mod tests {
             master.set_dimmer(0.25);
             master.set_crossfader(1.0);
         });
+        state
+            .update_layer(layer_id, |live| live.set_opacity(0.5))
+            .expect("loaded");
 
         let persisted = state.live_snapshot();
-        assert_eq!(persisted.bpm, Some(174.0));
+        assert_eq!(persisted.bpm, Some(174.0), "still written the old way too");
         assert_eq!(persisted.selected_slot(layer_id), Some(3));
-
-        let json = serde_json::to_string(&persisted).expect("serialises");
-        for forbidden in ["dimmer", "crossfader", "freeze", "opacity", "transform"] {
-            assert!(
-                !json.contains(forbidden),
-                "a persisted snapshot must not carry {forbidden}"
-            );
-        }
+        let master = persisted.master.expect("the master");
+        assert_eq!(master.dimmer, 0.25);
+        assert_eq!(master.crossfader, 1.0);
+        assert_eq!(persisted.layer(layer_id).expect("the layer").opacity, 0.5);
     }
 
     #[test]
-    fn a_full_restart_cycle_lands_where_the_policy_says() {
+    fn a_full_restart_cycle_brings_everything_back_but_the_switch() {
         // Run a show, persist, restart, and check what comes back.
         let mut state = AuthoritativeState::new();
-        let show = show();
+        let (show, blur) = show_with_a_blur();
         let layer_id = show.layers[0].id;
         state.load_show(show.clone(), None);
 
-        state.select_slot(layer_id, 3).expect("valid");
         state.update_master(|master| {
             master.set_bpm(174.0);
             master.set_dimmer(0.2);
             master.set_crossfader(1.0);
             master.freeze = true;
+            master.dmx_enabled = false;
         });
+        state
+            .update_layer(layer_id, |live| {
+                live.set_opacity(0.4);
+                live.transform.x = 64.0;
+                live.route = ovs_types::config::Route::B;
+                live.transport = ovs_types::live::Transport::Paused;
+            })
+            .expect("loaded");
+        state
+            .set_effect_parameters(blur, &radius(12.0), false)
+            .expect("a value the blur takes");
         let persisted = state.live_snapshot();
 
+        // A server that has just started, with its DMX switch on.
         let mut restarted = AuthoritativeState::new();
         restarted.load_show(show, Some(&persisted));
 
-        assert_eq!(restarted.master().bpm, 174.0, "tempo survives");
-        assert_eq!(
-            restarted.layer(layer_id).expect("loaded").active_slot,
-            3,
-            "clips survive"
+        let master = restarted.master();
+        assert_eq!(master.bpm, 174.0);
+        assert_eq!(master.dimmer, 0.2, "left down, comes back down");
+        assert_eq!(master.crossfader, 1.0, "mid-crossfade, as it was left");
+        assert!(master.freeze);
+        assert!(
+            master.dmx_enabled,
+            "the switch is the server's, and a show does not carry it back"
         );
+
+        let layer = restarted.layer(layer_id).expect("loaded");
+        assert_eq!(layer.opacity, 0.4);
+        assert_eq!(layer.transform.x, 64.0);
+        assert_eq!(layer.route, ovs_types::config::Route::B);
+        assert_eq!(layer.transport, ovs_types::live::Transport::Paused);
+
         assert_eq!(
-            restarted.master().dimmer,
-            0.9,
-            "dimmer returns to the show default"
+            restarted.effect_value(blur, "radius_px"),
+            Some(ParameterValue::Float(12.0)),
+            "the blur somebody pushed is still pushed"
         );
-        assert_eq!(restarted.master().crossfader, 0.0, "not mid-crossfade");
-        assert!(!restarted.master().freeze, "freeze never survives");
+    }
+
+    #[test]
+    fn opening_another_show_leaves_the_dmx_switch_where_it_is() {
+        let mut state = AuthoritativeState::new();
+        state.load_show(show(), None);
+        state.update_master(|master| master.dmx_enabled = false);
+
+        state.load_show(show(), None);
+        assert!(
+            !state.master().dmx_enabled,
+            "switched off by hand, it stays off when the next show opens"
+        );
+    }
+
+    #[test]
+    fn a_restored_value_the_show_can_no_longer_take_is_dropped() {
+        let mut state = AuthoritativeState::new();
+        let (show, blur) = show_with_a_blur();
+        let mut snapshot = LiveSnapshot::default();
+        snapshot.effects.insert(blur, radius(100_000.0));
+        snapshot
+            .effects
+            .insert(EffectInstanceId::new(), radius(4.0));
+
+        state.load_show(show, Some(&snapshot));
+        assert!(
+            state.effect_overrides().is_empty(),
+            "neither a refused value nor an instance the show lacks comes back: {:?}",
+            state.effect_overrides()
+        );
     }
 
     #[test]
@@ -1750,10 +1897,11 @@ mod tests {
     }
 
     #[test]
-    fn reopening_the_show_gives_the_configured_value_back() {
-        // The promise a live control makes: an operator can push an effect
-        // anywhere during a number and tomorrow's show still opens at the value
-        // it was set up with.
+    fn reopening_the_show_brings_its_live_values_back_and_leaves_the_document_alone() {
+        // Two promises, and since 2026-10-19 they are different ones. A show
+        // comes back the way it was left ("so wie er war"), so the pushed
+        // value is there again; and the value was never written into the
+        // show, so opening it with nothing kept gives what it was built with.
         let mut state = AuthoritativeState::new();
         let (show, blur) = show_with_a_blur();
         state.load_show(show.clone(), None);
@@ -1761,43 +1909,22 @@ mod tests {
             .set_effect_parameters(blur, &radius(40.0), false)
             .expect("applies");
 
-        state.load_show(show, Some(&state.live_snapshot()));
-
-        assert!(
-            state.effect(blur).is_none(),
-            "a live value must not survive the show being opened again"
+        state.load_show(show.clone(), Some(&state.live_snapshot()));
+        assert_eq!(
+            state.effect(blur).and_then(|live| live.get("radius_px")),
+            Some(&ovs_types::config::ParameterValue::Float(40.0)),
+            "what was left on the blur comes back with the show"
         );
         assert_eq!(
             state.show().expect("open").layers[0].effects[0]
                 .parameters
                 .get("radius_px"),
-            Some(&ovs_types::config::ParameterValue::Float(8.0))
-        );
-    }
-
-    #[test]
-    fn a_restart_does_not_bring_live_effect_values_back() {
-        // The restart rule, applied to the newest kind of live value. What is persisted
-        // is the selected slot and the tempo, because an operator cannot get
-        // those back from the show; a configured effect value is in the
-        // show, so the show is where a restart takes it from.
-        let mut state = AuthoritativeState::new();
-        let (show, blur) = show_with_a_blur();
-        state.load_show(show.clone(), None);
-        state
-            .set_effect_parameters(blur, &radius(40.0), false)
-            .expect("applies");
-
-        let persisted = state.live_snapshot();
-        let json = serde_json::to_string(&persisted).expect("serialises");
-        assert!(
-            !json.contains("radius_px") && !json.contains(&blur.to_string()),
-            "a persisted snapshot must not carry live effect values: {json}"
+            Some(&ovs_types::config::ParameterValue::Float(8.0)),
+            "and the document never heard about it"
         );
 
-        let mut restarted = AuthoritativeState::new();
-        restarted.load_show(show, Some(&persisted));
-        assert!(restarted.effect(blur).is_none());
+        state.load_show(show, None);
+        assert!(state.effect(blur).is_none());
     }
 
     #[test]

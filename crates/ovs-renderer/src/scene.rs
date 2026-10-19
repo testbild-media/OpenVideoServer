@@ -1694,6 +1694,7 @@ mod tests {
                 instance_id: ovs_types::id::GeneratorInstanceId::new(),
                 type_id: "ovs.strobe".to_owned(),
                 version: 2,
+                locked: false,
                 parameters,
             };
             let state = state_showing_everything(show);

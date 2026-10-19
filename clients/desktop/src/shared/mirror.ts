@@ -12,6 +12,7 @@
 // its own copy would be two places to get the same thing wrong.
 
 import type {
+  DeskControls,
   LayerLive,
   MasterLive,
   ParameterValue,
@@ -51,6 +52,14 @@ export interface ShowState {
    * generator could collide.
    */
   generators: Map<string, Record<string, ParameterValue>>;
+  /**
+   * What the open show's patch gives a lighting console.
+   *
+   * Held only while the master's DMX switch is on. The server's own reading
+   * of the patch, sent with the show, so that what this client greys out is
+   * exactly what the server would refuse (owner, 2026-10-19).
+   */
+  desk: DeskControls;
   /** What the renderer is doing. */
   renderer: RendererStatus | null;
 }
@@ -72,6 +81,7 @@ export function emptyState(): ShowState {
     layers: new Map(),
     effects: new Map(),
     generators: new Map(),
+    desk: {},
     renderer: null,
   };
 }
@@ -100,6 +110,8 @@ export function apply(state: ShowState, message: ServerMessage): Applied {
       // moved anything, which is where every effect starts.
       state.effects = new Map(Object.entries(message.effects ?? {}));
       state.generators = new Map(Object.entries(message.generators ?? {}));
+      // Absent from a server older than the rule, which held nothing.
+      state.desk = message.desk ?? {};
       return { kind: 'applied' };
     }
 
@@ -129,13 +141,17 @@ function applyChange(state: ShowState, change: StateChange): void {
       state.show = change.show ?? null;
       state.master = change.master;
       state.layers = new Map(change.layers.map((layer) => [layer.layer_id, layer]));
-      // Empty, always — opening a show returns every effect to what it was
-      // configured with. Taken from the message rather than cleared here, for
-      // the same reason the master and the layers are: the restart policy lives
-      // in the core, and a client that emptied its own copy would be a second
-      // implementation of it that has to agree with the server's for ever.
+      // What they were when the show was last open: a show comes back the way
+      // it was left (owner, 2026-10-19). Taken from the message rather than
+      // worked out here, for the same reason the master and the layers are: the
+      // restart policy lives in the core, and a client with its own copy would
+      // be a second implementation of it that has to agree with the server's
+      // for ever.
       state.effects = new Map(Object.entries(change.effects ?? {}));
       state.generators = new Map(Object.entries(change.generators ?? {}));
+      // A patch edit is a document edit, so this is where a fixture starts or
+      // stops holding what it drives.
+      state.desk = change.desk ?? {};
       break;
     }
 

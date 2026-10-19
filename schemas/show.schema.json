@@ -262,7 +262,7 @@
       ],
       "properties": {
         "enabled": {
-          "description": "Whether this effect contributes to the chain.",
+          "description": "Whether this effect contributes to the chain.\n\nEverybody's to change, locked or not (owner, 2026-10-19).",
           "type": "boolean"
         },
         "id": {
@@ -272,6 +272,10 @@
               "$ref": "#/definitions/EffectInstanceId"
             }
           ]
+        },
+        "locked": {
+          "description": "Whether an administrator has locked this effect where it is.\n\nA locked effect cannot be removed, moved or put in another order by anybody, and only an administrator can lock or unlock one; see [`crate::control`]. Left out of a document when it is not locked, so a show nobody has locked anything in reads exactly as it did before.",
+          "type": "boolean"
         },
         "parameters": {
           "description": "Parameter values as declared by the manifest.",
@@ -567,8 +571,8 @@
           ]
         },
         "slot_control": {
-          "description": "Who may choose this layer's slot.\n\nAbsent from a document written before the setting existed, which reads as [`SlotControl::Either`] — exactly what such a show did.",
-          "default": "either",
+          "description": "Who may choose this layer's slot.\n\nAbsent from a document written before the setting existed, which reads as [`SlotControl::Dmx`]: a desk patched to the layer chose its slots then too.",
+          "default": "dmx",
           "allOf": [
             {
               "$ref": "#/definitions/SlotControl"
@@ -1261,27 +1265,20 @@
       }
     },
     "SlotControl": {
-      "description": "Who may choose which slot a layer plays.\n\nThe owner, 2026-10-16: \"Layer Slotauswahl, pro Layer von DMX oder GUI abschaltbar, also das nur eins schalten kann. Ich habe layer die ich gerne transformieren möchte, aber keinen Slot auswählen möchte per DMX.\"\n\n**It exists because the two fight.** On his rig the FX layer is driven entirely from the desk, slots included, while layers 1 to 6 have their slots picked in the client — people who are not lighting operators simply press the picture they want, which turned out to be the practical thing in the room. A console holding its slot channel at a value re-sends it forty-four times a second, so without this the desk wins every time and the button somebody just pressed comes undone under their hand.\n\nThis is only about *choosing a slot*. Everything else a console does to such a layer — the dimmer, the transform, the effects — is untouched, which is the whole point: he wants to transform these layers from the desk and only not to select on them.",
+      "description": "Who may choose which slot a layer plays.\n\nThe owner, 2026-10-16: \"Layer Slotauswahl, pro Layer von DMX oder GUI abschaltbar, also das nur eins schalten kann. Ich habe layer die ich gerne transformieren möchte, aber keinen Slot auswählen möchte per DMX.\"\n\n**It exists because the two fight.** On his rig the FX layer is driven entirely from the desk, slots included, while layers 1 to 6 have their slots picked in the client — people who are not lighting operators simply press the picture they want, which turned out to be the practical thing in the room. A console holding its slot channel at a value re-sends it forty-four times a second, so without this the desk wins every time and the button somebody just pressed comes undone under their hand.\n\nThis is only about *choosing a slot*. Everything else a console does to such a layer — the dimmer, the transform, the effects — is untouched, which is the whole point: he wants to transform these layers from the desk and only not to select on them.\n\n**One or the other, never both** (owner, 2026-10-19: \"Pro Layer Slot entweder DMX oder GUI, nicht beides!\"). There used to be a third setting that let either choose, and it was the default; the two fought exactly as described above. A document that still says `either`, `client_only` or `desk_only` reads as the one of these two it meant.\n\n[`Dmx`](Self::Dmx) does not by itself take the slots away from the client. It hands them to a desk *when one is patched to this layer and the DMX switch is on*; until then nothing drives them but the client, which is why it can be the default (see [`crate::control`]).",
       "oneOf": [
         {
-          "description": "Both may. What every show written before this field did, and so the default: adding the setting must not change a single existing show.",
+          "description": "A patched console chooses, while DMX is on. The default.",
           "type": "string",
           "enum": [
-            "either"
+            "dmx"
           ]
         },
         {
-          "description": "The client only. A console's slot channel is read and ignored here.",
+          "description": "The client chooses, always. A console's slot channel is read and ignored here, and everything else it drives on the layer still moves.",
           "type": "string",
           "enum": [
-            "client_only"
-          ]
-        },
-        {
-          "description": "A console only. The client's slot buttons are refused on this layer, so nobody takes a desk-driven layer off its cue by pressing a picture.",
-          "type": "string",
-          "enum": [
-            "desk_only"
+            "gui"
           ]
         }
       ]
@@ -1377,6 +1374,10 @@
               "enum": [
                 "generator"
               ]
+            },
+            "locked": {
+              "description": "Whether an administrator has locked this generator in its slot.\n\nA locked generator cannot be taken out of its slot or replaced by anybody, and only an administrator can lock or unlock one; see [`crate::control`]. Left out of a document when it is not locked.",
+              "type": "boolean"
             },
             "parameters": {
               "description": "Generator parameters as defined by its manifest.",

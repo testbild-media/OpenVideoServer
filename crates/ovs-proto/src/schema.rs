@@ -167,6 +167,11 @@ pub fn generate_protocol() -> Vec<GeneratedSchema> {
             "order-effects-response.schema.json",
             crate::http::OrderEffectsResponse
         ),
+        schema!("set-lock-request.schema.json", crate::http::SetLockRequest),
+        schema!(
+            "set-lock-response.schema.json",
+            crate::http::SetLockResponse
+        ),
         schema!(
             "set-banks-request.schema.json",
             crate::http::SetBanksRequest

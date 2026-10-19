@@ -116,10 +116,12 @@ mod integration {
         let mut restarted = AuthoritativeState::new();
         restarted.load_show(reloaded, snapshot.as_ref());
 
+        // Where it was left, all of it (owner, 2026-10-19: "Nach neustart den
+        // kompletten status, so wie er war"), through the real database.
         assert_eq!(restarted.master().bpm, 174.0);
         assert_eq!(restarted.layer(layer_id).expect("loaded").active_slot, 3);
-        assert_eq!(restarted.master().dimmer, 0.9, "back to the show default");
-        assert_eq!(restarted.master().crossfader, 0.0);
+        assert_eq!(restarted.master().dimmer, 0.2, "the dimmer as it was left");
+        assert_eq!(restarted.master().crossfader, 1.0);
         assert!(!restarted.master().freeze);
     }
 

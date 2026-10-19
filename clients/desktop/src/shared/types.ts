@@ -80,6 +80,15 @@ export type SlotSource =
        * value.
        */
       live: Record<string, ParameterValue>;
+      /**
+       * The parameters a lighting console holds on this generator right now.
+       *
+       * Empty while the DMX switch is off and for a generator nothing is
+       * patched to. Shown and not offered (owner, 2026-10-19).
+       */
+      held: string[];
+      /** Whether an administrator has locked this generator in its slot. */
+      locked: boolean;
     };
 
 /**
