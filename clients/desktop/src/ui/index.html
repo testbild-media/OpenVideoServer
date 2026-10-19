@@ -734,6 +734,15 @@
       <section id="library-panel">
         <div class="panel-head">
           <h2>Library</h2>
+          <!-- Every folder, not only the open one: somebody searching does not
+               know which folder it is in. Finds folders by name as well. -->
+          <input
+            id="library-search"
+            class="browser-search"
+            type="search"
+            placeholder="Search folders and media"
+            aria-label="Search folders and media"
+          />
           <button id="library-new-folder" type="button">New folder</button>
           <button id="library-refresh" type="button">Refresh</button>
         </div>
@@ -746,6 +755,8 @@
         <div id="library-body">
           <nav id="library-folders" aria-label="Folders"></nav>
           <div id="library-content">
+            <!-- Where this is, each step a way back up (owner, 2026-10-20). -->
+            <nav id="library-path" class="browse-path" aria-label="Where you are"></nav>
             <p id="library-note"></p>
             <div id="library-grid"></div>
           </div>

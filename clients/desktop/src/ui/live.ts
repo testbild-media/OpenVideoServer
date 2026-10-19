@@ -134,7 +134,9 @@ import type { Route } from '../shared/types.js';
 import type { Transform2D } from '@ovs/schema';
 import { hexFromLinear, linearFromHex } from '../shared/colour.js';
 import { emptyCatalogue, type Catalogue } from '../shared/modules.js';
-import { facts, stateLabel } from '../shared/media.js';
+import { durationLabel, facts, stateLabel } from '../shared/media.js';
+import { browse, whereLabel, type Crumb, type FolderTile } from '../shared/browse.js';
+import { ROOT_FOLDER } from '../shared/folders.js';
 import {
   BROWSER_TABS,
   WORK_TABS,
@@ -148,7 +150,6 @@ import {
   generatorLines,
   generatorTiles,
   libraryLines,
-  matching,
   matchingEffects,
   matchingGenerators,
   matchingNdi,
@@ -610,6 +611,8 @@ function holdForDesk(node: HTMLElement, held: boolean, otherwise?: string): void
 /** The BROWSER tab's own nodes, which outlive a redraw so typing survives one. */
 interface BrowserNodes {
   search: HTMLInputElement;
+  /** Which folder of the library the grid is, as a path back up. MEDIA only. */
+  path: HTMLElement;
   grid: HTMLElement;
   note: HTMLElement;
   /**
@@ -692,6 +695,10 @@ export class LivePanel {
    * tab being left and come back to, and so that a redraw cannot lose it.
    */
   #librarySearch = '';
+  /** Which folder of the library the MEDIA browser has open. The root is ''. */
+  #browserFolder = '';
+  /** Every folder the library has, empty ones included. */
+  #libraryFolders: string[] = [];
   /**
    * What is being dragged out of the browser, while a drag is in progress.
    *
@@ -2540,7 +2547,7 @@ export class LivePanel {
     this.#optionsShape = '';
     if (this.#browser === null) {
       this.#browser = this.#buildBrowser();
-      this.#ui.workTool.replaceChildren(this.#browser.note, this.#browser.grid);
+      this.#ui.workTool.replaceChildren(this.#browser.path, this.#browser.note, this.#browser.grid);
     }
     // The search goes on the title line, which is the panel's head rather than
     // its tool. Moved rather than rebuilt: it holds what somebody typed.
@@ -2578,7 +2585,75 @@ export class LivePanel {
 
     const grid = make('div', 'browser-grid');
     const note = make('p', 'empty-note');
-    return { search, grid, note, shape: '', tiles: new Map() };
+    const path = make('nav', 'browse-path browser-path');
+    path.setAttribute('aria-label', 'Which folder this is');
+    return { search, path, grid, note, shape: '', tiles: new Map() };
+  }
+
+  /**
+   * Opens one folder of the library in the MEDIA browser.
+   *
+   * The search goes with it, for the reason it does on the MEDIA screen:
+   * somebody who picked a folder out of the results asked for its contents.
+   */
+  #browseInto(folder: string): void {
+    this.#browserFolder = folder;
+    this.#librarySearch = '';
+    if (this.#browser !== null) {
+      this.#browser.search.value = '';
+    }
+    this.#drawBrowser();
+  }
+
+  /** Where the MEDIA browser is, as a path back up. */
+  #drawBrowserPath(path: HTMLElement, crumbs: readonly Crumb[], searching: boolean): void {
+    const parts: HTMLElement[] = [];
+    crumbs.forEach((crumb, index) => {
+      if (index > 0) {
+        parts.push(make('span', 'browse-path-gap', '›'));
+      }
+      parts.push(
+        index === crumbs.length - 1 && !searching
+          ? make('span', 'browse-path-here', crumb.name)
+          : button(crumb.name, () => this.#browseInto(crumb.path), {
+              className: 'browse-path-step',
+              title: `Open ${crumb.name}`,
+            }),
+      );
+    });
+    if (searching) {
+      parts.push(
+        make('span', 'browse-path-gap', '›'),
+        make('span', 'browse-path-here', 'every folder'),
+      );
+    }
+    path.replaceChildren(...parts);
+  }
+
+  /** One folder of the library as a tile: pressed, it opens. */
+  #folderTile(folder: FolderTile | { path: string; up: true }, searching: boolean): HTMLElement {
+    const up = 'up' in folder;
+    const tile = button('', () => this.#browseInto(folder.path), {
+      className: up ? 'folder-tile browser-folder up' : 'folder-tile browser-folder',
+      title: up ? `Back up to ${whereLabel(folder.path)}` : `Open ${whereLabel(folder.path)}`,
+    });
+    const glyph = make('div', 'folder-glyph-frame');
+    glyph.append(make('span', up ? 'folder-glyph up' : 'folder-glyph'));
+    tile.append(glyph, make('span', 'folder-tile-name', up ? '..' : folder.name));
+    tile.append(
+      make(
+        'span',
+        'folder-tile-line',
+        up
+          ? whereLabel(folder.path)
+          : searching
+            ? `in ${folder.where}`
+            : folder.count === 0
+              ? 'empty'
+              : `${folder.count} item${folder.count === 1 ? '' : 's'}`,
+      ),
+    );
+    return tile;
   }
 
   /**
@@ -2613,7 +2688,7 @@ export class LivePanel {
     browser.search.hidden = false;
     browser.search.placeholder =
       kind === 'media'
-        ? 'Search the clips'
+        ? 'Search folders and clips'
         : kind === 'generators'
           ? 'Search the generators'
           : kind === 'inputs'
@@ -2622,8 +2697,31 @@ export class LivePanel {
 
     const inputs =
       kind === 'inputs' ? matchingNdi(ndiTiles(this.#ndiSources), this.#librarySearch) : [];
-    const clips =
-      kind === 'media' ? matching(libraryLines(this.#library, this.#view.layers), this.#librarySearch) : [];
+    // **One folder at a time, as folders** (owner, 2026-10-20: "Bei Live
+    // wurden einfach alle Videos im Fenster angezeigt"). It was every clip in
+    // the library in one grid, and a search over names only — so a folder
+    // could not be found, and two clips of one name could not be told apart.
+    const library =
+      kind === 'media'
+        ? browse(
+            libraryLines(this.#library, this.#view.layers),
+            (line) => line.item,
+            this.#libraryFolders,
+            this.#browserFolder,
+            this.#librarySearch,
+          )
+        : null;
+    if (library !== null) {
+      this.#browserFolder = library.at;
+    }
+    const clips = library?.items ?? [];
+    const folders = library?.folders ?? [];
+    const up = library !== null && !library.searching ? library.up : null;
+    const searching = library?.searching ?? false;
+    browser.path.hidden = library === null;
+    if (library !== null) {
+      this.#drawBrowserPath(browser.path, library.crumbs, searching);
+    }
     const generators =
       kind === 'generators'
         ? matchingGenerators(generatorTiles(this.#catalogue), this.#librarySearch)
@@ -2633,13 +2731,21 @@ export class LivePanel {
 
     const typed = this.#librarySearch.trim();
     const empty =
-      clips.length === 0 && generators.length === 0 && effects.length === 0 && inputs.length === 0;
+      clips.length === 0 &&
+      folders.length === 0 &&
+      generators.length === 0 &&
+      effects.length === 0 &&
+      inputs.length === 0;
     browser.note.hidden = !empty;
     browser.note.textContent =
       typed !== ''
-        ? `Nothing matches “${typed}”.`
+        ? kind === 'media'
+          ? `Nothing in any folder matches “${typed}”.`
+          : `Nothing matches “${typed}”.`
         : kind === 'media'
-          ? 'This server holds no media yet. Import some in MEDIA.'
+          ? this.#library.length === 0
+            ? 'This server holds no media yet. Import some in MEDIA.'
+            : 'Nothing is filed in this folder yet. Files are put in folders in MEDIA.'
           : kind === 'inputs'
             ? 'No NDI\u00AE senders on this network.'
             : `This server publishes no ${kind}.`;
@@ -2650,6 +2756,8 @@ export class LivePanel {
     // somebody's pointer mid-drag.
     const shape = [
       kind,
+      library === null ? '' : `${library.at}:${searching ? 'search' : 'folder'}:${up ?? ''}`,
+      folders.map((folder) => `${folder.path}=${folder.count}`).join(','),
       clips.map((line) => line.item.id).join(','),
       generators.map((tile) => tile.typeId).join(','),
       effects.map((tile) => tile.typeId).join(','),
@@ -2663,8 +2771,17 @@ export class LivePanel {
       // No headings: the tab is the heading, and one over a grid of the only
       // kind in it says nothing the rail did not already say.
       const children: HTMLElement[] = [];
+      if (up !== null) {
+        children.push(this.#folderTile({ path: up, up: true }, false));
+      }
+      for (const folder of folders) {
+        children.push(this.#folderTile(folder, searching));
+      }
       for (const line of clips) {
-        const tile = this.#browserTile(line);
+        const tile = this.#browserTile(
+          line,
+          searching ? whereLabel(line.item.folder ?? ROOT_FOLDER) : null,
+        );
         browser.tiles.set(line.item.id, tile);
         children.push(tile);
       }
@@ -2743,8 +2860,15 @@ export class LivePanel {
     return node;
   }
 
-  /** One item of the library as an icon that can be dragged onto a pad. */
-  #browserTile(line: LibraryLine): HTMLElement {
+  /**
+   * One item of the library as an icon that can be dragged onto a pad.
+   *
+   * Under the name, whether it is a clip or a still and how long a clip runs —
+   * and during a search, which folder it is in. A library where a clip and a
+   * still, or two clips in two folders, share a name has to say which one a
+   * tile is without being hovered over (owner, 2026-10-20).
+   */
+  #browserTile(line: LibraryLine, where: string | null = null): HTMLElement {
     const source: SlotSource = { kind: 'media', mediaItemId: line.item.id };
     const tile = make('div', 'browser-tile');
     tile.draggable = true;
@@ -2753,6 +2877,17 @@ export class LivePanel {
     const picture = make('div', 'browser-tile-picture');
     this.#paintTilePicture(picture, line.item.id);
     tile.append(picture, make('span', 'browser-tile-name', line.item.display_name));
+    const length = durationLabel(line.item.duration_ms);
+    tile.append(
+      make(
+        'span',
+        'browser-tile-line',
+        line.item.kind === 'image' ? 'Still' : length === null ? 'Video' : `Video ${length}`,
+      ),
+    );
+    if (where !== null) {
+      tile.append(make('span', 'browser-tile-line where', where));
+    }
     if (line.onAir) {
       tile.append(make('span', 'on-air', 'ON AIR'));
     }
@@ -2874,7 +3009,12 @@ export class LivePanel {
 
   /** What a longer hover over a library icon says. */
   #tileTitle(line: LibraryLine): string {
-    const parts = [line.item.display_name, stateLabel(line.item.state)];
+    const parts = [
+      line.item.display_name,
+      whereLabel(line.item.folder ?? ROOT_FOLDER),
+      line.item.original_filename,
+      stateLabel(line.item.state),
+    ];
     for (const entry of facts(line.item)) {
       parts.push(`${entry.label}: ${entry.value}`);
     }
@@ -4612,6 +4752,7 @@ export class LivePanel {
       return;
     }
     this.#library = answer.value.items;
+    this.#libraryFolders = answer.value.folders;
     this.#names.clear();
     for (const item of answer.value.items) {
       this.#names.set(item.id, item.display_name);

@@ -3899,6 +3899,18 @@ table.channels .control {
   max-height: 55vh;
 }
 
+/* Three buttons beside the title left the title "IMPO…". The buttons go on a
+   line of their own under it instead, at the width they need. */
+
+#ingest-panel > .panel-head {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+#ingest-panel > .panel-head h2 {
+  flex: 1 0 100%;
+}
+
 #ingest-into {
   margin: 6px 0 0;
 }
@@ -4180,6 +4192,179 @@ button.danger {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 10px;
+}
+
+/* Where the grid is, as a path back up (owner, 2026-10-20: "richtige Ordner …
+   und nicht nur Links in dem Baum"). The same in MEDIA and in the Live
+   browser. */
+
+.browse-path {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  margin: 0 0 8px;
+  font-size: 12px;
+}
+
+.browse-path[hidden] {
+  display: none;
+}
+
+.browser-path {
+  margin-bottom: 6px;
+  font-size: 11px;
+}
+
+.browse-path-step {
+  padding: 1px 4px;
+  background: none;
+  border: none;
+  border-radius: 3px;
+  color: var(--dim);
+  cursor: pointer;
+  font: inherit;
+}
+
+.browse-path-step:hover {
+  background: #26262c;
+  color: var(--text);
+}
+
+.browse-path-gap {
+  color: var(--mark);
+}
+
+.browse-path-here {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A folder in the grid, drawn as a folder: pressed, it opens; a clip dropped
+   on it is filed there. The same box as a clip's card, so the two read as one
+   grid, with a folder where the picture would be. */
+
+/* `align-items: stretch` said out loud, because a `<button>` does not do it on
+   its own: measured, the folder's picture frame came out 0x0 and the name as
+   wide as its text, so the tile showed no folder at all. */
+
+.folder-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 3px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 6px;
+  text-align: left;
+  background: #101013;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+}
+
+.folder-tile:hover {
+  border-color: var(--dim);
+}
+
+.folder-tile.drop-target {
+  border-color: var(--waiting);
+  box-shadow: inset 0 0 0 1px var(--waiting);
+}
+
+.browser-folder {
+  padding: 4px;
+  background: var(--panel);
+  border-radius: 3px;
+}
+
+.folder-glyph-frame {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #06080c;
+  border-radius: 3px;
+}
+
+/* The folder itself: a body and a tab, in the colour a folder has been on
+   every desktop anybody has used. */
+
+.folder-glyph {
+  position: relative;
+  width: 40%;
+  aspect-ratio: 5 / 4;
+  margin-top: 6%;
+  background: #a87b2e;
+  border-radius: 1px 4px 4px 4px;
+}
+
+.folder-glyph::before {
+  content: '';
+  position: absolute;
+  top: -14%;
+  left: 0;
+  width: 44%;
+  height: 16%;
+  background: #a87b2e;
+  border-radius: 3px 3px 0 0;
+}
+
+.folder-glyph.up::after {
+  content: '\2191';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #101013;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+/* `min-width: 0` on every line, for the reason `.media-card` has it: a flex
+   item's minimum width is its content's, and one long folder name pushed the
+   tile past its column before the ellipsis could apply. */
+
+.folder-tile-name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browser-folder .folder-tile-name {
+  font-size: 11px;
+}
+
+.folder-tile-line,
+.media-where,
+.browser-tile-line {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dim);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Which folder a search result is in, which is the whole difference between
+   two clips of the same name. */
+
+.media-where,
+.browser-tile-line.where {
+  color: var(--waiting);
 }
 
 #library-note {

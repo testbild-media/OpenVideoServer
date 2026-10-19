@@ -285,6 +285,70 @@ const CONTROLS = [
       " named.value = 'Press probe';" +
       " named.dispatchEvent(new Event('input'));",
   },
+  // --- folders, as folders (owner, 2026-10-20) ---
+  //
+  // In MEDIA and in the Live browser alike: a folder is a tile that opens, a
+  // path goes back up, a search finds folders by name, and a clip or a folder
+  // dragged onto a folder goes into it.
+  {
+    what: 'open a folder tile',
+    selector: '#library-grid .folder-tile:not(.up)',
+    open: ['#mode-media'],
+    reveals: { selector: '#library-path .browse-path-here', text: 'Nachtfahrt' },
+  },
+  {
+    what: 'go back up the path',
+    selector: '#library-path .browse-path-step',
+    reveals: { selector: '#library-grid .folder-tile-name', text: 'Zweiter Ordner' },
+  },
+  {
+    what: 'file a clip on a folder',
+    selector: '#library-grid .media-card',
+    drag: '#library-grid .folder-tile:not(.up)',
+    call: 'fileMedia',
+  },
+  {
+    what: 'drag a folder into one',
+    selector: '#library-grid .folder-tile[title="Open Zweiter Ordner"]',
+    drag: '#library-grid .folder-tile[title^="Open Nachtfahrt"]',
+    call: 'renameFolder',
+  },
+  {
+    what: 'drag a tree folder in',
+    selector: '#library-folders .folder-row:has(.folder-name[title="Zweiter Ordner"])',
+    drag: '#library-folders .folder-row:has(.folder-name[title^="Nachtfahrt"])',
+    call: 'renameFolder',
+  },
+  {
+    what: 'search for a folder',
+    selector: '#library-search',
+    turn: { value: 'Unterordner', event: 'input' },
+    reveals: { selector: '#library-grid .folder-tile-name', text: 'Unterordner' },
+  },
+  {
+    what: 'open a folder it found',
+    selector: '#library-grid .folder-tile:not(.up)',
+    reveals: { selector: '#library-path .browse-path-here', text: 'Unterordner' },
+  },
+  {
+    what: 'a Live browser folder',
+    selector: '.browser-folder:not(.up)',
+    open: ['#mode-live', '[data-tab="media"]'],
+    reveals: { selector: '.browser-path .browse-path-here', text: 'Nachtfahrt' },
+  },
+  {
+    what: 'Live browser back up',
+    selector: '.browser-folder.up',
+    reveals: { selector: '.browser-folder .folder-tile-name', text: 'Zweiter Ordner' },
+  },
+  {
+    what: 'Live search a folder',
+    selector: '.browser-search',
+    // One a level down, which the top of the library does not show: a search
+    // that found only what was already on screen would prove nothing.
+    turn: { value: 'Unterordner', event: 'input' },
+    reveals: { selector: '.browser-folder .folder-tile-name', text: 'Unterordner' },
+  },
   // Emptying a pad. Last in this list on purpose: every probe above it works
   // on a pad with something in it, and this one takes that away. A probe that
   // quietly broke the ones after it would read as a bug in whatever ran next.
@@ -382,12 +446,40 @@ async function press(win, control) {
   // A button is clicked and a field is turned. The value is assigned before the
   // event because the listener reads it off the element rather than off the
   // event -- which is also the reason a click never reached one.
-  const act = control.turn
-    ? `n.value = ${JSON.stringify(String(control.turn.value))};` +
-      ` n.dispatchEvent(new Event(${JSON.stringify(control.turn.event)}))`
-    : 'n.click()';
-  await win.webContents.executeJavaScript(`(() => { const n = ${find}; ${act}; })()`);
+  //
+  // And a thing that is dragged is dragged: picked up, carried over the
+  // target and let go, with one DataTransfer through all four events, which
+  // is what a real drag hands every listener. Filing a clip and moving a
+  // folder are nothing but this, so a click proves nothing about either.
+  const act = control.drag
+    ? `const t = document.querySelector(${JSON.stringify(control.drag)});` +
+      ' if (!t) throw new Error("nothing to drop on");' +
+      ' const d = new DataTransfer();' +
+      ' const ev = (type) => new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: d });' +
+      " n.dispatchEvent(ev('dragstart')); t.dispatchEvent(ev('dragover'));" +
+      " t.dispatchEvent(ev('drop')); n.dispatchEvent(ev('dragend'))"
+    : control.turn
+      ? `n.value = ${JSON.stringify(String(control.turn.value))};` +
+        ` n.dispatchEvent(new Event(${JSON.stringify(control.turn.event)}))`
+      : 'n.click()';
+  try {
+    await win.webContents.executeJavaScript(`(() => { const n = ${find}; ${act}; })()`);
+  } catch (error) {
+    return { verdict: 'BROKEN', detail: `the press itself failed: ${error.message}` };
+  }
   await new Promise((resolve) => setTimeout(resolve, 250));
+
+  // A control that changes what the screen says rather than what it sends:
+  // opening a folder, searching for one. Proved by the words that appear.
+  if (control.reveals) {
+    const shown = await win.webContents.executeJavaScript(
+      `(() => { const r = [...document.querySelectorAll(${JSON.stringify(control.reveals.selector)})];` +
+        ` return r.some((x) => x.offsetParent !== null && x.textContent.includes(${JSON.stringify(control.reveals.text)})); })()`,
+    );
+    return shown
+      ? { verdict: 'shows', detail: `${control.reveals.selector} says “${control.reveals.text}”` }
+      : { verdict: 'DEAD', detail: `${control.reveals.selector} never said “${control.reveals.text}”` };
+  }
 
   if (measure !== null) {
     const shapeAfter = await win.webContents.executeJavaScript(measure);

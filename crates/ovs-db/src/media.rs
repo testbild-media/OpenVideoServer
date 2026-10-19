@@ -384,7 +384,7 @@ impl Database {
     pub fn delete_media_folder(&mut self, path: &str) -> Result<bool> {
         let under = format!("{path}/");
         let items: i64 = self.connection().query_row(
-            "SELECT COUNT(*) FROM media_items WHERE folder = ?1 OR folder LIKE ?2 || '%'",
+            "SELECT COUNT(*) FROM media_items WHERE folder = ?1 OR SUBSTR(folder, 1, LENGTH(?2)) = ?2",
             params![path, under],
             |row| row.get(0),
         )?;
@@ -395,7 +395,7 @@ impl Database {
         }
 
         let children: i64 = self.connection().query_row(
-            "SELECT COUNT(*) FROM media_folders WHERE path LIKE ?1 || '%'",
+            "SELECT COUNT(*) FROM media_folders WHERE SUBSTR(path, 1, LENGTH(?1)) = ?1",
             params![under],
             |row| row.get(0),
         )?;
@@ -512,7 +512,7 @@ impl Database {
         transaction.execute(
             "UPDATE media_folders
                 SET path = ?2 || SUBSTR(path, LENGTH(?1) + 1)
-              WHERE path LIKE ?1 || '%'",
+              WHERE SUBSTR(path, 1, LENGTH(?1)) = ?1",
             params![under, format!("{to}/")],
         )?;
         transaction.execute(
@@ -522,7 +522,7 @@ impl Database {
         transaction.execute(
             "UPDATE media_items
                 SET folder = ?2 || SUBSTR(folder, LENGTH(?1) + 1)
-              WHERE folder LIKE ?1 || '%'",
+              WHERE SUBSTR(folder, 1, LENGTH(?1)) = ?1",
             params![under, format!("{to}/")],
         )?;
         transaction.commit()?;
@@ -785,6 +785,81 @@ mod tests {
             frame_rate: Some(FrameRate::FPS_60),
             ..MediaItem::importing("Intro", "intro.mov")
         }
+    }
+
+    #[test]
+    fn moving_a_folder_moves_what_is_under_it_and_nothing_else() {
+        // The owner's names carry underscores, and `_` in a `LIKE` matches any
+        // character — so moving `Visual_Smiley` used to take `VisualXSmiley`'s
+        // folders with it, and moving `loops` took `Loops`', because `LIKE`
+        // ignores case too.
+        let mut database = Database::open_in_memory().expect("opens");
+        for path in [
+            "Visual_Smiley",
+            "Visual_Smiley/Night",
+            "VisualXSmiley",
+            "VisualXSmiley/Day",
+            "loops",
+            "Loops",
+            "Loops/Tunnel",
+            "Archive",
+        ] {
+            database.create_media_folder(path).expect("creates");
+        }
+        let mut under = analysed_item();
+        under.folder = "Visual_Smiley/Night".to_owned();
+        database.upsert_media_item(&under).expect("stores");
+        let mut neighbour = analysed_item();
+        neighbour.folder = "VisualXSmiley/Day".to_owned();
+        database.upsert_media_item(&neighbour).expect("stores");
+
+        database
+            .rename_media_folder("Visual_Smiley", "Archive/Visual_Smiley")
+            .expect("moves");
+        database
+            .rename_media_folder("loops", "Archive/loops")
+            .expect("moves");
+
+        let folders = database.list_media_folders().expect("lists");
+        for kept in [
+            "VisualXSmiley",
+            "VisualXSmiley/Day",
+            "Loops",
+            "Loops/Tunnel",
+        ] {
+            assert!(
+                folders.iter().any(|path| path == kept),
+                "{kept} stays: {folders:?}"
+            );
+        }
+        assert!(folders
+            .iter()
+            .any(|path| path == "Archive/Visual_Smiley/Night"));
+        assert_eq!(
+            database.load_media_item(under.id).expect("loads").folder,
+            "Archive/Visual_Smiley/Night"
+        );
+        assert_eq!(
+            database
+                .load_media_item(neighbour.id)
+                .expect("loads")
+                .folder,
+            "VisualXSmiley/Day",
+            "a neighbour whose name differs by one character stays where it was"
+        );
+    }
+
+    #[test]
+    fn a_folder_with_folders_under_it_is_not_deleted() {
+        let mut database = Database::open_in_memory().expect("opens");
+        database.create_media_folder("A_B").expect("creates");
+        database.create_media_folder("AxB/child").expect("creates");
+        // Nothing under A_B itself; AxB's child must not count as its.
+        assert!(database.delete_media_folder("A_B").expect("deletes"));
+        assert!(
+            database.delete_media_folder("AxB").is_err(),
+            "AxB holds a folder"
+        );
     }
 
     #[test]

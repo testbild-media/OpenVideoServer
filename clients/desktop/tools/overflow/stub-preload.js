@@ -322,7 +322,9 @@ const answers = {
   mediaLibrary: async () =>
     ok({
       items: [item(1), item(2), item(13)],
-      folders: [LONG, `${LONG}/Unterordner mit langem Namen`],
+      // Two at the top, so one can be dragged into the other (owner,
+      // 2026-10-20: folders into folders, the way clips go into them).
+      folders: [LONG, `${LONG}/Unterordner mit langem Namen`, 'Zweiter Ordner'],
     }),
   catalogues: async () => ok({ effects: [effect], generators: [generator] }),
   shows: async () =>

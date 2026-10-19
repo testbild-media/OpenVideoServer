@@ -243,7 +243,7 @@ impl Database {
     /// Returns [`DbError::Conflict`] when the folder still holds something.
     pub fn delete_show_folder(&mut self, path: &str) -> Result<bool> {
         let filed: i64 = self.connection().query_row(
-            "SELECT COUNT(*) FROM shows WHERE folder = ?1 OR folder LIKE ?2 || '%'",
+            "SELECT COUNT(*) FROM shows WHERE folder = ?1 OR SUBSTR(folder, 1, LENGTH(?2)) = ?2",
             params![path, format!("{path}/")],
             |row| row.get(0),
         )?;
@@ -253,9 +253,14 @@ impl Database {
             )));
         }
 
+        // A prefix compared exactly rather than a `LIKE`. This was `LIKE ?1 ||
+        // '/'` with no wildcard after it, which matched only a folder called
+        // `<path>/` — none — so a folder with folders under it was deleted
+        // out from under them. And `LIKE` would have been wrong as a fix:
+        // `_` in a name matches any character, and it ignores case.
         let children: i64 = self.connection().query_row(
-            "SELECT COUNT(*) FROM show_folders WHERE path LIKE ?1 || '/'",
-            params![path],
+            "SELECT COUNT(*) FROM show_folders WHERE SUBSTR(path, 1, LENGTH(?1)) = ?1",
+            params![format!("{path}/")],
             |row| row.get(0),
         )?;
         if children > 0 {
@@ -329,7 +334,7 @@ impl Database {
         transaction.execute(
             "UPDATE show_folders
                 SET path = ?2 || SUBSTR(path, LENGTH(?1) + 1)
-              WHERE path LIKE ?1 || '%'",
+              WHERE SUBSTR(path, 1, LENGTH(?1)) = ?1",
             params![under, format!("{to}/")],
         )?;
         transaction.execute(
@@ -339,7 +344,7 @@ impl Database {
         transaction.execute(
             "UPDATE shows
                 SET folder = ?2 || SUBSTR(folder, LENGTH(?1) + 1)
-              WHERE folder LIKE ?1 || '%'",
+              WHERE SUBSTR(folder, 1, LENGTH(?1)) = ?1",
             params![under, format!("{to}/")],
         )?;
         transaction.commit()?;
@@ -422,6 +427,36 @@ mod tests {
         layer.slots.push(Slot::media(1, MediaItemId::new()));
         show.layers.push(layer);
         show
+    }
+
+    #[test]
+    fn a_show_folder_with_folders_under_it_is_not_deleted() {
+        // It was, because the check looked for a folder called `<path>/`.
+        let mut database = Database::open_in_memory().expect("opens");
+        database.create_show_folder("Tours/2026").expect("creates");
+        assert!(database.delete_show_folder("Tours").is_err());
+        assert!(database
+            .list_show_folders()
+            .expect("lists")
+            .iter()
+            .any(|path| path == "Tours/2026"));
+    }
+
+    #[test]
+    fn moving_a_show_folder_leaves_a_neighbour_of_a_similar_name_alone() {
+        let mut database = Database::open_in_memory().expect("opens");
+        for path in ["A_B/x", "AxB/y", "Archive"] {
+            database.create_show_folder(path).expect("creates");
+        }
+        database
+            .rename_show_folder("A_B", "Archive/A_B")
+            .expect("moves");
+        let folders = database.list_show_folders().expect("lists");
+        assert!(folders.iter().any(|path| path == "AxB/y"), "{folders:?}");
+        assert!(
+            folders.iter().any(|path| path == "Archive/A_B/x"),
+            "{folders:?}"
+        );
     }
 
     #[test]

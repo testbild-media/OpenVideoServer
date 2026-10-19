@@ -27,18 +27,21 @@ import {
   type QueueItem,
 } from '../shared/ingest.js';
 import { MEDIA_KINDS, MEDIA_KIND_LABELS } from '../shared/limits.js';
+import { browse, whereLabel, type Crumb, type FolderTile } from '../shared/browse.js';
 import {
   ROOT_FOLDER,
   countsByFolder,
   folderNameProblem,
   folderTree,
   isInside,
-  itemsIn,
   joinFolder,
+  moveFolder,
   nameOf,
   parentOf,
   type FolderNode,
 } from '../shared/folders.js';
+
+const NEWLINE = String.fromCharCode(10);
 import {
   facts,
   newestFirst,
@@ -84,10 +87,14 @@ export class MediaPanel {
   #folders: string[] = [];
   /** The folder whose contents are shown. Empty is the root. */
   #folder = ROOT_FOLDER;
+  /** What is typed into the search, which reaches every folder. */
+  #search = '';
   /** Which folders are open in the tree, by path. */
   readonly #open = new Set<string>();
   /** The item being dragged onto a folder, while a drag is in progress. */
   #dragging: string | null = null;
+  /** The folder being dragged into another one, while a drag is in progress. */
+  #draggingFolder: string | null = null;
   /**
    * A folder being named, either a new one or one being renamed.
    *
@@ -108,7 +115,9 @@ export class MediaPanel {
     queue: element('ingest-list'),
     refresh: element<HTMLButtonElement>('library-refresh'),
     newFolder: element<HTMLButtonElement>('library-new-folder'),
+    search: element<HTMLInputElement>('library-search'),
     folders: element('library-folders'),
+    path: element('library-path'),
     note: element('library-note'),
     grid: element('library-grid'),
     detail: element('media-detail'),
@@ -123,6 +132,10 @@ export class MediaPanel {
 
     this.#ui.pick.addEventListener('click', () => void this.#pick());
     this.#ui.refresh.addEventListener('click', () => void this.load());
+    this.#ui.search.addEventListener('input', () => {
+      this.#search = this.#ui.search.value;
+      this.#drawLibrary();
+    });
     this.#ui.newFolder.addEventListener('click', () => this.#newFolder());
     this.#ui.clear.addEventListener('click', () => void this.#ovs.clearIngest());
     // **Everything still on its way, in one press** (owner, 2026-10-20: "ich
@@ -328,11 +341,7 @@ export class MediaPanel {
 
     const open = button(
       node.path === ROOT_FOLDER ? 'All media' : node.name,
-      () => {
-        this.#folder = node.path;
-        this.#open.add(node.path);
-        this.draw();
-      },
+      () => this.#openFolder(node.path),
       { className: 'folder-name', title: node.path === ROOT_FOLDER ? 'Everything nothing has filed' : node.path },
     );
 
@@ -354,28 +363,66 @@ export class MediaPanel {
       );
     }
 
-    // A clip dropped on a folder is filed there. The file does not move.
-    row.addEventListener('dragover', (event) => {
-      if (this.#dragging === null) {
-        return;
-      }
-      event.preventDefault();
-      if (event.dataTransfer !== null) {
-        event.dataTransfer.dropEffect = 'move';
-      }
-      row.classList.add('drop-target');
-    });
-    row.addEventListener('dragleave', () => row.classList.remove('drop-target'));
-    row.addEventListener('drop', (event) => {
-      event.preventDefault();
-      row.classList.remove('drop-target');
-      const item = this.#dragging;
-      if (item !== null) {
-        void this.#fileItem(item, node.path);
-      }
-    });
+    // A clip dropped on a folder is filed there, and a folder dropped on one
+    // goes inside it. Nothing on disk moves either way.
+    this.#fileOnDrop(row, node.path);
+    if (node.path !== ROOT_FOLDER) {
+      this.#carriesFolder(row, node.path);
+    }
 
     return row;
+  }
+
+  /**
+   * Makes a folder's row or tile something that can be picked up and dropped
+   * on another folder (owner, 2026-10-20: "ich kann keine Ordner in Ordner
+   * verschieben via Drag and Drop wie bei Medien").
+   */
+  #carriesFolder(node: HTMLElement, path: string): void {
+    node.draggable = true;
+    node.addEventListener('dragstart', (event) => {
+      this.#draggingFolder = path;
+      this.#dragging = null;
+      if (event.dataTransfer !== null) {
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', nameOf(path));
+      }
+    });
+    node.addEventListener('dragend', () => {
+      this.#draggingFolder = null;
+      this.#clearDropTargets();
+    });
+  }
+
+  #clearDropTargets(): void {
+    for (const node of document.querySelectorAll('.drop-target')) {
+      node.classList.remove('drop-target');
+    }
+  }
+
+  /**
+   * Moves a folder, and everything filed in and under it, into another one.
+   *
+   * A rename to a path under the new parent, which is what the server's rename
+   * already is: it rewrites every path that begins with the old one.
+   */
+  async #moveFolderInto(path: string, into: string): Promise<void> {
+    const move = moveFolder(path, into, this.#folders);
+    if (!move.ok) {
+      this.#note(move.because);
+      return;
+    }
+    const answer = await this.#ovs.renameFolder(path, move.to);
+    if (!answer.ok) {
+      this.#note(answer.message);
+      return;
+    }
+    if (isInside(this.#folder, path)) {
+      this.#folder = move.to + this.#folder.slice(path.length);
+    }
+    this.#open.add(into);
+    await this.load();
+    this.#changed();
   }
 
   /** Whether a folder is drawn open, which the selected one's ancestors are. */
@@ -739,29 +786,178 @@ export class MediaPanel {
 
   // --- the library -----------------------------------------------------------
 
+  /**
+   * Opens a folder, the way the tree, a folder tile and the path all do.
+   *
+   * The search goes with it: somebody who picked a folder out of the results
+   * asked to see what is in it, which is a folder's contents and not the
+   * results again.
+   */
+  #openFolder(path: string): void {
+    this.#folder = path;
+    this.#open.add(path);
+    this.#search = '';
+    this.#ui.search.value = '';
+    this.draw();
+  }
+
   #drawLibrary(): void {
     // Only what is filed in the open folder, not what is under it: a folder
     // that showed its descendants' contents would put the same clip in
     // several places, and renaming it in one of them would rename it in all
-    // of them without anybody having been told.
-    const shown = itemsIn(this.#library, this.#folder);
+    // of them without anybody having been told. What is under it is there as
+    // folders, which is the other half of the owner's ask of 2026-10-20.
+    const view = browse(this.#library, (item) => item, this.#folders, this.#folder, this.#search);
+    if (view.at !== this.#folder) {
+      // Renamed or deleted under it. The nearest folder that is still there.
+      this.#folder = view.at;
+      this.#drawFolders();
+      this.#drawInto();
+    }
+
+    this.#drawPath(view.crumbs, view.searching);
+
+    const empty = view.folders.length === 0 && view.items.length === 0;
     this.#ui.note.textContent =
       this.#libraryNote !== ''
         ? this.#libraryNote
-        : shown.length === 0 && this.#folder !== ROOT_FOLDER
-          ? 'Nothing is filed here yet. Drag a clip onto this folder to put it in.'
-          : '';
+        : view.searching && empty
+          ? `Nothing in any folder matches “${this.#search.trim()}”.`
+          : empty && this.#folder !== ROOT_FOLDER
+            ? 'Nothing is filed here yet. Drag a clip onto this folder to put it in.'
+            : '';
     this.#ui.note.hidden = this.#ui.note.textContent === '';
-    this.#ui.grid.replaceChildren(...shown.map((item) => this.#card(item)));
+
+    const tiles: HTMLElement[] = [];
+    if (!view.searching && view.up !== null) {
+      tiles.push(this.#upTile(view.up));
+    }
+    for (const folder of view.folders) {
+      tiles.push(this.#folderTile(folder, view.searching));
+    }
+    for (const item of view.items) {
+      tiles.push(this.#card(item, view.searching ? whereLabel(item.folder ?? ROOT_FOLDER) : null));
+    }
+    this.#ui.grid.replaceChildren(...tiles);
   }
 
-  #card(item: MediaItem): HTMLElement {
+  /**
+   * Where the grid is, as a path somebody can go back up.
+   *
+   * During a search it says so, because the grid is then every folder's and
+   * not the one the path names.
+   */
+  #drawPath(crumbs: readonly Crumb[], searching: boolean): void {
+    const parts: HTMLElement[] = [];
+    crumbs.forEach((crumb, index) => {
+      if (index > 0) {
+        parts.push(make('span', 'browse-path-gap', '›'));
+      }
+      const last = index === crumbs.length - 1 && !searching;
+      const step = last
+        ? make('span', 'browse-path-here', crumb.name)
+        : button(crumb.name, () => this.#openFolder(crumb.path), {
+            className: 'browse-path-step',
+            title: `Open ${crumb.name}`,
+          });
+      // Each step is somewhere to drop as well: a folder dragged onto
+      // "All media" comes out to the top.
+      this.#fileOnDrop(step, crumb.path);
+      parts.push(step);
+    });
+    if (searching) {
+      parts.push(
+        make('span', 'browse-path-gap', '›'),
+        make('span', 'browse-path-here', `Searching every folder for “${this.#search.trim()}”`),
+      );
+    }
+    this.#ui.path.replaceChildren(...parts);
+  }
+
+  /** One folder in the grid: opened by a press, filed into by a drop. */
+  #folderTile(folder: FolderTile, searching: boolean): HTMLElement {
+    const tile = button('', () => this.#openFolder(folder.path), {
+      className: 'folder-tile',
+      title: `Open ${whereLabel(folder.path)}`,
+    });
+    const glyph = make('div', 'folder-glyph-frame');
+    glyph.append(make('span', 'folder-glyph'));
+    tile.append(glyph, make('span', 'folder-tile-name', folder.name));
+    tile.append(
+      make(
+        'span',
+        'folder-tile-line',
+        searching
+          ? `in ${folder.where}`
+          : folder.count === 0
+            ? 'empty'
+            : `${folder.count} item${folder.count === 1 ? '' : 's'}`,
+      ),
+    );
+    this.#fileOnDrop(tile, folder.path);
+    this.#carriesFolder(tile, folder.path);
+    return tile;
+  }
+
+  /** The way back up, as the first tile in the grid. */
+  #upTile(parent: string): HTMLElement {
+    const tile = button('', () => this.#openFolder(parent), {
+      className: 'folder-tile up',
+      title: `Back up to ${whereLabel(parent)}`,
+    });
+    const glyph = make('div', 'folder-glyph-frame');
+    glyph.append(make('span', 'folder-glyph up'));
+    tile.append(glyph, make('span', 'folder-tile-name', '..'), make('span', 'folder-tile-line', whereLabel(parent)));
+    this.#fileOnDrop(tile, parent);
+    return tile;
+  }
+
+  /**
+   * What lands on `target` goes into `folder`: a clip is filed there, and a
+   * folder is moved inside it. Nothing on disk moves either way.
+   *
+   * A folder is only offered a drop it can take — not itself, not one of its
+   * own folders, not the folder it is already in — so the highlight is a
+   * promise rather than an invitation to be refused.
+   */
+  #fileOnDrop(target: HTMLElement, folder: string): void {
+    const takes = (): boolean =>
+      this.#dragging !== null ||
+      (this.#draggingFolder !== null && moveFolder(this.#draggingFolder, folder, this.#folders).ok);
+    target.addEventListener('dragover', (event) => {
+      if (!takes()) {
+        return;
+      }
+      event.preventDefault();
+      if (event.dataTransfer !== null) {
+        event.dataTransfer.dropEffect = 'move';
+      }
+      target.classList.add('drop-target');
+    });
+    target.addEventListener('dragleave', () => target.classList.remove('drop-target'));
+    target.addEventListener('drop', (event) => {
+      event.preventDefault();
+      target.classList.remove('drop-target');
+      const item = this.#dragging;
+      const moving = this.#draggingFolder;
+      this.#dragging = null;
+      this.#draggingFolder = null;
+      if (item !== null) {
+        void this.#fileItem(item, folder);
+      } else if (moving !== null) {
+        void this.#moveFolderInto(moving, folder);
+      }
+    });
+  }
+
+  #card(item: MediaItem, where: string | null = null): HTMLElement {
     const card = make('button', `media-card ${item.state}`);
     card.type = 'button';
     // Dragged onto a folder to file it there. Nothing on disk moves.
     card.draggable = true;
     card.addEventListener('dragstart', (event) => {
       this.#dragging = item.id;
+      this.#draggingFolder = null;
       if (event.dataTransfer !== null) {
         event.dataTransfer.effectAllowed = 'move';
         event.dataTransfer.setData('text/plain', item.display_name);
@@ -769,9 +965,7 @@ export class MediaPanel {
     });
     card.addEventListener('dragend', () => {
       this.#dragging = null;
-      for (const node of document.querySelectorAll('.folder-row.drop-target')) {
-        node.classList.remove('drop-target');
-      }
+      this.#clearDropTargets();
     });
     card.classList.toggle('selected', item.id === this.#selected);
 
@@ -792,13 +986,24 @@ export class MediaPanel {
     card.append(make('span', 'media-name', item.display_name));
     card.append(make('span', `media-state ${item.state}`, stateLabel(item.state)));
 
+    // Whether it moves, beside its size and length: a library where a clip and
+    // a still often share a name has to say which one this is without being
+    // opened (owner, 2026-10-20).
     const line = facts(item)
-      .filter((fact) => fact.label === 'Dimensions' || fact.label === 'Duration')
+      .filter(
+        (fact) => fact.label === 'Type' || fact.label === 'Dimensions' || fact.label === 'Duration',
+      )
       .map((fact) => fact.value)
       .join(' · ');
     if (line !== '') {
       card.append(make('span', 'media-line', line));
     }
+    // During a search, which folder it is in: two of the same name in two
+    // folders are otherwise the same card twice.
+    if (where !== null) {
+      card.append(make('span', 'media-where', where));
+    }
+    card.title = `${item.display_name}${NEWLINE}${item.original_filename}${NEWLINE}${whereLabel(item.folder ?? ROOT_FOLDER)}`;
 
     card.addEventListener('click', () => {
       this.#selected = item.id;
