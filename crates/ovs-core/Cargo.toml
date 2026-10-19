@@ -19,6 +19,7 @@ unwrap_used = "warn"
 argon2 = "0.6.0"
 axum = { version = "0.8.9", features = ["ws"] }
 base64 = "0.23.1"
+crc32fast = "1.5.2"
 # Stills are verified rather than taken on trust: the client says what it
 # prepared and the server decodes the file to check. Only the formats ingest can
 # produce, because an image decoder is a parser fed operator-supplied files.

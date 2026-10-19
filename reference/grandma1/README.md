@@ -13,6 +13,11 @@ disagree.
 
 ## Importing
 
+**From the server itself:** its status page (`http://<server>/`, no sign-in)
+offers every desk's fixture types as one ZIP, made by that server for the
+version it is running, one folder per desk. The files in it are these, byte for
+byte.
+
 1. Copy the `.TXT` files to a USB stick (any folder).
 2. On the desk: **Setup → Full Access → Fixture Types → Import → External**,
    and pick each file.

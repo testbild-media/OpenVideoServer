@@ -18,6 +18,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs, clippy::all)]
 
+pub mod desks;
 pub mod effects;
 pub mod fixtures;
 pub mod generators;

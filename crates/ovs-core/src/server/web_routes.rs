@@ -109,6 +109,7 @@ pub async fn public_status(State(state): State<AppState>) -> Response {
         "show": show,
         "needs_setup": needs_setup,
         "downloads": super::downloads::available(),
+        "fixtures": super::desk_fixtures::summary(state.server_version()),
         "uptime_s": state.uptime_s(),
         "machine": {
             "cpu_percent": host.cpu_percent,
@@ -170,6 +171,30 @@ pub async fn download(
                 // The name is already known to be a plain file name with no
                 // separator, quote or newline in it — `resolve` refuses
                 // everything else — so it cannot break out of this header.
+                format!("attachment; filename=\"{name}\""),
+            ),
+        ],
+        bytes,
+    )
+        .into_response())
+}
+
+/// Hands out every desk's fixture types, as one ZIP.
+///
+/// Without a session, like the client: a fixture type says how this server
+/// reads a desk, which is what anybody patching one needs and nothing about the
+/// show (owner, 2026-10-19: "alle Fixtures als Zip mitliefern").
+pub async fn fixtures(State(state): State<AppState>) -> Result<Response, StatusCode> {
+    let bytes = super::desk_fixtures::archive().ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+    let name = super::desk_fixtures::file_name(state.server_version());
+    Ok((
+        [
+            (
+                axum::http::header::CONTENT_TYPE,
+                "application/zip".to_owned(),
+            ),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
                 format!("attachment; filename=\"{name}\""),
             ),
         ],

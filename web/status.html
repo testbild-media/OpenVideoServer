@@ -323,6 +323,18 @@
         </p>
       </section>
 
+      <section id="fixtures" hidden>
+        <h2>Lighting desks</h2>
+        <ul id="fixture-list"></ul>
+        <p class="notice">
+          Fixture types for <span id="fixture-desks"></span>, one folder per
+          desk, made by this server for the version it is running. Copy a desk's
+          folder to a USB stick. On a grandMA1: <em>Setup</em>, <em>Full
+          Access</em>, <em>Fixture Types</em>, <em>Import</em>,
+          <em>External</em>.
+        </p>
+      </section>
+
       <section>
         <h2>Administration</h2>
         <p><a href="/admin">Accounts and machine settings</a></p>
@@ -634,6 +646,33 @@
           list.append(item);
         }
         document.getElementById('downloads').hidden = files.length === 0;
+
+        // Every desk's fixture types, as one file the server makes itself.
+        const fixtures = status.fixtures;
+        const desks = fixtures && Array.isArray(fixtures.desks) ? fixtures.desks : [];
+        const fixtureList = document.getElementById('fixture-list');
+        fixtureList.replaceChildren();
+        if (desks.length > 0) {
+          const row = document.createElement('a');
+          row.className = 'file';
+          row.href = '/fixtures.zip';
+          row.download = fixtures.file;
+          const name = document.createElement('span');
+          name.className = 'file-name';
+          name.textContent = fixtures.file;
+          const bytes = document.createElement('span');
+          bytes.className = 'file-size';
+          bytes.textContent = size(fixtures.bytes);
+          row.append(name, bytes);
+          const item = document.createElement('li');
+          item.append(row);
+          fixtureList.append(item);
+          text(
+            'fixture-desks',
+            desks.map((desk) => `${desk.name} (${desk.fixture_types})`).join(', '),
+          );
+        }
+        document.getElementById('fixtures').hidden = desks.length === 0;
       }
 
       void draw();
