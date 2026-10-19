@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "InstallUpdateRequest",
+  "description": "Which release to install.",
+  "type": "object",
+  "required": [
+    "version"
+  ],
+  "properties": {
+    "version": {
+      "description": "The version, such as `0.2.46`. Only a newer one than is installed.",
+      "type": "string"
+    }
+  }
+}

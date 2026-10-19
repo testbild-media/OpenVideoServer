@@ -1,0 +1,26 @@
+[Unit]
+Description=Install OpenVideoServer %i
+Documentation=https://github.com/testbild-media/OpenVideoServer
+# The administration page's update button starts this, through a polkit rule
+# that lets the server start this unit and no other
+# (deploy/polkit/51-openvideoserver-update.rules). The instance is the version
+# asked for; the script decides whether that is a version worth installing.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/openvideoserver/ovs-update %i
+
+# Root, because it installs a package. Apart from the server, because the
+# package restarts the server: an install the server ran itself would be killed
+# half way through.
+#
+# Where it writes how far it got: readable by the server, which runs as another
+# user, and kept across a reboot so a failure is still there to be read.
+StateDirectory=ovs-update
+StateDirectoryMode=0755
+CacheDirectory=openvideoserver/update
+
+# Long enough for a slow venue line to fetch a quarter of a gigabyte.
+TimeoutStartSec=45min

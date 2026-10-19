@@ -318,7 +318,7 @@ jobs:
       # syntax error in one strands a half-unpacked install. Cheap to check.
       - name: Check the maintainer scripts parse
         run: |
-          for script in deploy/debian/postinst deploy/debian/prerm deploy/debian/postrm; do
+          for script in deploy/debian/postinst deploy/debian/prerm deploy/debian/postrm deploy/update/ovs-update; do
             sh -n "$script"
           done
           bash -n install.sh
@@ -333,6 +333,14 @@ jobs:
         run: |
           apt-get install -y --no-install-recommends dash
           dash tools/test-release-assets.sh
+
+      # The administration page's update button ends in a script that runs as
+      # root and installs a package. Everything that would make it install the
+      # wrong thing — a name that is not a version, an older release, a package
+      # that does not match its checksum, a download address from somewhere
+      # else — is tried against stand-ins for the network and apt.
+      - name: Check the update installer installs only what it should
+        run: TEST_SHELL=dash dash tools/test-update.sh
 
       - name: Say what came out
         run: dpkg-deb --info target/package/*.deb

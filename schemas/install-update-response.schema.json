@@ -1,0 +1,20 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "InstallUpdateResponse",
+  "description": "Whether the installer was started.",
+  "type": "object",
+  "required": [
+    "accepted",
+    "detail"
+  ],
+  "properties": {
+    "accepted": {
+      "description": "Whether the machine started it. Its progress is in [`UpdateStatus`].",
+      "type": "boolean"
+    },
+    "detail": {
+      "description": "What was run, or why nothing was.",
+      "type": "string"
+    }
+  }
+}

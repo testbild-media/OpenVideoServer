@@ -73,6 +73,17 @@ pub fn router(state: AppState) -> Router {
             post(server_routes::restart_renderer),
         )
         .route("/server/power", post(server_routes::power))
+        // Updating the server from its own administration page. Administrators
+        // only; the repository is asked only when one presses the button.
+        .route("/server/update", get(server_routes::update_status))
+        .route(
+            "/server/update/check",
+            post(server_routes::check_for_update),
+        )
+        .route(
+            "/server/update/install",
+            post(server_routes::install_update),
+        )
         .route(
             "/server/counters/reset",
             post(server_routes::reset_counters),
@@ -612,6 +623,59 @@ mod tests {
         let (status, _) = send(&app, request).await;
 
         assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn updating_the_server_is_for_an_administrator_and_nobody_else() {
+        // Installing a package is root on the machine by another route, so
+        // none of the three answers a request without a session.
+        let (app, _) = app();
+        let _ = signed_in(&app).await;
+
+        let (status, _) = send(&app, get("/api/v1/server/update")).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        for path in [
+            "/api/v1/server/update/check",
+            "/api/v1/server/update/install",
+        ] {
+            let (status, _) = send(
+                &app,
+                post_json(path, &serde_json::json!({ "version": "9.9.9" })),
+            )
+            .await;
+            assert_eq!(status, StatusCode::UNAUTHORIZED, "{path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn an_administrator_sees_the_installed_version_and_cannot_go_back() {
+        let (app, _) = app();
+        let token = signed_in(&app).await;
+
+        let (status, body) = send(&app, get_auth("/api/v1/server/update", &token)).await;
+        assert_eq!(status, StatusCode::OK);
+        let update: ovs_proto::http::UpdateStatus = decode(body);
+        assert_eq!(update.installed, "0.0.1-test");
+
+        // Refused before anything is run: an older version, the same one, and
+        // something that is not a version at all. None of these can start the
+        // installer on the machine running the test.
+        for version in ["0.0.0", "0.0.1", "1.2.3; reboot", "../9.9.9"] {
+            let (status, body) = send(
+                &app,
+                post_json_auth(
+                    "/api/v1/server/update/install",
+                    &token,
+                    &ovs_proto::http::InstallUpdateRequest {
+                        version: version.to_owned(),
+                    },
+                ),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{version}");
+            let answer: ovs_proto::http::InstallUpdateResponse = decode(body);
+            assert!(!answer.accepted, "{version} was accepted");
+        }
     }
 
     #[tokio::test]

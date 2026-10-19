@@ -5,8 +5,8 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
 use ovs_proto::fixtures::FixtureCatalogueResponse;
 use ovs_proto::http::{
-    capabilities as build_capabilities, CapabilitiesResponse, PowerAction, PowerResponse,
-    StatusResponse,
+    capabilities as build_capabilities, CapabilitiesResponse, InstallUpdateRequest,
+    InstallUpdateResponse, PowerAction, PowerResponse, StatusResponse, UpdateStatus,
 };
 use ovs_types::config::{DmxProtocols, StartupPolicy};
 use ovs_types::telemetry::ServerTelemetry;
@@ -272,6 +272,69 @@ pub async fn power(
     }
 
     Ok(Json(PowerResponse {
+        accepted: outcome.accepted,
+        detail: outcome.detail,
+    }))
+}
+
+/// What this server knows about updating itself: what is installed, what the
+/// last check found, and where the installer is.
+///
+/// Asks nobody: the repository is only asked when an administrator presses the
+/// button (owner, 2026-10-19: "gar nicht automatisch prüfen. nur auf
+/// knopfdruck").
+pub async fn update_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> ApiResult<Json<UpdateStatus>> {
+    administer(&state, &headers)?;
+    Ok(Json(UpdateStatus {
+        installed: state.server_version().to_owned(),
+        check: crate::update::last_check(),
+        install: crate::update::progress(),
+    }))
+}
+
+/// Asks the repository for its newest release, because an administrator
+/// pressed the button.
+pub async fn check_for_update(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> ApiResult<Json<UpdateStatus>> {
+    administer(&state, &headers)?;
+    let installed = state.server_version().to_owned();
+    // Off the runtime's threads: it waits on the network, for up to twenty
+    // seconds where there is none.
+    let asked = installed.clone();
+    let check = tokio::task::spawn_blocking(move || crate::update::check(&asked))
+        .await
+        .ok();
+    tracing::info!(?check, "an administrator asked for updates");
+    Ok(Json(UpdateStatus {
+        installed,
+        check: check.or_else(crate::update::last_check),
+        install: crate::update::progress(),
+    }))
+}
+
+/// Starts installing a newer release.
+///
+/// Returns as soon as the installer has been started: it restarts this server,
+/// so there is nobody here to wait for it. Its progress is in
+/// [`update_status`].
+pub async fn install_update(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<InstallUpdateRequest>,
+) -> ApiResult<Json<InstallUpdateResponse>> {
+    administer(&state, &headers)?;
+    let installed = state.server_version().to_owned();
+    tracing::warn!(version = %request.version, %installed, "an administrator asked for an update");
+    let outcome = crate::update::install(&request.version, &installed);
+    if !outcome.accepted {
+        tracing::error!(version = %request.version, "{}", outcome.detail);
+    }
+    Ok(Json(InstallUpdateResponse {
         accepted: outcome.accepted,
         detail: outcome.detail,
     }))

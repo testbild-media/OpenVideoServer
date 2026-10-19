@@ -388,6 +388,18 @@
         </section>
 
         <section>
+          <h2>Software</h2>
+          <p>Installed: <strong id="update-installed">…</strong></p>
+          <p class="note" id="update-found"></p>
+          <div class="buttons section-actions">
+            <button id="update-check">Check for updates</button>
+            <button class="danger" id="update-install" hidden>Install</button>
+          </div>
+          <p class="warn" id="update-warn" hidden></p>
+          <p class="said" id="update-said" hidden></p>
+        </section>
+
+        <section>
           <h2>This machine</h2>
           <div id="machine"></div>
           <p class="note"><a href="/">Back to the status page</a></p>
@@ -500,6 +512,7 @@
           drawSystem(),
           drawPreviews(),
           readPattern(),
+          readUpdate(),
         ]);
         return true;
       }
@@ -1177,6 +1190,221 @@
             answer.body ? answer.body.accepted !== false : true,
           );
         });
+      }
+
+      // --- updating the server ------------------------------------------------
+      //
+      // The repository is asked only when somebody presses the button (owner,
+      // 2026-10-19: "gar nicht automatisch prüfen. nur auf knopfdruck").
+      // Installing is two presses, like restarting: the package restarts the
+      // server, and the wall is dark while it does.
+
+      /** What the server last said about updating itself. */
+      let update = null;
+
+      /** Whether the install button has been pressed once. */
+      let installArmed = false;
+
+      /** The version being installed while this page watches it, if any. */
+      let watching = null;
+
+      /** When watching started, so a page left open does not ask for ever. */
+      let watchingSince = 0;
+
+      const RUNNING = ['starting', 'downloading', 'verifying', 'installing'];
+      const isRunning = (progress) => progress !== null && RUNNING.includes(progress.stage);
+
+      /** One sentence about where the installer is, or where it stopped. */
+      function describe(progress) {
+        const at = progress.at ? new Date(progress.at).toLocaleString() : '';
+        switch (progress.stage) {
+          case 'installed':
+            return `${progress.version} was installed ${at}.`;
+          case 'failed':
+            return `Installing ${progress.version} failed ${at}: ${progress.detail}`;
+          case 'refused':
+            return `${progress.version} was not installed: ${progress.detail}`;
+          default:
+            return `Installing ${progress.version}: ${progress.stage} — ${progress.detail}`;
+        }
+      }
+
+      function drawUpdate() {
+        if (update === null) return;
+        $('update-installed').textContent = `OpenVideoServer ${update.installed}`;
+
+        // A check from before an install is stale once that version runs.
+        const check =
+          update.check !== null && update.check.latest === update.installed
+            ? { ...update.check, newer: false }
+            : update.check;
+        const found = $('update-found');
+        found.replaceChildren();
+        if (check === null) {
+          found.textContent =
+            'Not checked since this server started. It asks the repository only when you press the button.';
+        } else if (check.problem) {
+          found.textContent = `Checked ${when(check.checked_at)}: ${check.problem}`;
+        } else if (check.newer) {
+          found.append(`${check.latest} is available, published ${new Date(check.published_at).toLocaleDateString()}. `);
+          if (check.notes_url) {
+            const notes = document.createElement('a');
+            notes.href = check.notes_url;
+            notes.target = '_blank';
+            notes.rel = 'noopener';
+            notes.textContent = 'What changed';
+            found.append(notes);
+          }
+        } else {
+          found.textContent = `Checked ${when(check.checked_at)}: ${update.installed} is the newest release.`;
+        }
+
+        const offer = check !== null && check.newer && !isRunning(update.install) && watching === null;
+        const button = $('update-install');
+        button.hidden = !offer;
+        if (offer) {
+          button.textContent = installArmed
+            ? `Install ${check.latest} — press again`
+            : `Install ${check.latest}`;
+        } else {
+          installArmed = false;
+        }
+        $('update-warn').hidden = !(offer && installArmed);
+        $('update-check').disabled = watching !== null || isRunning(update.install);
+
+        if (update.install !== null) {
+          const stage = update.install.stage;
+          say('update-said', describe(update.install), stage !== 'failed' && stage !== 'refused');
+        }
+      }
+
+      async function readUpdate() {
+        const answer = await api('/api/v1/server/update');
+        if (!answer.ok) {
+          say('update-said', answer.message, false);
+          return;
+        }
+        update = answer.body;
+        drawUpdate();
+        // A page opened while an install is under way watches it too.
+        if (isRunning(update.install) && watching === null) {
+          watch(update.install.version);
+        }
+      }
+
+      $('update-check').addEventListener('click', async () => {
+        installArmed = false;
+        $('update-check').disabled = true;
+        $('update-found').textContent = 'Asking the repository…';
+        const answer = await api('/api/v1/server/update/check', { method: 'POST' });
+        $('update-check').disabled = false;
+        if (!answer.ok) {
+          say('update-said', answer.message, false);
+          return;
+        }
+        update = answer.body;
+        drawUpdate();
+      });
+
+      $('update-install').addEventListener('click', async () => {
+        const version = update && update.check && update.check.latest;
+        if (!version) return;
+        if (!installArmed) {
+          installArmed = true;
+          // Said before the second press, with the show's name where one is
+          // open: the person pressing is the one who knows whether now is a
+          // moment the wall can be dark.
+          let show = null;
+          try {
+            show = (await (await fetch('/status.json', { cache: 'no-store' })).json()).show;
+          } catch {
+            // Without it the warning still says what happens.
+          }
+          $('update-warn').textContent =
+            `The server restarts while ${version} is installed: the wall is dark for about a minute` +
+            (show ? ` and "${show}" is reopened afterwards.` : '.');
+          drawUpdate();
+          return;
+        }
+        installArmed = false;
+
+        const answer = await api('/api/v1/server/update/install', {
+          method: 'POST',
+          body: JSON.stringify({ version }),
+        });
+        if (!answer.ok) {
+          say('update-said', answer.message, false);
+          drawUpdate();
+          return;
+        }
+        if (!answer.body.accepted) {
+          say('update-said', answer.body.detail, false);
+          drawUpdate();
+          return;
+        }
+        say('update-said', `Installing ${version}…`, true);
+        watch(version);
+      });
+
+      /**
+       * Follows the installer until it says it is done, through the server's
+       * own restart.
+       *
+       * From the public status rather than the administration API: the
+       * restart signs everybody out, because sessions live in the server's
+       * memory, and the person who pressed the button still wants to see how
+       * it went. While the server is down every request fails, and that is the
+       * moment to keep asking rather than to give up.
+       */
+      function watch(version) {
+        watching = version;
+        watchingSince = Date.now();
+        drawUpdate();
+
+        const step = async () => {
+          // Longer than the installer's own limit, so the page never gives up
+          // on an install that is still allowed to finish.
+          if (Date.now() - watchingSince > 50 * 60 * 1000) {
+            watching = null;
+            say('update-said', `Stopped watching ${version}; reload the page to see where it got.`, false);
+            drawUpdate();
+            return;
+          }
+          let status = null;
+          try {
+            const answer = await fetch('/status.json', { cache: 'no-store' });
+            status = answer.ok ? await answer.json() : null;
+          } catch {
+            status = null;
+          }
+          if (status === null) {
+            say('update-said', `Installing ${version}: the server is restarting…`, true);
+            setTimeout(step, 2000);
+            return;
+          }
+          const progress = status.update ?? null;
+          if (progress !== null && progress.version === version && progress.stage === 'installed') {
+            watching = null;
+            say(
+              'update-said',
+              `${version} is installed and running ${status.version}. Reloading this page — the restart signed you out.`,
+              true,
+            );
+            setTimeout(() => location.reload(), 4000);
+            return;
+          }
+          if (progress !== null && progress.version === version && !isRunning(progress)) {
+            watching = null;
+            if (update !== null) update.install = progress;
+            drawUpdate();
+            return;
+          }
+          if (progress !== null && progress.version === version) {
+            say('update-said', describe(progress), true);
+          }
+          setTimeout(step, 2000);
+        };
+        setTimeout(step, 1500);
       }
 
       void enter();

@@ -110,6 +110,12 @@ pub async fn public_status(State(state): State<AppState>) -> Response {
         "needs_setup": needs_setup,
         "downloads": super::downloads::available(),
         "fixtures": super::desk_fixtures::summary(state.server_version()),
+        // Where the installer is, when an update has been asked for. Here as
+        // well as behind the administration API because installing restarts
+        // the server, sessions live in memory, and the page that asked has to
+        // be able to follow it through that restart. It says which version and
+        // how far, which is a fact about the machine like its version is.
+        "update": crate::update::progress(),
         "uptime_s": state.uptime_s(),
         "machine": {
             "cpu_percent": host.cpu_percent,

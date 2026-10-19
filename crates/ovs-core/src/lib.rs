@@ -33,6 +33,7 @@ pub mod server;
 pub mod session;
 pub mod state;
 pub mod stream_tickets;
+pub mod update;
 pub mod uploads;
 
 pub use auth::{AuthError, SessionToken};

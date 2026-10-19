@@ -386,6 +386,42 @@ a backup of that directory is a backup of the server.
 
 ## Updating a machine that is already running one
 
+**From the administration page, from 0.2.46 on.** `http://<server>/admin`,
+signed in as an administrator: *Software*, *Check for updates*, and where a
+newer release is there, *Install* — pressed twice, because the server restarts
+and the wall is dark for about a minute. The page follows the install through
+that restart from the public status, and reloads when it is done; the restart
+signs everybody out.
+
+- **The repository is asked only when the button is pressed** (owner,
+  2026-10-19: "gar nicht automatisch prüfen. nur auf knopfdruck"). A machine
+  with no internet says so and does nothing else.
+- **Only a newer release, only from this repository.** The server cannot
+  install anything itself: it starts `ovs-update@<version>.service`, which
+  `deploy/polkit/51-openvideoserver-update.rules` lets the `ovs` user start for
+  a version-shaped name and nothing else. The unit runs
+  `/usr/lib/openvideoserver/ovs-update` as root, which fetches the release from
+  `testbild-media/OpenVideoServer` — written into it, not passed in — checks the
+  package against the checksum published beside it, refuses anything not newer
+  than what is installed, and installs it with apt, keeping an administrator's
+  edited configuration files.
+- **Not signed** (owner: "ohne Signatur"): the download is trusted because it
+  comes over HTTPS from the repository's own releases.
+- **No going back from the page.** A newer version may already have changed the
+  database. An older release is installed by hand.
+- How far it got is in `/var/lib/ovs-update/status.json`, apt's own words in
+  `/var/lib/ovs-update/install.log`, and the unit's in
+  `journalctl -u 'ovs-update@*'`.
+
+By hand, the same thing:
+
+```bash
+sudo systemctl start ovs-update@0.2.47.service
+sudo /usr/lib/openvideoserver/ovs-update --reinstall 0.2.46   # the same version again
+```
+
+From a checkout instead:
+
 ```bash
 ./tools/deploy.sh --check    # build, and say what differs from what is installed
 ./tools/deploy.sh            # install it, restart, and check the wall came back

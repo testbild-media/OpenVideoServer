@@ -1,0 +1,158 @@
+#!/bin/sh
+# Installs one OpenVideoServer release, asked for from the administration page.
+#
+#   ovs-update 0.2.46               what ovs-update@0.2.46.service runs
+#   ovs-update --reinstall 0.2.46   by hand, as root: the same version again
+#
+# The owner, 2026-10-19: "ob der server selber Updates über das Repo abfragen
+# kann und bei bedarf durch den User in der AdminGUI direkt installiert werden
+# kann, dass man kein ssh zugriff oder ähnlich mehr braucht."
+#
+# # Why this is a script of its own, run by a unit of its own
+#
+# The server runs as an unprivileged user, and installing a package needs root.
+# So the server does not install anything: it asks the init system to start
+# `ovs-update@<version>.service`, a polkit rule lets it start that unit and no
+# other, and this runs as root inside it. It is apart from the server for a
+# second reason too — the package restarts the server, and an install the server
+# had started itself would be killed half way.
+#
+# # What it trusts the server for
+#
+# **The version, and nothing else.** Where the release comes from is written
+# below, not passed in; the version has to be three numbers; it has to be newer
+# than what is installed; the package has to be the one published under that
+# release for this machine, and match the checksum published beside it.
+#
+# # How far it got
+#
+# Written to /var/lib/ovs-update/status.json after every step, by rename so a
+# reader never sees half a file. The server reads it, and the administration
+# page shows it — through the server's own restart, because the file outlives
+# both.
+#
+# Written for `sh`, and checked under dash in CI with `tools/test-update.sh`.
+set -u
+
+REPOSITORY="testbild-media/OpenVideoServer"
+API="https://api.github.com/repos/$REPOSITORY/releases/tags"
+DOWNLOADS="https://github.com/$REPOSITORY/releases/download"
+
+# Moved only by the test, which runs this as nobody in particular.
+STATE_DIR="${OVS_UPDATE_STATE_DIR:-/var/lib/ovs-update}"
+CACHE_DIR="${OVS_UPDATE_CACHE_DIR:-/var/cache/openvideoserver/update}"
+
+reinstall=""
+if [ "${1:-}" = "--reinstall" ]; then
+  reinstall="yes"
+  shift
+fi
+asked="${1:-}"
+
+# Three numbers, and nothing that could become part of a path or a command.
+version=""
+if printf '%s\n' "$asked" | grep -Eq '^[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}$'; then
+  version="$asked"
+fi
+
+# One step, written where the server reads it. The detail is cut to one line
+# with no quote or backslash in it, so it is always a JSON string.
+status() {
+  mkdir -p "$STATE_DIR"
+  detail=$(printf '%s' "$2" | tr '\r\n\t"\\' '     ' | cut -c1-400)
+  now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  printf '{"version":"%s","stage":"%s","detail":"%s","at":"%s"}\n' \
+    "$version" "$1" "$detail" "$now" > "$STATE_DIR/status.json.part"
+  mv "$STATE_DIR/status.json.part" "$STATE_DIR/status.json"
+  echo "$1: $2"
+}
+
+fail() {
+  status failed "$1"
+  exit 1
+}
+
+refuse() {
+  status refused "$1"
+  exit 1
+}
+
+[ -n "$version" ] || refuse "\"$asked\" is not a version"
+
+status starting "looking for $version"
+
+installed=$(dpkg-query -W -f='${Version}' openvideoserver 2> /dev/null || true)
+installed_upstream="${installed%%-*}"
+if [ -n "$installed_upstream" ]; then
+  if [ -n "$reinstall" ]; then
+    dpkg --compare-versions "$version" ge "$installed_upstream" \
+      || refuse "$version is older than $installed, which is installed"
+  else
+    dpkg --compare-versions "$version" gt "$installed_upstream" \
+      || refuse "$version is not newer than $installed, which is installed"
+  fi
+fi
+
+architecture=$(dpkg --print-architecture)
+
+release=$(curl --fail --silent --show-error --location --max-time 30 \
+  --header "Accept: application/vnd.github+json" \
+  --header "User-Agent: OpenVideoServer" \
+  "$API/v$version" 2>&1) || fail "the repository has no release v$version, or could not be reached: $(printf '%s' "$release" | tail -n 1)"
+
+# The package's name, out of the release. Every asset's name is on a line of
+# its own once the answer is split at its commas; the one wanted is this
+# version's package for this machine, whatever its revision.
+package=$(printf '%s' "$release" | tr ',' '\n' \
+  | sed -n 's/^[[:space:]]*"name":[[:space:]]*"\([^"]*\)".*$/\1/p' \
+  | grep -E "^openvideoserver_${version}-[0-9]+_${architecture}\.deb$" | head -n 1)
+[ -n "$package" ] || fail "release v$version has no package for $architecture"
+printf '%s' "$release" | grep -q "\"name\":[[:space:]]*\"$package.sha256\"" \
+  || fail "release v$version has no checksum for $package"
+
+# Built here from the name rather than read from the answer: the address is
+# this repository's, whatever the answer said.
+address="$DOWNLOADS/v$version/$package"
+
+mkdir -p "$CACHE_DIR"
+# Nothing from an earlier attempt: a half-downloaded package is not one.
+rm -f "$CACHE_DIR"/openvideoserver_*.deb "$CACHE_DIR"/openvideoserver_*.deb.sha256 \
+  "$CACHE_DIR"/*.part
+
+status downloading "$package"
+said=$(curl --fail --silent --show-error --location --max-time 1800 \
+  --output "$CACHE_DIR/$package.part" "$address" 2>&1) \
+  || fail "the package could not be downloaded: $(printf '%s' "$said" | tail -n 1)"
+mv "$CACHE_DIR/$package.part" "$CACHE_DIR/$package"
+said=$(curl --fail --silent --show-error --location --max-time 60 \
+  --output "$CACHE_DIR/$package.sha256" "$address.sha256" 2>&1) \
+  || fail "the checksum could not be downloaded: $(printf '%s' "$said" | tail -n 1)"
+
+status verifying "$package"
+expected=$(cut -d ' ' -f 1 "$CACHE_DIR/$package.sha256" | head -n 1)
+actual=$(sha256sum "$CACHE_DIR/$package" | cut -d ' ' -f 1)
+if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
+  rm -f "$CACHE_DIR/$package" "$CACHE_DIR/$package.sha256"
+  fail "$package does not match its published checksum"
+fi
+
+# With apt, so a dependency the new version gained comes too. An
+# administrator's edited configuration file is kept rather than asked about:
+# there is nobody here to ask. Waits for apt's lock rather than failing on it,
+# because a machine that is installing its own security updates will be done
+# in a minute.
+status installing "$package"
+log="$STATE_DIR/install.log"
+if ! DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends \
+  ${reinstall:+--reinstall} \
+  -o DPkg::Lock::Timeout=300 \
+  -o Dpkg::Options::=--force-confdef \
+  -o Dpkg::Options::=--force-confold \
+  "$CACHE_DIR/$package" > "$log" 2>&1; then
+  fail "apt-get could not install it: $(grep -v '^[[:space:]]*$' "$log" | tail -n 1)"
+fi
+
+rm -f "$CACHE_DIR/$package" "$CACHE_DIR/$package.sha256"
+now_installed=$(dpkg-query -W -f='${Version}' openvideoserver 2> /dev/null || true)
+status installed "openvideoserver $now_installed"
+exit 0

@@ -996,6 +996,77 @@ pub struct PowerResponse {
     pub detail: String,
 }
 
+/// What this server knows about updating itself.
+///
+/// The owner, 2026-10-19: "ob der server selber Updates über das Repo abfragen
+/// kann und bei bedarf durch den User in der AdminGUI direkt installiert werden
+/// kann" — and "gar nicht automatisch prüfen. nur auf knopfdruck." So nothing
+/// here is ever fetched unasked: `check` is empty until an administrator has
+/// pressed the button since the server started.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct UpdateStatus {
+    /// The version this server is running.
+    pub installed: String,
+    /// What the last check found, if anybody has asked since the server started.
+    pub check: Option<UpdateCheck>,
+    /// What the installer last did, if it has ever run on this machine.
+    pub install: Option<UpdateProgress>,
+}
+
+/// What asking the repository for its newest release found.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct UpdateCheck {
+    /// When the repository was asked, in milliseconds since the epoch.
+    pub checked_at: i64,
+    /// The newest release's version, such as `0.2.46`, when there was an answer.
+    pub latest: Option<String>,
+    /// Whether that is newer than what is installed, and carries a package for
+    /// this machine — which is the one case in which there is something to
+    /// install.
+    pub newer: bool,
+    /// When that release was published, as the repository writes it.
+    pub published_at: Option<String>,
+    /// The release's own page, where what changed is written.
+    pub notes_url: Option<String>,
+    /// Why there is no answer, or why the newest release cannot be installed
+    /// here: no connection, no package for this machine.
+    pub problem: Option<String>,
+}
+
+/// Where the installer is, or where it stopped.
+///
+/// Written by the installer itself, which runs apart from the server: the
+/// server is restarted by the package it installs, and an install it ran itself
+/// would be killed half way.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct UpdateProgress {
+    /// The version it was asked for.
+    pub version: String,
+    /// `starting`, `downloading`, `verifying`, `installing`, then `installed`,
+    /// `failed` or `refused`.
+    pub stage: String,
+    /// What it is doing, or why it stopped, in a sentence.
+    pub detail: String,
+    /// When it last wrote this, as UTC in ISO 8601.
+    pub at: String,
+}
+
+/// Which release to install.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct InstallUpdateRequest {
+    /// The version, such as `0.2.46`. Only a newer one than is installed.
+    pub version: String,
+}
+
+/// Whether the installer was started.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct InstallUpdateResponse {
+    /// Whether the machine started it. Its progress is in [`UpdateStatus`].
+    pub accepted: bool,
+    /// What was run, or why nothing was.
+    pub detail: String,
+}
+
 /// What a tap did to the tempo.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TapTempoResponse {

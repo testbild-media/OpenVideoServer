@@ -1,0 +1,35 @@
+// Lets the server start the installer for a newer release of itself.
+//
+// Owner, 2026-10-19: "ob der server selber Updates über das Repo abfragen kann
+// und bei bedarf durch den User in der AdminGUI direkt installiert werden kann,
+// dass man kein ssh zugriff oder ähnlich mehr braucht."
+//
+// # What it grants, and what it does not
+//
+// **Starting one template unit, `ovs-update@<version>.service`, for a name that
+// is three numbers** — for the one system user the core runs as. Not stopping or
+// restarting it, not any other unit, and not a name that could carry anything
+// but a version. The unit runs `/usr/lib/openvideoserver/ovs-update` as root,
+// and that script decides the rest: it fetches only from the repository written
+// into it, only a release newer than what is installed, and only a package that
+// matches the checksum published beside it.
+//
+// So what this hands the server is "install a newer release of yourself", which
+// is what the administration page offers an administrator, and nothing a
+// compromised server could turn into a different package.
+polkit.addRule(function (action, subject) {
+  if (subject.user !== "ovs") {
+    return undefined;
+  }
+
+  if (
+    action.id === "org.freedesktop.systemd1.manage-units" &&
+    action.lookup("verb") === "start" &&
+    /^ovs-update@[0-9]+\.[0-9]+\.[0-9]+\.service$/.test(action.lookup("unit"))
+  ) {
+    return polkit.Result.YES;
+  }
+
+  // Everything else this user might ask for is somebody else's decision.
+  return undefined;
+});

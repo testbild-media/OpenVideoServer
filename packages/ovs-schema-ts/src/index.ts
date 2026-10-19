@@ -97,6 +97,12 @@ export type {
   Relinked,
 } from './import-show-response.js';
 export type {
+  InstallUpdateRequest,
+} from './install-update-request.js';
+export type {
+  InstallUpdateResponse,
+} from './install-update-response.js';
+export type {
   BlendMode,
   LayerId,
   Route,
@@ -261,6 +267,11 @@ export type {
 export type {
   UpdateMasterRequest,
 } from './update-master-request.js';
+export type {
+  UpdateStatus,
+  UpdateCheck,
+  UpdateProgress,
+} from './update-status.js';
 export type {
   UploadSession,
 } from './upload-session.js';

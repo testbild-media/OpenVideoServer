@@ -84,6 +84,15 @@ pub fn generate_protocol() -> Vec<GeneratedSchema> {
         ),
         schema!("power-action.schema.json", crate::http::PowerAction),
         schema!("power-response.schema.json", crate::http::PowerResponse),
+        schema!("update-status.schema.json", crate::http::UpdateStatus),
+        schema!(
+            "install-update-request.schema.json",
+            crate::http::InstallUpdateRequest
+        ),
+        schema!(
+            "install-update-response.schema.json",
+            crate::http::InstallUpdateResponse
+        ),
         schema!(
             "fixture-catalogue.schema.json",
             crate::fixtures::FixtureCatalogueResponse

@@ -187,8 +187,18 @@ install -m 0644 deploy/systemd/*.service "$staging/lib/systemd/system/"
 #
 # /usr/share is where a package's rules belong, and an administrator overrides
 # them from /etc/polkit-1/rules.d without this file being in their way.
-install -m 0644 deploy/polkit/50-openvideoserver-power.rules \
-  "$staging/usr/share/polkit-1/rules.d/"
+#
+# Every rule in the directory: the second, `51-openvideoserver-update.rules`,
+# lets the server start the installer below for a newer release of itself and
+# nothing else.
+install -m 0644 deploy/polkit/*.rules "$staging/usr/share/polkit-1/rules.d/"
+
+# **Updating from the administration page** (owner, 2026-10-19). The server
+# cannot install a package, so `ovs-update@<version>.service` — laid down with
+# the other units above — runs this as root. It fetches only from the
+# repository written into it, only a newer release, and only a package that
+# matches the checksum beside it; `tools/test-update.sh` holds it to that.
+install -m 0755 deploy/update/ovs-update "$staging$PRIVATE_LIB/ovs-update"
 
 # **The card's module options**, which are what an NVIDIA card needs before it
 # will give up more than one output. A conffile, so an administrator who edits it
@@ -509,8 +519,14 @@ fi
 # one is right is not a fact about the machine. It is the same package
 # everywhere, and without it an NDI output is a stream nobody can find.
 #
+# `curl` and `ca-certificates` are the fourth and fifth, and run rather than
+# linked: the administration page's update button asks the repository through
+# curl, and the installer fetches the release with it. A Debian netinst has
+# neither, and without the certificates curl refuses every https address it is
+# given — which would read as "no connection" on a machine that has one.
+#
 # The rest is what the binaries link against, read out of them.
-depends="adduser, systemd, libvulkan1, polkitd, avahi-daemon"
+depends="adduser, systemd, libvulkan1, polkitd, avahi-daemon, curl, ca-certificates"
 
 # Debian's FFmpeg must not appear. If it does, something linked against the
 # machine's copy and the package would carry a GPL dependency it was built

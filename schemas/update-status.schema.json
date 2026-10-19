@@ -1,0 +1,114 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "UpdateStatus",
+  "description": "What this server knows about updating itself.\n\nThe owner, 2026-10-19: \"ob der server selber Updates über das Repo abfragen kann und bei bedarf durch den User in der AdminGUI direkt installiert werden kann\" — and \"gar nicht automatisch prüfen. nur auf knopfdruck.\" So nothing here is ever fetched unasked: `check` is empty until an administrator has pressed the button since the server started.",
+  "type": "object",
+  "required": [
+    "installed"
+  ],
+  "properties": {
+    "check": {
+      "description": "What the last check found, if anybody has asked since the server started.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/UpdateCheck"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "install": {
+      "description": "What the installer last did, if it has ever run on this machine.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/UpdateProgress"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "installed": {
+      "description": "The version this server is running.",
+      "type": "string"
+    }
+  },
+  "definitions": {
+    "UpdateCheck": {
+      "description": "What asking the repository for its newest release found.",
+      "type": "object",
+      "required": [
+        "checked_at",
+        "newer"
+      ],
+      "properties": {
+        "checked_at": {
+          "description": "When the repository was asked, in milliseconds since the epoch.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "latest": {
+          "description": "The newest release's version, such as `0.2.46`, when there was an answer.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "newer": {
+          "description": "Whether that is newer than what is installed, and carries a package for this machine — which is the one case in which there is something to install.",
+          "type": "boolean"
+        },
+        "notes_url": {
+          "description": "The release's own page, where what changed is written.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "problem": {
+          "description": "Why there is no answer, or why the newest release cannot be installed here: no connection, no package for this machine.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "published_at": {
+          "description": "When that release was published, as the repository writes it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "UpdateProgress": {
+      "description": "Where the installer is, or where it stopped.\n\nWritten by the installer itself, which runs apart from the server: the server is restarted by the package it installs, and an install it ran itself would be killed half way.",
+      "type": "object",
+      "required": [
+        "at",
+        "detail",
+        "stage",
+        "version"
+      ],
+      "properties": {
+        "at": {
+          "description": "When it last wrote this, as UTC in ISO 8601.",
+          "type": "string"
+        },
+        "detail": {
+          "description": "What it is doing, or why it stopped, in a sentence.",
+          "type": "string"
+        },
+        "stage": {
+          "description": "`starting`, `downloading`, `verifying`, `installing`, then `installed`, `failed` or `refused`.",
+          "type": "string"
+        },
+        "version": {
+          "description": "The version it was asked for.",
+          "type": "string"
+        }
+      }
+    }
+  }
+}
