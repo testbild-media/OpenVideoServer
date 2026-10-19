@@ -78,10 +78,11 @@ import {
  * low budget Laptops laufen der Client").
  *
  * **Eight bits only**, which is a limit of the wrapper rather than a choice:
- * FFmpeg's Kvazaar takes `yuv420p` and a ten-bit target asks for `p010le`. A
- * ten-bit source on a machine with no hardware encoder therefore still has no
- * way through, and says so by failing rather than by producing eight-bit
- * quietly.
+ * FFmpeg's Kvazaar takes `yuv420p`. That used to leave a ten-bit source with no
+ * way through on a machine whose hardware could not make Main 10 — encoded to
+ * the end, eight-bit, and refused before it was sent (owner, 2026-10-20). What
+ * this client prepares is eight-bit now (`targetFor`), so Kvazaar is a whole
+ * fallback rather than half of one.
  */
 export const HEVC_BACKENDS = [
   'hevc_nvenc',
@@ -425,9 +426,39 @@ export function hapArguments(
   ];
 }
 
+/**
+ * What a file can be prepared into: one of the server's video profiles, or a
+ * PNG for a still the server cannot read as it is.
+ */
+export type PreparedForm = OvsProfile | 'png';
+
+/**
+ * Still codecs the server reads exactly as they are.
+ *
+ * What the server's own image reader is built with — PNG and JPEG
+ * (`check_content` in upload_routes.rs, the `image` crate's features in
+ * `ovs-core`'s manifest). ffprobe calls a JPEG `mjpeg`, and a single-frame APNG
+ * is a PNG to anything that reads one. These go up untouched (owner,
+ * 2026-10-20: "PNGs und Bilder sollten ja so durchgehen ohne Konvertierung").
+ */
+export const STILLS_AS_THEY_ARE: ReadonlySet<string> = new Set(['png', 'apng', 'mjpeg']);
+
+/**
+ * The arguments that turn a still into a PNG at `into`.
+ *
+ * For a still the server cannot read as it is — TIFF, BMP, WebP, a one-frame
+ * GIF. PNG because it is lossless and keeps alpha, so the picture that arrives
+ * is the picture that was dropped. Nothing is scaled: a ceiling is about how
+ * much a clip costs per frame, and a still is decoded once.
+ */
+export function pngArguments(from: string, into: string): string[] {
+  return [...common(from), '-frames:v', '1', '-update', '1', into];
+}
+
 /** What a prepared file should be called, beside the one it came from. */
-export function preparedName(fileName: string, to: OvsProfile): string {
+export function preparedName(fileName: string, to: PreparedForm): string {
   const withoutExtension = fileName.replace(/\.[^.\\/]+$/, '');
+  if (to === 'png') return `${withoutExtension}.png`;
   if (to === 'hap') return `${withoutExtension}.hap.mov`;
   return `${withoutExtension}.${to === 'hevc_10' ? 'hevc10' : 'hevc'}.mp4`;
 }

@@ -104,6 +104,7 @@ export class MediaPanel {
     into: element('ingest-into'),
     pick: element<HTMLButtonElement>('ingest-pick'),
     clear: element<HTMLButtonElement>('ingest-clear'),
+    stopAll: element<HTMLButtonElement>('ingest-stop'),
     queue: element('ingest-list'),
     refresh: element<HTMLButtonElement>('library-refresh'),
     newFolder: element<HTMLButtonElement>('library-new-folder'),
@@ -124,6 +125,18 @@ export class MediaPanel {
     this.#ui.refresh.addEventListener('click', () => void this.load());
     this.#ui.newFolder.addEventListener('click', () => this.#newFolder());
     this.#ui.clear.addEventListener('click', () => void this.#ovs.clearIngest());
+    // **Everything still on its way, in one press** (owner, 2026-10-20: "ich
+    // kann die Vorgänge nichtmals abbrechen"). Remove stops the file being
+    // prepared, and the next one in the queue starts at once — so with a dozen
+    // files that all fail the same way, stopping them was a dozen presses, each
+    // racing the next encode.
+    this.#ui.stopAll.addEventListener('click', () => {
+      for (const item of this.#queue) {
+        if (item.stage.at !== 'ready') {
+          void this.#ovs.removeIngest(item.id);
+        }
+      }
+    });
 
     // Drag and drop. The page cannot read a file and would not know what to do
     // with one if it could; what it takes from a drop is where each file is on
@@ -570,6 +583,7 @@ export class MediaPanel {
     this.#ui.clear.disabled = !this.#queue.some(
       (item) => item.stage.at === 'ready' || item.stage.at === 'stopped',
     );
+    this.#ui.stopAll.disabled = !this.#queue.some((item) => item.stage.at !== 'ready');
 
     if (this.#queue.length === 0) {
       this.#ui.queue.replaceChildren();

@@ -36,14 +36,16 @@ import {
   hapArguments,
   hevcArguments,
   HEVC_BACKENDS,
+  pngArguments,
   preparedName,
   progressFrom,
   whyItStopped,
   CONVENTIONAL_TAGS,
   type ColourTags,
   type HevcBackend,
+  type PreparedForm,
 } from '../shared/encoder.js';
-import { depthOf, type OvsProfile } from '../shared/profile.js';
+import { depthOf } from '../shared/profile.js';
 
 /**
  * What to run for one of FFmpeg's programs.
@@ -612,7 +614,7 @@ export async function readPart(
  */
 export async function prepareFile(
   path: string,
-  to: OvsProfile,
+  to: PreparedForm,
   backend: HevcBackend | null,
   rate: FrameRate,
   tags: ColourTags,
@@ -628,17 +630,20 @@ export async function prepareFile(
 ): Promise<PrepareOutcome> {
   const directory = await mkdtemp(join(tmpdir(), 'ovs-prepare-'));
   const into = join(directory, preparedName(basenameOf(path), to));
-  const depth = depthOf(to);
-  // HAP has one encoder and no depth; HEVC has a backend the caller chose and
-  // a depth the profile names. A HEVC profile with no backend is a caller
-  // mistake rather than a machine without one, which `planFor` has already
-  // reported — so the honest answer is the same as having no FFmpeg.
+  const depth = to === 'png' ? null : depthOf(to);
+  // A still becomes a PNG; HAP has one encoder and no depth; HEVC has a
+  // backend the caller chose and a depth the profile names. A HEVC profile
+  // with no backend is a caller mistake rather than a machine without one,
+  // which `planFor` has already reported — so the honest answer is the same as
+  // having no FFmpeg.
   const args =
-    depth === null
-      ? hapArguments(path, into, rate, [], size)
-      : backend === null
-        ? null
-        : hevcArguments(path, into, backend, depth, rate, tags, [], size);
+    to === 'png'
+      ? pngArguments(path, into)
+      : depth === null
+        ? hapArguments(path, into, rate, [], size)
+        : backend === null
+          ? null
+          : hevcArguments(path, into, backend, depth, rate, tags, [], size);
   if (args === null) {
     await rm(directory, { recursive: true, force: true });
     return { kind: 'unavailable' };

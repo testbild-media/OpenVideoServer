@@ -35,7 +35,6 @@ import {
 } from '../src/shared/encoder.js';
 import {
   faults,
-  isTenBit,
   keyframesAtMost,
   passesWithoutReadingPackets,
   profileOf,
@@ -158,24 +157,16 @@ describe('which of the three a file is, and which it should become', () => {
     expect(profileOf({ ...conforming(), codec: 'hap' })).toBe('hap');
   });
 
-  it('routes alpha to HAP and everything else to HEVC at its own depth', () => {
+  it('routes alpha to HAP and everything else to HEVC 8-bit, whatever its depth', () => {
+    // The owner, 2026-10-20: "Videos … nach HEVC 8-Bit … bei Alpha in HAP
+    // Alpha". A ten-bit target was what failed on a machine whose only working
+    // encoder writes eight bits.
     expect(targetFor({ ...conforming(), codec: 'prores', hasAlpha: true })).toBe('hap');
     expect(targetFor({ ...conforming(), codec: 'prores', pixelFormat: 'yuv420p' })).toBe('hevc_8');
-    // Ten-bit source stays ten-bit: narrowing throws away what it was mastered
-    // for, and widening costs a third more bitrate for nothing.
-    expect(targetFor({ ...conforming(), codec: 'vp9', pixelFormat: 'yuv420p10le' })).toBe('hevc_10');
-    expect(targetFor({ ...conforming(), codec: 'prores', pixelFormat: 'yuv422p12le' })).toBe(
-      'hevc_10',
+    expect(targetFor({ ...conforming(), codec: 'vp9', pixelFormat: 'yuv420p10le' })).toBe('hevc_8');
+    expect(targetFor({ ...conforming(), codec: 'prores', pixelFormat: 'yuv422p10le' })).toBe(
+      'hevc_8',
     );
-  });
-
-  it('reads a bit depth out of a pixel format’s name', () => {
-    expect(isTenBit('yuv420p')).toBe(false);
-    expect(isTenBit('rgba')).toBe(false);
-    expect(isTenBit('yuv420p10le')).toBe(true);
-    expect(isTenBit('p010le')).toBe(true);
-    expect(isTenBit('yuva444p12le')).toBe(true);
-    expect(isTenBit('gbrp16le')).toBe(true);
   });
 
   it('never asks for no keyframes at all', () => {
@@ -198,6 +189,24 @@ describe('which encoder, and what it is told', () => {
 
   it('leaves a conforming file alone', () => {
     expect(planFor(conforming(), everything)).toEqual({ kind: 'ready' });
+    // Ten-bit included: the server plays it, and a re-encode is a generation
+    // of quality spent on nothing.
+    expect(planFor({ ...conforming(), pixelFormat: 'yuv420p10le' }, everything)).toEqual({
+      kind: 'ready',
+    });
+  });
+
+  it('prepares a ten-bit source as eight-bit, which every encoder can make', () => {
+    // The owner's files of 2026-10-20: three ten-bit clips, each encoded to
+    // the end by the software encoder, each refused before it was sent because
+    // the target was ten-bit and Kvazaar writes eight.
+    const plan = planFor(
+      { ...conforming(), codec: 'prores', pixelFormat: 'yuv422p10le' },
+      new Set(['hevc_nvenc', 'libkvazaar']),
+    );
+    expect(plan.kind === 'encode' && plan.to).toBe('hevc_8');
+    expect(plan.kind === 'encode' && plan.backends).toEqual(['hevc_nvenc', 'libkvazaar']);
+    expect(plan.kind === 'encode' && plan.reason).toContain('HEVC 8-bit');
   });
 
   it('prefers NVIDIA and falls back to Media Foundation, never asking anybody', () => {

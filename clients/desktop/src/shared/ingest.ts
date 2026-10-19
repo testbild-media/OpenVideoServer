@@ -37,12 +37,14 @@ import {
   planFor,
   preparedSize,
   tagsFor,
+  STILLS_AS_THEY_ARE,
   type ColourTags,
   type HevcBackend,
+  type PreparedForm,
   type UploadCeiling,
 } from './encoder.js';
 import { MAX_SIDE } from './limits.js';
-import { faults, passesWithoutReadingPackets, profileOf, type OvsProfile } from './profile.js';
+import { faults, passesWithoutReadingPackets, profileOf } from './profile.js';
 
 // --- what a file turned out to be -------------------------------------------
 
@@ -315,7 +317,7 @@ export type IngestStage =
    * long it is, so a bar can be honest about a job that takes minutes. Both are
    * the file's own numbers, not an estimate of how long the machine will take.
    */
-  | { at: 'preparing'; seconds: number; ofSeconds: number | null; to: OvsProfile }
+  | { at: 'preparing'; seconds: number; ofSeconds: number | null; to: PreparedForm }
   /** Being hashed, which is the long part for a large file. */
   | { at: 'hashing'; hashed: number; byteSize: number }
   /** Asking the server whether it wants the bytes at all. */
@@ -433,11 +435,12 @@ export interface IngestPorts {
    * afterwards, whatever happened: an ingest that leaves gigabytes of working
    * files behind is one nobody uses twice.
    *
-   * `backend` is null for HAP, which has one encoder and no choice to make.
+   * `backend` is null for HAP and for a PNG, which have one encoder each and no
+   * choice to make.
    */
   prepare(
     path: string,
-    to: OvsProfile,
+    to: PreparedForm,
     backend: HevcBackend | null,
     rate: FrameRate,
     tags: ColourTags,
@@ -746,15 +749,18 @@ export class IngestQueue {
   async #prepare(
     item: QueueItem,
     from: Probe,
-    to: OvsProfile,
+    to: PreparedForm,
     backend: HevcBackend | null,
   ): Promise<Attempt> {
     const rate = from.frameRate ?? { numerator: 25, denominator: 1 };
     const ofSeconds = from.durationMs === null ? null : from.durationMs / 1000;
     const tags = tagsFor(from.video ?? {});
     // Decided here rather than in the encoder, because the probe is what knows
-    // how big the picture is and this is the one place that has both.
-    const size = preparedSize({ width: from.width, height: from.height }, this.#ceiling);
+    // how big the picture is and this is the one place that has both. Never for
+    // a still: the ceiling is what a clip may cost a frame, and a still is
+    // decoded once.
+    const size =
+      to === 'png' ? null : preparedSize({ width: from.width, height: from.height }, this.#ceiling);
 
     this.#set(item, { at: 'preparing', seconds: 0, ofSeconds, to });
     const stop = new AbortController();
@@ -878,6 +884,14 @@ export class IngestQueue {
       return null;
     }
 
+    // **A still is not a video**, and was being prepared as one: a PNG went
+    // through the HEVC encoders, and one with alpha came out as HAP. Pictures
+    // the server reads go up exactly as they are; one it cannot read becomes a
+    // PNG (owner, 2026-10-20).
+    if (kindFor(probe) === 'image') {
+      return this.#conformStill(item, probe);
+    }
+
     const video = probe.video;
     if (video === null) {
       // No prober, so nothing is known and nothing is guessed. The file goes as
@@ -912,14 +926,15 @@ export class IngestQueue {
     // actually conforms.
     const attempts: (HevcBackend | null)[] =
       decided.to === 'hap' ? [null] : decided.backends;
-    // Two different endings, kept apart because they read differently to the
-    // person holding the file: `lastFault` is a backend that produced
-    // something the server would refuse, `lastFailure` is one that produced
-    // nothing at all and said why.
-    let lastFault = '';
-    let lastFailure = '';
+    // What every backend came to, in the order they were tried. **All of them,
+    // not the last one**: this kept only the last, and on 2026-10-20 the last
+    // was the software encoder saying it had made eight bits — while why every
+    // hardware encoder before it had failed was thrown away, which is the
+    // half that would have said what was wrong with the machine.
+    const outcomes: string[] = [];
 
     for (const backend of attempts) {
+      const who = backend ?? 'hap';
       const attempt = await this.#prepare(item, probe, decided.to, backend);
       if (attempt.kind === 'over') {
         // Stopped, cancelled, or no FFmpeg at all. `#prepare` has already said
@@ -932,7 +947,7 @@ export class IngestQueue {
         // there: all of them end here, and on a machine with two encoders this
         // is the difference between a file an operator can upload and one they
         // cannot. It used to end the item.
-        lastFailure = attempt.reason;
+        outcomes.push(`${who}: ${attempt.reason}`);
         await this.#discardWorking(item);
         continue;
       }
@@ -949,9 +964,11 @@ export class IngestQueue {
         return { ...attempt.probe, video: check };
       }
 
-      lastFault = problems
-        .map((fault) => `${fault.what}: wanted ${fault.wanted}, got ${fault.found}`)
-        .join('; ');
+      outcomes.push(
+        `${who} made a file the server would refuse (${problems
+          .map((fault) => `${fault.what}: wanted ${fault.wanted}, got ${fault.found}`)
+          .join('; ')})`,
+      );
       // This backend produced something the server would refuse. Throw it away
       // and try the next one; the source is still where it was.
       await this.#discardWorking(item);
@@ -960,17 +977,42 @@ export class IngestQueue {
     this.#set(item, {
       at: 'stopped',
       reason:
-        lastFault !== ''
-          ? `This file was prepared, and what came out is still not something the server will take (${lastFault}). Nothing on this machine can produce it.`
-          : lastFailure !== ''
-            ? // The encoder's own last words, unwrapped. Nothing was produced,
-              // so a sentence about what came out would be describing a file
-              // that does not exist.
-              lastFailure
-            : 'This file could not be prepared into anything the server will take.',
+        outcomes.length === 0
+          ? 'This file could not be prepared into anything the server will take.'
+          : `No converter on this machine could prepare this file. ${outcomes.join(' — ')}`,
       resumable: false,
     });
     return null;
+  }
+
+  /**
+   * A still: as it is when the server can read it, and a PNG when it cannot.
+   *
+   * Answers the probe of what will be uploaded, like `#conform`.
+   */
+  async #conformStill(item: QueueItem, probe: Probe): Promise<Probe | null> {
+    if (STILLS_AS_THEY_ARE.has(probe.codec.trim().toLowerCase())) {
+      return probe;
+    }
+
+    const attempt = await this.#prepare(item, probe, 'png', null);
+    if (attempt.kind === 'over') {
+      return null;
+    }
+    if (attempt.kind === 'failed') {
+      await this.#discardWorking(item);
+      this.#set(item, {
+        at: 'stopped',
+        reason: `This picture is ${probe.codec}, which the server cannot read, and it could not be turned into a PNG: ${attempt.reason}`,
+        resumable: false,
+      });
+      return null;
+    }
+    item.byteSize = await this.ports.size(this.#source(item));
+    if (!this.#holds(item)) {
+      return null;
+    }
+    return attempt.probe;
   }
 
   /** Throws away whatever the last attempt wrote. The source is untouched. */
@@ -1306,7 +1348,13 @@ export function stageLine(item: QueueItem): string {
       // The format, never the encoder. Which backend produced it is an
       // implementation detail and an operator never sees one.
       const as =
-        stage.to === 'hap' ? 'HAP Alpha' : stage.to === 'hevc_10' ? 'HEVC 10-bit' : 'HEVC';
+        stage.to === 'png'
+          ? 'PNG'
+          : stage.to === 'hap'
+            ? 'HAP Alpha'
+            : stage.to === 'hevc_10'
+              ? 'HEVC 10-bit'
+              : 'HEVC';
       if (stage.ofSeconds === null || stage.ofSeconds <= 0) {
         return `Preparing as ${as}…`;
       }

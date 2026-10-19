@@ -31,7 +31,8 @@ import {
   type ProbeOutcome,
   type QueueItem,
 } from '../src/shared/ingest.js';
-import type { OvsProfile, ProbedVideo } from '../src/shared/profile.js';
+import type { PreparedForm } from '../src/shared/encoder.js';
+import type { ProbedVideo } from '../src/shared/profile.js';
 
 /**
  * What a server built from this tree says it can decode.
@@ -357,7 +358,7 @@ function harness(
   const outcome: ProbeOutcome = options.probe ?? { kind: 'read', probe: prores() };
 
   /** Every file this machine was asked to prepare, and what it was asked for. */
-  const prepared: Array<{ path: string; to: OvsProfile; backend: string | null }> = [];
+  const prepared: Array<{ path: string; to: PreparedForm; backend: string | null }> = [];
   /** Every working file this machine was asked to remove. */
   const discarded: string[] = [];
   let probes = 0;
@@ -644,6 +645,89 @@ describe('the ingest queue', () => {
     expect(prepared[0]?.to).toBe('hap');
   });
 
+  it('sends a PNG or a JPEG exactly as it is, alpha or not', async () => {
+    // The owner, 2026-10-20: "PNGs und Bilder sollten ja so durchgehen ohne
+    // Konvertierung". A PNG with alpha used to come out as HAP.
+    for (const codec of ['png', 'mjpeg']) {
+      const { queue, prepared, server } = harness({
+        probe: {
+          kind: 'read',
+          probe: prores({
+            codec,
+            container: 'image2',
+            durationMs: 40,
+            video: reading({ codec, pixelFormat: 'rgba', hasAlpha: true }),
+          }),
+        },
+      });
+      queue.add([{ path: '/media/logo.png', name: 'logo.png' }]);
+
+      const items = await settled(queue);
+
+      expect(prepared, codec).toEqual([]);
+      expect(server.created[0], codec).toMatchObject({ kind: 'image' });
+      expect(items[0]?.stage.at, codec).toBe('ready');
+    }
+  });
+
+  it('turns a picture the server cannot read into a PNG, and nothing else', async () => {
+    const { queue, prepared, server } = harness({
+      probe: {
+        kind: 'read',
+        probe: prores({
+          codec: 'tiff',
+          container: 'tiff_pipe',
+          durationMs: null,
+          video: reading({ codec: 'tiff', pixelFormat: 'rgb48le' }),
+        }),
+      },
+      afterPreparing: {
+        kind: 'read',
+        probe: prores({
+          codec: 'png',
+          container: 'png_pipe',
+          durationMs: null,
+          video: reading({ codec: 'png', pixelFormat: 'rgb48be' }),
+        }),
+      },
+    });
+    queue.add([{ path: '/media/plan.tif', name: 'plan.tif' }]);
+
+    const items = await settled(queue);
+
+    expect(prepared.map((attempt) => [attempt.to, attempt.backend])).toEqual([['png', null]]);
+    expect(server.created[0]).toMatchObject({ kind: 'image', original_filename: 'plan.tif' });
+    expect(items[0]?.stage.at).toBe('ready');
+  });
+
+  it('prepares a ten-bit clip as eight-bit and sends it', async () => {
+    // The owner's three clips of 2026-10-20, each encoded to the end and then
+    // refused before it was sent, because the target was ten-bit and the
+    // encoder that finished writes eight.
+    const { queue, prepared, server } = harness({
+      probe: {
+        kind: 'read',
+        probe: needsPreparing({
+          codec: 'prores',
+          video: reading({ codec: 'prores', pixelFormat: 'yuv422p10le' }),
+        }),
+      },
+      afterPreparing: { kind: 'read', probe: prores() },
+      encoders: ['hevc_nvenc', 'libkvazaar'],
+      prepareByBackend: {
+        hevc_nvenc: { kind: 'failed', reason: 'No capable devices found' },
+        libkvazaar: { kind: 'prepared', path: '/tmp/ovs-prepare-x/clip.hevc.mp4' },
+      },
+    });
+    queue.add([{ path: '/media/visual.mov', name: 'visual.mov' }]);
+
+    const items = await settled(queue);
+
+    expect(prepared.map((attempt) => attempt.to)).toEqual(['hevc_8', 'hevc_8']);
+    expect(server.created[0]).toMatchObject({ kind: 'video', codec: 'hevc' });
+    expect(items[0]?.stage.at).toBe('ready');
+  });
+
   it('says so when there is nothing on this machine to prepare with', async () => {
     // A machine with ffprobe and no ffmpeg is an ordinary machine, and telling
     // somebody to prepare it elsewhere is more use than an exit code.
@@ -674,11 +758,11 @@ describe('the ingest queue', () => {
 
     const items = await settled(queue);
 
-    expect(items[0]?.stage).toEqual({
-      at: 'stopped',
-      reason: 'Preparing this file failed: Invalid data found',
-      resumable: false,
-    });
+    expect(items[0]?.stage.at).toBe('stopped');
+    const stage = items[0]?.stage;
+    expect(stage?.at === 'stopped' && stage.reason).toContain(
+      'Preparing this file failed: Invalid data found',
+    );
     // Nothing was made, so nothing is removed.
     expect(discarded).toEqual([]);
   });
@@ -706,23 +790,33 @@ describe('the ingest queue', () => {
     expect(items[0]?.stage.at).not.toBe('stopped');
   });
 
-  it('says the encoder\u2019s own words when every backend fails', async () => {
-    // Nothing was produced, so the sentence must not be about what came out.
+  it('says what every backend said when every backend fails', async () => {
+    // **Every one, not the last one.** On 2026-10-20 the last one was the
+    // software encoder reporting eight bits, and why each hardware encoder
+    // before it had failed \u2014 the half that said what was wrong \u2014 was gone.
     const { queue, prepared } = harness({
       probe: { kind: 'read', probe: needsPreparing({ container: 'mov,mp4' }) },
-      encoders: ['hevc_nvenc', 'hevc_mf'],
-      prepare: { kind: 'failed', reason: 'Preparing this file failed: Invalid data found' },
+      afterPreparing: {
+        kind: 'read',
+        probe: prores({ container: 'mov,mp4', video: reading({ interlaced: true }) }),
+      },
+      encoders: ['hevc_nvenc', 'libkvazaar'],
+      prepareByBackend: {
+        hevc_nvenc: { kind: 'failed', reason: 'OpenEncodeSessionEx failed: out of memory' },
+        libkvazaar: { kind: 'prepared', path: '/tmp/ovs-prepare-x/clip.hevc.mp4' },
+      },
     });
     queue.add([{ path: '/media/opener.mp4', name: 'opener.mp4' }]);
 
     const items = await settled(queue);
 
     expect(prepared).toHaveLength(2);
-    expect(items[0]?.stage).toEqual({
-      at: 'stopped',
-      reason: 'Preparing this file failed: Invalid data found',
-      resumable: false,
-    });
+    const stage = items[0]?.stage;
+    expect(stage?.at).toBe('stopped');
+    const reason = stage?.at === 'stopped' ? stage.reason : '';
+    expect(reason).toContain('hevc_nvenc: OpenEncodeSessionEx failed: out of memory');
+    expect(reason).toContain('libkvazaar made a file the server would refuse');
+    expect(reason).toContain('scan: wanted progressive, got interlaced');
   });
 
   it('refuses a picture too large for the server before preparing it', async () => {

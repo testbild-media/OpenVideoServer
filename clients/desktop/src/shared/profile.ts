@@ -118,29 +118,26 @@ export function profileOf(video: ProbedVideo): OvsProfile {
 }
 
 /**
- * Which profile a file should *become*, which is not the same question.
+ * Which profile a file should *become*, when it has to become one.
  *
- * The owner's routing of 2026-09-23: alpha goes to HAP because HAP was made for
- * exactly this and arrives as a texture already; everything else goes to HEVC,
- * at the depth the source already is. Ten-bit source stays ten-bit — widening
- * an eight-bit file buys nothing and costs a third more bitrate, and narrowing
- * a ten-bit one throws away what it was mastered for.
+ * Alpha goes to HAP, because HAP was made for exactly this and arrives as a
+ * texture already. **Everything else goes to HEVC 8-bit** (owner, 2026-10-20:
+ * "Videos … nach HEVC 8-Bit in unser Format bringen … bei Alpha in HAP Alpha",
+ * and then "es kann ja auch 10-Bit sein, ist mir egal, aber es soll
+ * funktionieren!").
+ *
+ * It used to be HEVC at the depth the source already was, and a ten-bit source
+ * was the case that did not work: on a machine whose hardware encoders could
+ * not make Main 10, the one encoder left was Kvazaar, which writes eight bits
+ * only — so the encode ran to the end, came out eight-bit, and was refused
+ * before it was sent, file after file. Every encoder this client knows writes
+ * eight bits, and the composition and every output are eight-bit anyway.
+ *
+ * A file that already conforms is not re-encoded whatever its depth: a ten-bit
+ * HEVC file the server plays goes as it is (`planFor`).
  */
 export function targetFor(video: ProbedVideo): OvsProfile {
-  if (video.hasAlpha) return 'hap';
-  return isTenBit(video.pixelFormat) ? 'hevc_10' : 'hevc_8';
-}
-
-/**
- * Whether a pixel format carries more than eight bits a sample.
- *
- * By name, because that is what a prober reports and the alternative is a table
- * of every format FFmpeg knows. Anything with a bit depth in its name above
- * eight counts: `yuv420p10le`, `yuv422p12le`, `p010le`, `gbrp16le`.
- */
-export function isTenBit(pixelFormat: string): boolean {
-  const bits = /(\d+)(?:le|be)$/.exec(pixelFormat.trim().toLowerCase());
-  return bits !== null && Number(bits[1]) > 8;
+  return video.hasAlpha ? 'hap' : 'hevc_8';
 }
 
 /**
