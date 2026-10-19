@@ -26,6 +26,7 @@ pub mod dmx_link;
 pub mod host;
 pub mod machine_connectors;
 pub mod media_store;
+pub mod network;
 pub mod parameters;
 pub mod power;
 pub mod renderer_link;

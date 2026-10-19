@@ -93,6 +93,16 @@ pub fn generate_protocol() -> Vec<GeneratedSchema> {
             "install-update-response.schema.json",
             crate::http::InstallUpdateResponse
         ),
+        schema!("network-status.schema.json", crate::http::NetworkStatus),
+        schema!("network-settings.schema.json", crate::http::NetworkSettings),
+        schema!(
+            "network-change-response.schema.json",
+            crate::http::NetworkChangeResponse
+        ),
+        schema!(
+            "network-trial-answer.schema.json",
+            crate::http::NetworkTrialAnswer
+        ),
         schema!(
             "fixture-catalogue.schema.json",
             crate::fixtures::FixtureCatalogueResponse

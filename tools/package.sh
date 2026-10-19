@@ -200,6 +200,13 @@ install -m 0644 deploy/polkit/*.rules "$staging/usr/share/polkit-1/rules.d/"
 # matches the checksum beside it; `tools/test-update.sh` holds it to that.
 install -m 0755 deploy/update/ovs-update "$staging$PRIVATE_LIB/ovs-update"
 
+# **The wired network, from the administration page** (owner, 2026-10-19).
+# `ovs-network.service` runs this as root: it reads the server's request as
+# somebody else's words, brings the change up from a file of its own, and puts
+# the previous settings back after five minutes unless somebody keeps it.
+# `tools/test-network.sh` holds it to that.
+install -m 0755 deploy/network/ovs-network "$staging$PRIVATE_LIB/ovs-network"
+
 # **The card's module options**, which are what an NVIDIA card needs before it
 # will give up more than one output. A conffile, so an administrator who edits it
 # keeps their edit across an upgrade — `deploy/debian/conffiles` lists it and

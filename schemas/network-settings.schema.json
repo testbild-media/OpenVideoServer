@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "NetworkSettings",
+  "description": "Settings for one interface: the request to change them, and what a static configuration holds.",
+  "type": "object",
+  "required": [
+    "interface",
+    "method"
+  ],
+  "properties": {
+    "address": {
+      "description": "The IPv4 address, for `static`.",
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "gateway": {
+      "description": "The default gateway, for `static`. Optional: a show network often has none.",
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "interface": {
+      "description": "The interface, such as `eno1`.",
+      "type": "string"
+    },
+    "method": {
+      "description": "`dhcp` or `static`.",
+      "type": "string"
+    },
+    "nameservers": {
+      "description": "Up to three nameservers, for `static`.",
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "netmask": {
+      "description": "The subnet mask, as `255.255.255.0` or as a prefix length such as `24`.",
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  }
+}

@@ -1,0 +1,25 @@
+[Unit]
+Description=Change OpenVideoServer's wired network, on trial
+Documentation=https://github.com/testbild-media/OpenVideoServer
+# The administration page's Network section starts this, through a polkit rule
+# that lets the server start this unit and no other
+# (deploy/polkit/52-openvideoserver-network.rules). What to change is in the
+# server's request file; the script checks every value of it again.
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/openvideoserver/ovs-network
+
+# Root, because it changes the network. Apart from the server, because it has
+# to be able to put the previous settings back when nobody can reach the server
+# any more: it applies the change, waits five minutes for somebody to keep it,
+# and otherwise restores what it kept.
+#
+# Where it writes how far it got, and the files it kept: readable by the
+# server, which runs as another user, and kept across a reboot.
+StateDirectory=ovs-network
+StateDirectoryMode=0755
+
+# Five minutes on trial, and time either side to bring the interface down and
+# up twice.
+TimeoutStartSec=12min

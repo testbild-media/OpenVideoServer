@@ -84,6 +84,17 @@ pub fn router(state: AppState) -> Router {
             "/server/update/install",
             post(server_routes::install_update),
         )
+        // The machine's wired network. Administrators only, and a change is on
+        // trial for five minutes until somebody keeps it.
+        .route("/server/network", get(server_routes::network_status))
+        .route(
+            "/server/network/change",
+            post(server_routes::change_network),
+        )
+        .route(
+            "/server/network/trial",
+            post(server_routes::answer_network_trial),
+        )
         .route(
             "/server/counters/reset",
             post(server_routes::reset_counters),
@@ -645,6 +656,58 @@ mod tests {
             .await;
             assert_eq!(status, StatusCode::UNAUTHORIZED, "{path}");
         }
+    }
+
+    #[tokio::test]
+    async fn the_network_is_for_an_administrator_and_nobody_else() {
+        // Changing an address is taking the machine off the network, so none
+        // of the three answers a request without a session.
+        let (app, _) = app();
+        let _ = signed_in(&app).await;
+
+        let (status, _) = send(&app, get("/api/v1/server/network")).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        let (status, _) = send(
+            &app,
+            post_json(
+                "/api/v1/server/network/change",
+                &serde_json::json!({ "interface": "eno1", "method": "dhcp" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        let (status, _) = send(
+            &app,
+            post_json(
+                "/api/v1/server/network/trial",
+                &serde_json::json!({ "keep": true }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn a_change_to_an_interface_the_machine_has_not_got_is_refused_before_anything_runs() {
+        let (app, _) = app();
+        let token = signed_in(&app).await;
+        let (status, body) = send(
+            &app,
+            post_json_auth(
+                "/api/v1/server/network/change",
+                &token,
+                &serde_json::json!({ "interface": "nonexistent9", "method": "dhcp" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let answer: ovs_proto::http::NetworkChangeResponse = decode(body);
+        assert!(!answer.accepted);
+        assert!(
+            answer.detail.contains("not a wired interface"),
+            "{}",
+            answer.detail
+        );
     }
 
     #[tokio::test]

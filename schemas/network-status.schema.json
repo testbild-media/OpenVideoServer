@@ -1,0 +1,205 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "NetworkStatus",
+  "description": "The machine's wired network interfaces, and any change on trial.\n\nThe owner, 2026-10-19: \"Network Settings via Admin GUI, also ob DHCP/Static inkl IP Subnetz Gateway DNS etc.\" — and on the safety net, five minutes to confirm before the previous settings come back by themselves.",
+  "type": "object",
+  "required": [
+    "interfaces",
+    "nameservers"
+  ],
+  "properties": {
+    "interfaces": {
+      "description": "Every wired interface, in name order. Not the loopback, not a VPN and not a radio: none of those is configured here.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/NetworkInterface"
+      }
+    },
+    "nameservers": {
+      "description": "The nameservers the machine uses now, whichever interface set them.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "trial": {
+      "description": "The last change and where it got, if one has ever been made here.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/NetworkTrial"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "unavailable": {
+      "description": "Why nothing can be changed from here, where nothing can: a machine whose network is not run by `ifupdown` is changed where it is run.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "definitions": {
+    "NetworkInterface": {
+      "description": "One wired interface, as it is and as it is configured.",
+      "type": "object",
+      "required": [
+        "addresses",
+        "link",
+        "mac",
+        "method",
+        "name"
+      ],
+      "properties": {
+        "addresses": {
+          "description": "The IPv4 addresses it has now, as `address/prefix`.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "configured": {
+          "description": "The configured static settings, where the method is `static`.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/NetworkSettings"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "gateway": {
+          "description": "The default gateway through it now, if there is one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "link": {
+          "description": "Whether a cable with something at the other end is plugged in.",
+          "type": "boolean"
+        },
+        "mac": {
+          "description": "Its hardware address.",
+          "type": "string"
+        },
+        "method": {
+          "description": "How it is configured to come up: `dhcp`, `static`, or `none` where the configuration does not mention it.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Its name, such as `eno1`.",
+          "type": "string"
+        },
+        "speed_mbps": {
+          "description": "The link's speed in megabits a second, where the driver says.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      }
+    },
+    "NetworkSettings": {
+      "description": "Settings for one interface: the request to change them, and what a static configuration holds.",
+      "type": "object",
+      "required": [
+        "interface",
+        "method"
+      ],
+      "properties": {
+        "address": {
+          "description": "The IPv4 address, for `static`.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "gateway": {
+          "description": "The default gateway, for `static`. Optional: a show network often has none.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "interface": {
+          "description": "The interface, such as `eno1`.",
+          "type": "string"
+        },
+        "method": {
+          "description": "`dhcp` or `static`.",
+          "type": "string"
+        },
+        "nameservers": {
+          "description": "Up to three nameservers, for `static`.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "netmask": {
+          "description": "The subnet mask, as `255.255.255.0` or as a prefix length such as `24`.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "NetworkTrial": {
+      "description": "A change to the network, and how far it got.\n\nWritten by the machine's own network helper, which runs apart from the server: it has to be able to put the previous settings back when nobody can reach the server any more.",
+      "type": "object",
+      "required": [
+        "at",
+        "detail",
+        "id",
+        "interface",
+        "stage",
+        "summary"
+      ],
+      "properties": {
+        "at": {
+          "description": "When it last wrote this, as UTC in ISO 8601.",
+          "type": "string"
+        },
+        "deadline": {
+          "description": "When the previous settings come back by themselves, in seconds since the epoch, while it is `waiting`.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "detail": {
+          "description": "What it is doing, or why it stopped, in a sentence.",
+          "type": "string"
+        },
+        "id": {
+          "description": "Which change this is.",
+          "type": "string"
+        },
+        "interface": {
+          "description": "The interface it changed.",
+          "type": "string"
+        },
+        "stage": {
+          "description": "`applying`, `waiting` for somebody to keep it, then `kept`, `restored`, `failed` or `refused`.",
+          "type": "string"
+        },
+        "summary": {
+          "description": "What it set, in a few words: `static 10.110.0.50/24` or `dhcp`.",
+          "type": "string"
+        }
+      }
+    }
+  }
+}

@@ -540,6 +540,41 @@ drive or could:
   renderer starts — so the disagreement is reported rather than quietly
   resolved.
 
+## The network, from the administration page
+
+From 0.3.0, `http://<server>/admin` has a **Network** section (owner,
+2026-10-19: "Network Settings via Admin GUI, also ob DHCP/Static inkl IP Subnetz
+Gateway DNS etc."): every wired interface with what it has now, and DHCP or a
+static IPv4 address, subnet mask, gateway and up to two nameservers to set.
+
+**A change is on trial for five minutes.** It applies at once; if nobody keeps
+it within five minutes the previous settings come back by themselves (owner:
+"mache lieber 5 min"). Keep it from the page at the new address, from the same
+page where the address did not change, or on the System screen, which shows the
+change, the time left, KEEP and UNDO for as long as it waits. A wrong address,
+mask or gateway therefore costs five minutes, not a drive to the venue.
+
+- **A restart during those five minutes comes back as it was.** The change is
+  brought up from a file of its own (`ifup -i`), and `/etc/network/interfaces`
+  is rewritten only when somebody keeps it. The one thing written at once is
+  `/etc/resolv.conf`, for a static address with nameservers, and it is put back
+  with everything else.
+- **How it works.** The server checks the request and writes it to
+  `/var/lib/ovs/network-request`, then starts `ovs-network.service` — the one
+  unit `deploy/polkit/52-openvideoserver-network.rules` lets the `ovs` user
+  start. That runs `/usr/lib/openvideoserver/ovs-network` as root, which checks
+  every value again, brings the change up, waits for the answer the server
+  writes to `/var/lib/ovs/network-answer`, and keeps or restores. How far it got
+  is in `/var/lib/ovs-network/status.json`, what `ifup` said in
+  `/var/lib/ovs-network/network.log`, and what it replaced in
+  `/var/lib/ovs-network/interfaces.before`.
+- **Kept**, the interface's stanza in `/etc/network/interfaces` is replaced by
+  one block marked `# OpenVideoServer: <interface>`; everything else in the file
+  stays as it was.
+- **Only `ifupdown`**, which is what Debian's installer sets up, and only wired
+  IPv4. A machine whose network NetworkManager runs, or an interface configured
+  under `/etc/network/interfaces.d`, is said so and left alone.
+
 The file stays the answer for a machine being commissioned before it has an
 account, and for one being recovered from a copy.
 

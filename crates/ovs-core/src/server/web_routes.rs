@@ -116,6 +116,12 @@ pub async fn public_status(State(state): State<AppState>) -> Response {
         // be able to follow it through that restart. It says which version and
         // how far, which is a fact about the machine like its version is.
         "update": crate::update::progress(),
+        // A network change on trial, for the same reason: the page that made
+        // it may be on an address that has just stopped answering, and the
+        // System screen and the new address both have to see that it is
+        // waiting to be kept. Which interface, what it was set to and until
+        // when — facts about the machine, as its address is.
+        "network": crate::network::trial(),
         "uptime_s": state.uptime_s(),
         "machine": {
             "cpu_percent": host.cpu_percent,

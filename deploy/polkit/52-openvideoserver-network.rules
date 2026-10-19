@@ -1,0 +1,31 @@
+// Lets the server start the helper that changes the machine's wired network.
+//
+// Owner, 2026-10-19: "Network Settings via Admin GUI, also ob DHCP/Static inkl
+// IP Subnetz Gateway DNS etc."
+//
+// # What it grants, and what it does not
+//
+// **Starting one unit, `ovs-network.service`**, for the one system user the
+// core runs as. Not stopping it — stopping it half way would leave a change on
+// trial with nobody to put it back — and not any other unit. The unit runs
+// `/usr/lib/openvideoserver/ovs-network` as root, which reads the server's
+// request as somebody else's words: one wired interface that exists, DHCP or an
+// IPv4 address with its mask, gateway and nameservers, every value checked
+// again. It keeps the files it changes, and puts them back by itself after five
+// minutes unless somebody keeps the change.
+polkit.addRule(function (action, subject) {
+  if (subject.user !== "ovs") {
+    return undefined;
+  }
+
+  if (
+    action.id === "org.freedesktop.systemd1.manage-units" &&
+    action.lookup("verb") === "start" &&
+    action.lookup("unit") === "ovs-network.service"
+  ) {
+    return polkit.Result.YES;
+  }
+
+  // Everything else this user might ask for is somebody else's decision.
+  return undefined;
+});

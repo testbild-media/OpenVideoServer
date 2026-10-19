@@ -318,7 +318,7 @@ jobs:
       # syntax error in one strands a half-unpacked install. Cheap to check.
       - name: Check the maintainer scripts parse
         run: |
-          for script in deploy/debian/postinst deploy/debian/prerm deploy/debian/postrm deploy/update/ovs-update; do
+          for script in deploy/debian/postinst deploy/debian/prerm deploy/debian/postrm deploy/update/ovs-update deploy/network/ovs-network; do
             sh -n "$script"
           done
           bash -n install.sh
@@ -341,6 +341,14 @@ jobs:
       # else — is tried against stand-ins for the network and apt.
       - name: Check the update installer installs only what it should
         run: TEST_SHELL=dash dash tools/test-update.sh
+
+      # The administration page's Network section ends in a script that runs
+      # as root and changes the machine's address. A change nobody keeps, one
+      # that cannot be brought up and one somebody undoes must all leave the
+      # machine as it was; a request that is not what the server writes must
+      # change nothing.
+      - name: Check the network helper puts back what nobody keeps
+        run: TEST_SHELL=dash dash tools/test-network.sh
 
       - name: Say what came out
         run: dpkg-deb --info target/package/*.deb

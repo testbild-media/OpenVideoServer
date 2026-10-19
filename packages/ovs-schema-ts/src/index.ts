@@ -136,6 +136,20 @@ export type {
   MediaUsageResponse,
 } from './media-usage.js';
 export type {
+  NetworkChangeResponse,
+} from './network-change-response.js';
+export type {
+  NetworkSettings,
+} from './network-settings.js';
+export type {
+  NetworkStatus,
+  NetworkInterface,
+  NetworkTrial,
+} from './network-status.js';
+export type {
+  NetworkTrialAnswer,
+} from './network-trial-answer.js';
+export type {
   OrderEffectsRequest,
 } from './order-effects-request.js';
 export type {

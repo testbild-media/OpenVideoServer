@@ -108,7 +108,8 @@
         border-color: var(--active);
       }
 
-      button:disabled {
+      button:disabled,
+      input:disabled {
         opacity: 0.45;
         cursor: not-allowed;
       }
@@ -135,6 +136,17 @@
       .row > div {
         flex: 1;
         min-width: 140px;
+      }
+
+      /* One wired interface in the Network section, parted from the next. */
+      .nic + .nic {
+        margin-top: 18px;
+        padding-top: 14px;
+        border-top: 1px solid var(--edge);
+      }
+
+      .nic > p {
+        margin: 0 0 6px;
       }
 
       /* A row of buttons, which is not a row of fields. Fields share the width
@@ -388,6 +400,20 @@
         </section>
 
         <section>
+          <h2>Network</h2>
+          <div id="net-interfaces"></div>
+          <div class="warn" id="net-trial" hidden>
+            <p id="net-trial-what"></p>
+            <div class="buttons">
+              <button class="primary" id="net-keep">Keep these settings</button>
+              <button id="net-undo">Put the previous ones back now</button>
+            </div>
+          </div>
+          <p class="note" id="net-note"></p>
+          <p class="said" id="net-said" hidden></p>
+        </section>
+
+        <section>
           <h2>Software</h2>
           <p>Installed: <strong id="update-installed">…</strong></p>
           <p class="note" id="update-found"></p>
@@ -513,6 +539,7 @@
           drawPreviews(),
           readPattern(),
           readUpdate(),
+          readNetwork(),
         ]);
         return true;
       }
@@ -1189,6 +1216,282 @@
                 : 'Shutting down. This page will stop answering.',
             answer.body ? answer.body.accepted !== false : true,
           );
+        });
+      }
+
+      // --- the network ----------------------------------------------------------
+      //
+      // A change is on trial: it applies at once and comes back by itself after
+      // five minutes unless somebody keeps it (owner, 2026-10-19: "ja aber mache
+      // lieber 5 min"). Applying is two presses, because it can take this very
+      // page off the network.
+
+      /** What the server last said about its network. */
+      let network = null;
+
+      /** The interface whose Apply has been pressed once, if any. */
+      let netArmed = null;
+
+      /** Whether this page is following a change on trial. */
+      let netFollowing = false;
+
+      const netOpen = (trial) =>
+        trial !== null && trial !== undefined && (trial.stage === 'applying' || trial.stage === 'waiting');
+
+      /** A prefix length as the mask people type. */
+      function maskOf(prefix) {
+        const bits = Number(prefix);
+        if (!Number.isInteger(bits) || bits < 0 || bits > 32) return String(prefix ?? '');
+        const value = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
+        return [24, 16, 8, 0].map((shift) => (value >>> shift) & 255).join('.');
+      }
+
+      async function readNetwork() {
+        const answer = await api('/api/v1/server/network');
+        if (!answer.ok) {
+          say('net-said', answer.message, false);
+          return;
+        }
+        network = answer.body;
+        drawNetwork();
+        if (netOpen(network.trial)) followNetwork();
+      }
+
+      function field(label, value, disabled) {
+        const holder = document.createElement('div');
+        const name = document.createElement('label');
+        name.textContent = label;
+        const input = document.createElement('input');
+        input.value = value ?? '';
+        input.autocomplete = 'off';
+        input.disabled = disabled;
+        name.append(input);
+        holder.append(name);
+        return { holder, input };
+      }
+
+      function drawNetwork() {
+        if (network === null) return;
+        const holder = $('net-interfaces');
+        holder.replaceChildren();
+        $('net-note').textContent =
+          network.unavailable ??
+          'A change is on trial for five minutes. Keep it from the new address, from this page or on the System screen, or the previous settings come back by themselves.';
+
+        if (network.interfaces.length === 0) {
+          holder.textContent = 'This machine reports no wired interface.';
+        }
+
+        for (const nic of network.interfaces) {
+          const block = document.createElement('div');
+          block.className = 'nic';
+
+          const title = document.createElement('p');
+          const strong = document.createElement('strong');
+          strong.textContent = nic.name;
+          title.append(
+            strong,
+            ` · ${nic.mac} · ${nic.link ? `link up${nic.speed_mbps ? `, ${nic.speed_mbps} Mb/s` : ''}` : 'no cable'}`,
+          );
+          const now = document.createElement('p');
+          now.className = 'note';
+          now.textContent =
+            `Now ${nic.addresses.join(', ') || 'no address'}` +
+            (nic.gateway ? ` via ${nic.gateway}` : '') +
+            ` · nameservers ${network.nameservers.join(', ') || 'none'}` +
+            ` · starts as ${nic.method === 'none' ? 'not configured' : nic.method.toUpperCase()}`;
+
+          // What the fields start with: what it is configured to, or else
+          // what it has now, which is the useful start for fixing a DHCP
+          // address in place.
+          const configured = nic.configured;
+          const [nowAddress, nowPrefix] = (nic.addresses[0] ?? '').split('/');
+          const start = {
+            address: configured?.address ?? nowAddress ?? '',
+            netmask: maskOf(configured?.netmask ?? nowPrefix ?? '24'),
+            gateway: configured?.gateway ?? nic.gateway ?? '',
+            dns: network.nameservers,
+          };
+
+          const row = document.createElement('div');
+          row.className = 'row';
+          const methodHolder = document.createElement('div');
+          const methodLabel = document.createElement('label');
+          methodLabel.textContent = 'Address from';
+          const method = document.createElement('select');
+          for (const [value, text] of [
+            ['dhcp', 'DHCP'],
+            ['static', 'Static'],
+          ]) {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = text;
+            method.append(option);
+          }
+          method.value = nic.method === 'static' ? 'static' : 'dhcp';
+          methodLabel.append(method);
+          methodHolder.append(methodLabel);
+
+          const isDhcp = method.value === 'dhcp';
+          const address = field('IP address', start.address, isDhcp);
+          const netmask = field('Subnet mask', start.netmask, isDhcp);
+          const gateway = field('Gateway', start.gateway, isDhcp);
+          const dns1 = field('DNS 1', start.dns[0], isDhcp);
+          const dns2 = field('DNS 2', start.dns[1], isDhcp);
+          const inputs = [address, netmask, gateway, dns1, dns2];
+          row.append(methodHolder, ...inputs.map((one) => one.holder));
+
+          method.addEventListener('change', () => {
+            for (const one of inputs) one.input.disabled = method.value === 'dhcp';
+            netArmed = null;
+            drawApply();
+          });
+
+          const actions = document.createElement('div');
+          actions.className = 'buttons section-actions';
+          const apply = document.createElement('button');
+          apply.className = 'danger';
+          const drawApply = () => {
+            apply.textContent =
+              netArmed === nic.name ? `Apply to ${nic.name} — press again` : `Apply to ${nic.name}`;
+            apply.disabled = network.unavailable !== null || netOpen(network.trial) || netFollowing;
+          };
+          drawApply();
+          actions.append(apply);
+
+          apply.addEventListener('click', async () => {
+            const settings = {
+              interface: nic.name,
+              method: method.value,
+              address: method.value === 'static' ? address.input.value.trim() : null,
+              netmask: method.value === 'static' ? netmask.input.value.trim() : null,
+              gateway: method.value === 'static' ? gateway.input.value.trim() || null : null,
+              nameservers:
+                method.value === 'static'
+                  ? [dns1.input.value.trim(), dns2.input.value.trim()].filter((one) => one !== '')
+                  : [],
+            };
+            if (netArmed !== nic.name) {
+              netArmed = nic.name;
+              drawApply();
+              const elsewhere =
+                settings.method === 'static' && settings.address !== location.hostname
+                  ? ` This page is on ${location.hostname}; if that stops answering, open http://${settings.address}/admin and keep it there.`
+                  : settings.method === 'dhcp'
+                    ? ' The address will come from DHCP: if this page stops answering, the System screen shows the new one and can keep it.'
+                    : '';
+              say(
+                'net-said',
+                `${nic.name} changes at once. Nobody keeping it within five minutes puts the previous settings back by themselves.${elsewhere}`,
+                true,
+              );
+              return;
+            }
+            netArmed = null;
+            drawApply();
+            const answer = await api('/api/v1/server/network/change', {
+              method: 'POST',
+              body: JSON.stringify(settings),
+            });
+            if (!answer.ok) {
+              say('net-said', answer.message, false);
+              return;
+            }
+            say('net-said', answer.body.detail, answer.body.accepted);
+            if (answer.body.accepted) followNetwork(settings.method === 'static' ? settings.address : null);
+          });
+
+          block.append(title, now, row, actions);
+          holder.append(block);
+        }
+        drawTrial(network.trial);
+      }
+
+      /** The box that says a change is on trial, with the two answers. */
+      function drawTrial(trial, reachable = true) {
+        const box = $('net-trial');
+        if (!netOpen(trial)) {
+          box.hidden = true;
+          return;
+        }
+        box.hidden = false;
+        const left =
+          trial.deadline === null ? null : Math.max(0, Math.round(trial.deadline - Date.now() / 1000));
+        const clock = left === null ? '' : ` ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')} left.`;
+        $('net-trial-what').textContent =
+          trial.stage === 'applying'
+            ? `Applying ${trial.summary} to ${trial.interface}…`
+            : `${trial.summary} on ${trial.interface} is on trial.${clock} Keep it, or the previous settings come back by themselves.`;
+        $('net-keep').disabled = !reachable || trial.stage !== 'waiting';
+        $('net-undo').disabled = !reachable || trial.stage !== 'waiting';
+      }
+
+      /**
+       * Follows a change on trial from the public status, which keeps working
+       * as long as this address does — and says where to go when it stops.
+       */
+      function followNetwork(newAddress = null) {
+        if (netFollowing) return;
+        netFollowing = true;
+        // One change at a time: the helper refuses a second while the first
+        // waits, and a button that looked pressable would only be refused.
+        for (const button of document.querySelectorAll('#net-interfaces button')) {
+          button.disabled = true;
+        }
+        let last = network?.trial ?? null;
+
+        const step = async () => {
+          let status = null;
+          try {
+            const answer = await fetch('/status.json', { cache: 'no-store' });
+            status = answer.ok ? await answer.json() : null;
+          } catch {
+            status = null;
+          }
+          if (status === null) {
+            // This address has stopped answering, which a new static address
+            // was expected to do.
+            if (last !== null) drawTrial(last, false);
+            say(
+              'net-said',
+              newAddress
+                ? `This address no longer answers. Open http://${newAddress}/admin, sign in and keep the change there.`
+                : 'This address no longer answers. The System screen shows the new one and can keep the change.',
+              false,
+            );
+            setTimeout(step, 2000);
+            return;
+          }
+          const trial = status.network ?? null;
+          last = trial;
+          if (netOpen(trial)) {
+            drawTrial(trial);
+            setTimeout(step, 1000);
+            return;
+          }
+          netFollowing = false;
+          if (trial !== null) {
+            say('net-said', trial.detail, trial.stage === 'kept');
+          }
+          await readNetwork();
+        };
+        void step();
+      }
+
+      for (const [id, keep] of [
+        ['net-keep', true],
+        ['net-undo', false],
+      ]) {
+        $(id).addEventListener('click', async () => {
+          const answer = await api('/api/v1/server/network/trial', {
+            method: 'POST',
+            body: JSON.stringify({ keep }),
+          });
+          if (!answer.ok) {
+            say('net-said', answer.message, false);
+            return;
+          }
+          say('net-said', answer.body.detail, answer.body.accepted);
         });
       }
 

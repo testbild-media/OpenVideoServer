@@ -6,7 +6,8 @@ use axum::Json;
 use ovs_proto::fixtures::FixtureCatalogueResponse;
 use ovs_proto::http::{
     capabilities as build_capabilities, CapabilitiesResponse, InstallUpdateRequest,
-    InstallUpdateResponse, PowerAction, PowerResponse, StatusResponse, UpdateStatus,
+    InstallUpdateResponse, NetworkChangeResponse, NetworkSettings, NetworkStatus,
+    NetworkTrialAnswer, PowerAction, PowerResponse, StatusResponse, UpdateStatus,
 };
 use ovs_types::config::{DmxProtocols, StartupPolicy};
 use ovs_types::telemetry::ServerTelemetry;
@@ -335,6 +336,64 @@ pub async fn install_update(
         tracing::error!(version = %request.version, "{}", outcome.detail);
     }
     Ok(Json(InstallUpdateResponse {
+        accepted: outcome.accepted,
+        detail: outcome.detail,
+    }))
+}
+
+/// The machine's wired interfaces as they are and as they are configured, and
+/// the last change made to them.
+pub async fn network_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> ApiResult<Json<NetworkStatus>> {
+    administer(&state, &headers)?;
+    // It runs `ip`, which is quick but is still a process.
+    let status = tokio::task::spawn_blocking(crate::network::status)
+        .await
+        .map_err(|_| crate::server::error::ApiFailure::internal("the network could not be read"))?;
+    Ok(Json(status))
+}
+
+/// Changes one interface's settings, on trial: they come back by themselves
+/// after five minutes unless somebody keeps them (owner, 2026-10-19).
+pub async fn change_network(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(settings): Json<NetworkSettings>,
+) -> ApiResult<Json<NetworkChangeResponse>> {
+    administer(&state, &headers)?;
+    let wired = crate::network::wired_interfaces(std::path::Path::new("/sys/class/net"));
+    let change = match crate::network::validate(&settings, &wired) {
+        Ok(change) => change,
+        Err(detail) => {
+            return Ok(Json(NetworkChangeResponse {
+                accepted: false,
+                detail,
+            }))
+        }
+    };
+    tracing::warn!(interface = %change.interface, summary = %change.summary(), "an administrator changed the network");
+    let outcome = crate::network::apply(&change);
+    if !outcome.accepted {
+        tracing::error!("{}", outcome.detail);
+    }
+    Ok(Json(NetworkChangeResponse {
+        accepted: outcome.accepted,
+        detail: outcome.detail,
+    }))
+}
+
+/// Keeps a change on trial, or puts the previous settings back now.
+pub async fn answer_network_trial(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(answer): Json<NetworkTrialAnswer>,
+) -> ApiResult<Json<NetworkChangeResponse>> {
+    administer(&state, &headers)?;
+    let outcome = crate::network::answer(answer.keep);
+    tracing::warn!(keep = answer.keep, "{}", outcome.detail);
+    Ok(Json(NetworkChangeResponse {
         accepted: outcome.accepted,
         detail: outcome.detail,
     }))

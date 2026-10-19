@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "NetworkTrialAnswer",
+  "description": "The answer to a change on trial.",
+  "type": "object",
+  "required": [
+    "keep"
+  ],
+  "properties": {
+    "keep": {
+      "description": "True to keep the new settings, false to put the previous ones back now.",
+      "type": "boolean"
+    }
+  }
+}

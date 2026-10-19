@@ -1067,6 +1067,111 @@ pub struct InstallUpdateResponse {
     pub detail: String,
 }
 
+/// The machine's wired network interfaces, and any change on trial.
+///
+/// The owner, 2026-10-19: "Network Settings via Admin GUI, also ob DHCP/Static
+/// inkl IP Subnetz Gateway DNS etc." — and on the safety net, five minutes to
+/// confirm before the previous settings come back by themselves.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct NetworkStatus {
+    /// Every wired interface, in name order. Not the loopback, not a VPN and
+    /// not a radio: none of those is configured here.
+    pub interfaces: Vec<NetworkInterface>,
+    /// The nameservers the machine uses now, whichever interface set them.
+    pub nameservers: Vec<String>,
+    /// The last change and where it got, if one has ever been made here.
+    pub trial: Option<NetworkTrial>,
+    /// Why nothing can be changed from here, where nothing can: a machine
+    /// whose network is not run by `ifupdown` is changed where it is run.
+    pub unavailable: Option<String>,
+}
+
+/// One wired interface, as it is and as it is configured.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct NetworkInterface {
+    /// Its name, such as `eno1`.
+    pub name: String,
+    /// Its hardware address.
+    pub mac: String,
+    /// Whether a cable with something at the other end is plugged in.
+    pub link: bool,
+    /// The link's speed in megabits a second, where the driver says.
+    pub speed_mbps: Option<u32>,
+    /// The IPv4 addresses it has now, as `address/prefix`.
+    pub addresses: Vec<String>,
+    /// The default gateway through it now, if there is one.
+    pub gateway: Option<String>,
+    /// How it is configured to come up: `dhcp`, `static`, or `none` where the
+    /// configuration does not mention it.
+    pub method: String,
+    /// The configured static settings, where the method is `static`.
+    pub configured: Option<NetworkSettings>,
+}
+
+/// Settings for one interface: the request to change them, and what a static
+/// configuration holds.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct NetworkSettings {
+    /// The interface, such as `eno1`.
+    pub interface: String,
+    /// `dhcp` or `static`.
+    pub method: String,
+    /// The IPv4 address, for `static`.
+    #[serde(default)]
+    pub address: Option<String>,
+    /// The subnet mask, as `255.255.255.0` or as a prefix length such as `24`.
+    #[serde(default)]
+    pub netmask: Option<String>,
+    /// The default gateway, for `static`. Optional: a show network often has
+    /// none.
+    #[serde(default)]
+    pub gateway: Option<String>,
+    /// Up to three nameservers, for `static`.
+    #[serde(default)]
+    pub nameservers: Vec<String>,
+}
+
+/// A change to the network, and how far it got.
+///
+/// Written by the machine's own network helper, which runs apart from the
+/// server: it has to be able to put the previous settings back when nobody can
+/// reach the server any more.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct NetworkTrial {
+    /// Which change this is.
+    pub id: String,
+    /// The interface it changed.
+    pub interface: String,
+    /// What it set, in a few words: `static 10.110.0.50/24` or `dhcp`.
+    pub summary: String,
+    /// `applying`, `waiting` for somebody to keep it, then `kept`, `restored`,
+    /// `failed` or `refused`.
+    pub stage: String,
+    /// What it is doing, or why it stopped, in a sentence.
+    pub detail: String,
+    /// When the previous settings come back by themselves, in seconds since
+    /// the epoch, while it is `waiting`.
+    pub deadline: Option<i64>,
+    /// When it last wrote this, as UTC in ISO 8601.
+    pub at: String,
+}
+
+/// Whether a change was started.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct NetworkChangeResponse {
+    /// Whether the machine started it. How far it got is in [`NetworkStatus`].
+    pub accepted: bool,
+    /// What was asked for, or why nothing was.
+    pub detail: String,
+}
+
+/// The answer to a change on trial.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct NetworkTrialAnswer {
+    /// True to keep the new settings, false to put the previous ones back now.
+    pub keep: bool,
+}
+
 /// What a tap did to the tempo.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TapTempoResponse {

@@ -1,0 +1,221 @@
+#!/bin/sh
+# Changes one wired interface, on trial, as asked from the administration page.
+#
+# The owner, 2026-10-19: "Network Settings via Admin GUI, also ob DHCP/Static
+# inkl IP Subnetz Gateway DNS etc." — and five minutes for somebody to keep a
+# change before the previous settings come back by themselves.
+#
+# Run by `ovs-network.service`, which the server may start and nothing else.
+# What to change is in the server's request file, one `key=value` a line.
+#
+# # On trial, in a file of its own
+#
+# The change is brought up from a copy of /etc/network/interfaces with this
+# interface's stanza replaced — `ifup -i` — and /etc/network/interfaces itself
+# is only rewritten when somebody keeps it. So a wrong address costs five
+# minutes and no more: this waits for the answer and puts the previous
+# settings back when none comes, and a machine restarted during those five
+# minutes comes up as it was, because nothing it boots from has changed. The
+# nameservers are the one thing written straight away, to /etc/resolv.conf, and
+# kept to be put back.
+#
+# # What it trusts the server for
+#
+# Nothing it has not checked again: an identifier, one wired interface that
+# exists, `dhcp` or an IPv4 address with a prefix length, an optional gateway,
+# up to three nameservers. Anything else in the file, or anything that is not
+# exactly that shape, and nothing is changed.
+#
+# Written for `sh`, and checked under dash in CI with `tools/test-network.sh`.
+set -u
+
+REQUEST="${OVS_NETWORK_REQUEST:-/var/lib/ovs/network-request}"
+ANSWER="${OVS_NETWORK_ANSWER:-/var/lib/ovs/network-answer}"
+STATE_DIR="${OVS_NETWORK_STATE_DIR:-/var/lib/ovs-network}"
+INTERFACES="${OVS_NETWORK_INTERFACES:-/etc/network/interfaces}"
+INTERFACES_D="${OVS_NETWORK_INTERFACES_D:-/etc/network/interfaces.d}"
+RESOLV="${OVS_NETWORK_RESOLV:-/etc/resolv.conf}"
+SYSFS="${OVS_NETWORK_SYSFS:-/sys/class/net}"
+TRIAL_SECONDS="${OVS_NETWORK_TRIAL_SECONDS:-300}"
+
+id=""
+interface=""
+summary=""
+deadline=""
+
+# One step, where the server reads it. The detail is one line with no quote or
+# backslash, so it is always a JSON string.
+status() {
+  mkdir -p "$STATE_DIR"
+  detail=$(printf '%s' "$2" | tr '\r\n\t"\\' '     ' | cut -c1-400)
+  now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  printf '{"id":"%s","interface":"%s","summary":"%s","stage":"%s","detail":"%s","deadline":%s,"at":"%s"}\n' \
+    "$id" "$interface" "$summary" "$1" "$detail" "${deadline:-null}" "$now" \
+    > "$STATE_DIR/status.json.part"
+  mv "$STATE_DIR/status.json.part" "$STATE_DIR/status.json"
+  echo "$1: $2"
+}
+
+refuse() {
+  status refused "$1"
+  exit 1
+}
+
+octet='(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])'
+is_ipv4() {
+  printf '%s\n' "$1" | grep -Eq "^$octet\\.$octet\\.$octet\\.$octet\$"
+}
+
+[ -f "$REQUEST" ] || refuse "there is no request at $REQUEST"
+
+# Read, never sourced: these are somebody else's words.
+r_id=""; r_interface=""; r_method=""; r_address=""; r_prefix=""; r_gateway=""; r_dns=""
+while IFS= read -r line || [ -n "$line" ]; do
+  [ -n "$line" ] || continue
+  key=${line%%=*}
+  value=${line#*=}
+  case "$key" in
+    id) r_id="$value" ;;
+    interface) r_interface="$value" ;;
+    method) r_method="$value" ;;
+    address) r_address="$value" ;;
+    prefix) r_prefix="$value" ;;
+    gateway) r_gateway="$value" ;;
+    nameservers) r_dns="$value" ;;
+    *) refuse "the request has a line this does not read" ;;
+  esac
+done < "$REQUEST"
+
+printf '%s\n' "$r_id" | grep -Eq '^[0-9a-f]{16}$' || refuse "the request has no identifier"
+id="$r_id"
+
+printf '%s\n' "$r_interface" | grep -Eq '^[A-Za-z0-9_.-]{1,15}$' || refuse "\"$r_interface\" is not an interface name"
+interface="$r_interface"
+[ "$interface" != "lo" ] && [ -e "$SYSFS/$interface/device" ] && [ ! -e "$SYSFS/$interface/wireless" ] \
+  || refuse "$interface is not a wired interface of this machine"
+
+# Configured somewhere this does not rewrite, and two stanzas would fight.
+if [ -d "$INTERFACES_D" ] && grep -lsE "^[[:space:]]*iface[[:space:]]+$interface[[:space:]]+inet[[:space:]]" "$INTERFACES_D"/* > /dev/null 2>&1; then
+  refuse "$interface is configured in $INTERFACES_D, which this does not change"
+fi
+
+case "$r_method" in
+  dhcp)
+    [ -z "$r_address$r_prefix$r_gateway$r_dns" ] || refuse "dhcp takes no address, mask, gateway or nameserver"
+    summary="dhcp"
+    ;;
+  static)
+    is_ipv4 "$r_address" || refuse "\"$r_address\" is not an IPv4 address"
+    printf '%s\n' "$r_prefix" | grep -Eq '^([1-9]|[12][0-9]|3[0-2])$' || refuse "\"$r_prefix\" is not a prefix length"
+    [ -z "$r_gateway" ] || is_ipv4 "$r_gateway" || refuse "\"$r_gateway\" is not an IPv4 address"
+    count=0
+    for server in $r_dns; do
+      is_ipv4 "$server" || refuse "\"$server\" is not an IPv4 address"
+      count=$((count + 1))
+    done
+    [ "$count" -le 3 ] || refuse "three nameservers at most"
+    summary="static $r_address/$r_prefix"
+    ;;
+  *) refuse "\"$r_method\" is neither dhcp nor static" ;;
+esac
+
+# Nothing from an earlier change answers this one.
+rm -f "$ANSWER"
+
+mkdir -p "$STATE_DIR"
+log="$STATE_DIR/network.log"
+: > "$log"
+before="$STATE_DIR/interfaces.before"
+trial="$STATE_DIR/interfaces.trial"
+cp "$INTERFACES" "$before" || refuse "$INTERFACES could not be kept"
+
+# The trial: everything as it was, except this interface's IPv4 stanza and the
+# lines that bring it up, which are replaced by one block at the end.
+awk -v ifc="$interface" '
+  $0 == "# OpenVideoServer: " ifc ", set from the administration page" { next }
+  ($1 == "auto" || $1 ~ /^allow-/) {
+    rest = ""
+    for (i = 2; i <= NF; i++) if ($i != ifc) rest = rest " " $i
+    skipping = 0
+    if (rest != "") print $1 rest
+    next
+  }
+  $1 == "iface" { skipping = ($2 == ifc && $3 == "inet"); if (skipping) next }
+  skipping && /^[ \t]/ { next }
+  { if ($0 !~ /^[ \t]/) skipping = 0; print }
+' "$before" > "$trial"
+{
+  echo ""
+  echo "# OpenVideoServer: $interface, set from the administration page"
+  echo "allow-hotplug $interface"
+  if [ "$r_method" = "dhcp" ]; then
+    echo "iface $interface inet dhcp"
+  else
+    echo "iface $interface inet static"
+    printf '\taddress %s/%s\n' "$r_address" "$r_prefix"
+    [ -z "$r_gateway" ] || printf '\tgateway %s\n' "$r_gateway"
+  fi
+} >> "$trial"
+
+# The nameservers, for a static address that names some. Kept to be put back;
+# left alone where resolv.conf is somebody else's link.
+resolv_kept=""
+if [ "$r_method" = "static" ] && [ -n "$r_dns" ] && [ ! -L "$RESOLV" ]; then
+  cp "$RESOLV" "$STATE_DIR/resolv.conf.before" 2> /dev/null && resolv_kept="yes"
+fi
+
+put_back() {
+  ifdown --force -i "$trial" "$interface" >> "$log" 2>&1 || true
+  ip -4 addr flush dev "$interface" >> "$log" 2>&1 || true
+  if [ -n "$resolv_kept" ]; then
+    cat "$STATE_DIR/resolv.conf.before" > "$RESOLV"
+  fi
+  ifup "$interface" >> "$log" 2>&1 || true
+}
+
+status applying "$summary on $interface"
+ifdown --force "$interface" >> "$log" 2>&1 || true
+ip -4 addr flush dev "$interface" >> "$log" 2>&1 || true
+if [ -n "$resolv_kept" ]; then
+  {
+    echo "# Written by OpenVideoServer for $interface, from the administration page"
+    for server in $r_dns; do
+      echo "nameserver $server"
+    done
+  } > "$RESOLV"
+fi
+if ! ifup -i "$trial" "$interface" >> "$log" 2>&1; then
+  said=$(grep -v '^[[:space:]]*$' "$log" | tail -n 1)
+  put_back
+  status failed "$summary could not be brought up, so the previous settings are back: $said"
+  exit 1
+fi
+
+deadline=$(( $(date +%s) + TRIAL_SECONDS ))
+status waiting "$summary on $interface is on trial; keep it, or the previous settings come back by themselves"
+
+while [ "$(date +%s)" -lt "$deadline" ]; do
+  if [ -f "$ANSWER" ]; then
+    answer=$(head -n 1 "$ANSWER")
+    if [ "$answer" = "keep $id" ]; then
+      cat "$trial" > "$INTERFACES"
+      rm -f "$ANSWER"
+      deadline=""
+      status kept "$summary on $interface is kept, and is what the machine starts with from now on"
+      exit 0
+    fi
+    if [ "$answer" = "undo $id" ]; then
+      rm -f "$ANSWER"
+      put_back
+      deadline=""
+      status restored "the previous settings of $interface are back, as asked"
+      exit 0
+    fi
+  fi
+  sleep 1
+done
+
+put_back
+deadline=""
+status restored "nobody kept $summary on $interface within $TRIAL_SECONDS seconds, so the previous settings are back"
+exit 0
