@@ -44,6 +44,7 @@ import {
   type ColourTags,
   type HevcBackend,
   type PreparedForm,
+  type Spending,
 } from '../shared/encoder.js';
 import { depthOf } from '../shared/profile.js';
 
@@ -627,6 +628,12 @@ export async function prepareFile(
    * here: this function has the file and not the show it is for.
    */
   size: { width: number; height: number } | null = null,
+  /**
+   * How a HEVC encode spends its bits: to a quality, or to an average under
+   * the ceiling for a clip whose first encode came out over it. Decided by the
+   * queue, which is what saw the first result.
+   */
+  spending: Spending = 'quality',
 ): Promise<PrepareOutcome> {
   const directory = await mkdtemp(join(tmpdir(), 'ovs-prepare-'));
   const into = join(directory, preparedName(basenameOf(path), to));
@@ -643,7 +650,7 @@ export async function prepareFile(
         ? hapArguments(path, into, rate, [], size)
         : backend === null
           ? null
-          : hevcArguments(path, into, backend, depth, rate, tags, [], size);
+          : hevcArguments(path, into, backend, depth, rate, tags, [], size, spending);
   if (args === null) {
     await rm(directory, { recursive: true, force: true });
     return { kind: 'unavailable' };

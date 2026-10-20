@@ -136,10 +136,12 @@ export type EncodePlan =
  * - `-color_*` are the four tagging clauses. BT.709 unless the source says
  *   otherwise, because that is what HD is and what every tool assumes of a file
  *   that does not say.
- * - `-maxrate` is the bitrate clause, and it is the whole of it. What decides how
- *   many bits a clip actually gets is a *quality* target — `-cq` on NVENC,
+ * - `-maxrate` is the bitrate clause on NVENC. What decides how many bits a
+ *   clip actually gets is a *quality* target — `-cq` on NVENC,
  *   `-rate_control quality` on Media Foundation — so a clip that needs eight
- *   megabits gets eight and the ceiling is only ever a cap.
+ *   megabits gets eight and the ceiling is only ever a cap. The other backends
+ *   take no cap in their quality modes, so a clip that comes out over the
+ *   ceiling is encoded a second time at an average under it (`Spending`).
  *
  *   This used to set `-b:v` to four fifths of the ceiling, reasoning that a rate
  *   control allowed sixty would spend sixty. It would; and `-b:v` under VBR is
@@ -367,6 +369,7 @@ export function hevcArguments(
   tags: ColourTags,
   readAs: readonly string[] = [],
   size: { width: number; height: number } | null = null,
+  spending: Spending = 'quality',
 ): string[] {
   const keyframes = keyframeArguments(backend, rate);
 
@@ -410,7 +413,9 @@ export function hevcArguments(
     ...pictureArguments(size),
     '-c:v',
     backend,
-    ...qualityArguments(backend, MOST_BITS_PER_SECOND, rate, tags),
+    ...(spending === 'capped'
+      ? cappedArguments(backend, MOST_BITS_PER_SECOND, rate, tags)
+      : qualityArguments(backend, MOST_BITS_PER_SECOND, rate, tags)),
     '-pix_fmt',
     PIXEL_FORMAT[depth],
     ...keyframes,
@@ -655,9 +660,11 @@ function kvazaarKeyframes(rate: FrameRate): { gop: number; period: number } {
  * the average of the whole clip.
  *
  * Media Foundation has no preset worth naming and no way to cap a quality-mode
- * encode, so it gets the quality target alone. Nothing caps it, and what catches a
- * result over the ceiling is the probe `ingest.ts` runs on every prepared file
- * before it is sent.
+ * encode, so it gets the quality target alone — and so do Quick Sync, AMF and
+ * Kvazaar, whose quality modes take no peak either. What catches a result over
+ * the ceiling is the probe `ingest.ts` runs on every prepared file before it is
+ * sent, and a clip whose only fault is that is encoded once more by the same
+ * backend with `cappedArguments`.
  */
 function qualityArguments(
   backend: HevcBackend,
@@ -700,39 +707,116 @@ function qualityArguments(
     ];
   }
   if (backend === 'libkvazaar') {
-    // Everything Kvazaar takes, in the one string it takes it in: the preset,
-    // the quantiser, the B-gop, the keyframe period and the colour tags.
-    // `veryfast` because this is the path a machine with no encoder at all goes
-    // down, where what an operator cares about is whether it finishes before
-    // doors — a slower preset buys picture quality nobody is comparing against
-    // anything.
-    //
-    // **The colour tags have to be in here too.** FFmpeg's wrapper hands
-    // Kvazaar the dimensions, the frame rate and this string, and nothing else:
-    // `-color_primaries` and `-color_trc` never reach it, so the stream it
-    // writes carries no colour description at all. A file like that is one the
-    // server refuses — "colour primaries: wanted tagged, found untagged",
-    // measured on a release runner on 2026-10-13, after the encode itself had
-    // finally started working — so the whole encode would be thrown away at the
-    // last step. HEVC's VUI gates all three of primaries, transfer and matrix
-    // on one flag, which is why all three are named rather than only the two
-    // that were missing.
-    const keyframes = kvazaarKeyframes(rate);
-    return [
-      '-kvazaar-params',
-      [
-        'preset=veryfast',
-        `qp=${CONSTANT_QUALITY}`,
-        `gop=${keyframes.gop}`,
-        `period=${keyframes.period}`,
-        `colorprim=${kvazaarTag(tags.primaries)}`,
-        `transfer=${kvazaarTag(tags.transfer)}`,
-        `colormatrix=${kvazaarTag(tags.matrix)}`,
-        `range=${tags.range === 'pc' || tags.range === 'full' ? 'pc' : 'tv'}`,
-      ].join(','),
-    ];
+    return kvazaarArguments(`qp=${CONSTANT_QUALITY}`, rate, tags);
   }
   return ['-rate_control', 'quality', '-quality', String(MEDIA_FOUNDATION_QUALITY)];
+}
+
+/**
+ * How a HEVC encode decides how many bits to spend.
+ *
+ * `quality` is every clip's first encode: a quality target, so a clip that
+ * needs eight megabits gets eight. `capped` is the second encode of a clip
+ * whose first one came out over the ceiling, and asks for an average instead.
+ */
+export type Spending = 'quality' | 'capped';
+
+/**
+ * The average a capped encode is asked for: nine tenths of the ceiling.
+ *
+ * **Only ever a second encode.** A rate mode spends its target whatever the
+ * picture needs: Quick Sync's QVBR, which is meant to be the quality-led one,
+ * took a clip that needs 41.6 Mbit/s at the usual quality and made it 53.9.
+ * So the quality target goes first, and this is for the clip that needs more
+ * than the ceiling allows — the owner's 1.4 GB clip, 2026-10-20, came out at
+ * 73.5 through Quick Sync and 65.0 through Kvazaar, and both were refused.
+ *
+ * **Why a tenth under.** The server refuses an average over sixty by any
+ * amount, and a rate control lands near its target, not on it. Measured on the
+ * development machine with the FFmpeg the client ships, six seconds of 1080p60
+ * noise that needs 168–305 Mbit/s at the usual quality, asked for 54:
+ *
+ * | backend    | came out at      |
+ * |------------|------------------|
+ * | hevc_qsv   | 55.7, 55.8 Mbit/s |
+ * | libkvazaar | 54.4, 54.3 Mbit/s |
+ *
+ * Three per cent over at worst, against eleven of room. NVENC, AMF and Media
+ * Foundation were not measured: NVENC is capped on its first encode already,
+ * and the other two do not run on that machine.
+ */
+export const CAPPED_BITS_PER_SECOND = 54_000_000;
+
+/**
+ * The rate-control flags for a capped encode: an average of
+ * `CAPPED_BITS_PER_SECOND`, and nowhere a peak over the ceiling where the
+ * backend can be told one.
+ */
+function cappedArguments(
+  backend: HevcBackend,
+  ceiling: number,
+  rate: FrameRate,
+  tags: ColourTags,
+): string[] {
+  const average = String(CAPPED_BITS_PER_SECOND);
+  const most = String(ceiling);
+  if (backend === 'hevc_nvenc') {
+    return ['-preset', 'p5', '-rc', 'vbr', '-b:v', average, '-maxrate', most, '-bufsize', most];
+  }
+  if (backend === 'hevc_qsv') {
+    // No `-global_quality`: with one and a `-maxrate` FFmpeg picks QVBR, which
+    // spends the target just the same and adds a second number to disagree
+    // with it. Plain VBR is what was measured.
+    return ['-b:v', average, '-maxrate', most, '-bufsize', most];
+  }
+  if (backend === 'hevc_amf') {
+    return ['-rc', 'vbr_peak', '-b:v', average, '-maxrate', most];
+  }
+  if (backend === 'libkvazaar') {
+    // Kvazaar's rate control is an average and nothing else: there is no peak
+    // to give it, and the server checks the average.
+    return kvazaarArguments(`bitrate=${average}`, rate, tags);
+  }
+  // Unconstrained VBR, which is Media Foundation's average with no peak.
+  return ['-rate_control', 'u_vbr', '-b:v', average];
+}
+
+/**
+ * Kvazaar's one parameter string, around how it is to spend its bits — a
+ * quantiser or a bitrate.
+ */
+function kvazaarArguments(spend: string, rate: FrameRate, tags: ColourTags): string[] {
+  // Everything Kvazaar takes, in the one string it takes it in: the preset,
+  // how to spend, the B-gop, the keyframe period and the colour tags.
+  // `veryfast` because this is the path a machine with no encoder at all goes
+  // down, where what an operator cares about is whether it finishes before
+  // doors — a slower preset buys picture quality nobody is comparing against
+  // anything.
+  //
+  // **The colour tags have to be in here too.** FFmpeg's wrapper hands
+  // Kvazaar the dimensions, the frame rate and this string, and nothing else:
+  // `-color_primaries` and `-color_trc` never reach it, so the stream it
+  // writes carries no colour description at all. A file like that is one the
+  // server refuses — "colour primaries: wanted tagged, found untagged",
+  // measured on a release runner on 2026-10-13, after the encode itself had
+  // finally started working — so the whole encode would be thrown away at the
+  // last step. HEVC's VUI gates all three of primaries, transfer and matrix
+  // on one flag, which is why all three are named rather than only the two
+  // that were missing.
+  const keyframes = kvazaarKeyframes(rate);
+  return [
+    '-kvazaar-params',
+    [
+      'preset=veryfast',
+      spend,
+      `gop=${keyframes.gop}`,
+      `period=${keyframes.period}`,
+      `colorprim=${kvazaarTag(tags.primaries)}`,
+      `transfer=${kvazaarTag(tags.transfer)}`,
+      `colormatrix=${kvazaarTag(tags.matrix)}`,
+      `range=${tags.range === 'pc' || tags.range === 'full' ? 'pc' : 'tv'}`,
+    ].join(','),
+  ];
 }
 
 /**

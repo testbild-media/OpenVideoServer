@@ -41,6 +41,7 @@ import {
   type ColourTags,
   type HevcBackend,
   type PreparedForm,
+  type Spending,
   type UploadCeiling,
 } from './encoder.js';
 import { MAX_SIDE } from './limits.js';
@@ -316,8 +317,17 @@ export type IngestStage =
    * `seconds` is how far into the file the encoder has got and `ofSeconds` how
    * long it is, so a bar can be honest about a job that takes minutes. Both are
    * the file's own numbers, not an estimate of how long the machine will take.
+   *
+   * `capped` on the second encode of a clip whose first came out over the
+   * bitrate ceiling, so a bar that went back to the start says why.
    */
-  | { at: 'preparing'; seconds: number; ofSeconds: number | null; to: PreparedForm }
+  | {
+      at: 'preparing';
+      seconds: number;
+      ofSeconds: number | null;
+      to: PreparedForm;
+      capped?: boolean;
+    }
   /** Being hashed, which is the long part for a large file. */
   | { at: 'hashing'; hashed: number; byteSize: number }
   /** Asking the server whether it wants the bytes at all. */
@@ -448,6 +458,8 @@ export interface IngestPorts {
     stop: AbortSignal,
     /** The size to prepare at, or `null` to keep the picture as it is. */
     size: { width: number; height: number } | null,
+    /** To a quality, or to an average under the bitrate ceiling. */
+    spending: Spending,
   ): Promise<PrepareOutcome>;
   /** Removes a file this client made. Best effort, and never the operator's. */
   discard(path: string): Promise<void>;
@@ -751,6 +763,7 @@ export class IngestQueue {
     from: Probe,
     to: PreparedForm,
     backend: HevcBackend | null,
+    spending: Spending = 'quality',
   ): Promise<Attempt> {
     const rate = from.frameRate ?? { numerator: 25, denominator: 1 };
     const ofSeconds = from.durationMs === null ? null : from.durationMs / 1000;
@@ -768,7 +781,9 @@ export class IngestQueue {
             this.#ceiling,
           );
 
-    this.#set(item, { at: 'preparing', seconds: 0, ofSeconds, to });
+    // Only said when it is so, so a first encode's stage reads as it always did.
+    const capped = spending === 'capped' ? { capped: true } : {};
+    this.#set(item, { at: 'preparing', seconds: 0, ofSeconds, to, ...capped });
     const stop = new AbortController();
     item.stop = stop;
     const outcome = await this.ports
@@ -780,11 +795,12 @@ export class IngestQueue {
         tags,
         (seconds) => {
           if (item.stage.at === 'preparing') {
-            this.#set(item, { at: 'preparing', seconds, ofSeconds, to });
+            this.#set(item, { at: 'preparing', seconds, ofSeconds, to, ...capped });
           }
         },
         stop.signal,
         size,
+        spending,
       )
       .finally(() => {
         item.stop = null;
@@ -940,44 +956,64 @@ export class IngestQueue {
     const outcomes: string[] = [];
 
     for (const backend of attempts) {
-      const who = backend ?? 'hap';
-      const attempt = await this.#prepare(item, probe, decided.to, backend);
-      if (attempt.kind === 'over') {
-        // Stopped, cancelled, or no FFmpeg at all. `#prepare` has already said
-        // so where there was anything to say, and no other backend changes it.
-        return null;
-      }
-      if (attempt.kind === 'failed') {
-        // **This backend could not do it; the next one still might.** A wrong
-        // flag, a depth an encoder does not have, a driver that is not really
-        // there: all of them end here, and on a machine with two encoders this
-        // is the difference between a file an operator can upload and one they
-        // cannot. It used to end the item.
-        outcomes.push(`${who}: ${attempt.reason}`);
-        await this.#discardWorking(item);
-        continue;
-      }
-      const check = await this.#measure(item, attempt.probe.video);
-      if (check === null) {
-        return null;
-      }
-      const problems = faults(check, decided.to);
-      if (problems.length === 0) {
-        item.byteSize = await this.ports.size(this.#source(item));
-        if (!this.#holds(item)) {
+      // **To a quality first, and to an average only when that was too much.**
+      // A quality target is what keeps an ordinary clip small, and only NVENC
+      // can also be given a peak; Quick Sync and Kvazaar took the owner's
+      // 1.4 GB clip to 73.5 and 65.0 Mbit/s and the server refused both
+      // (2026-10-20). The same backend again at an average under the ceiling
+      // is what that clip needs — it costs a second encode, and only to the
+      // clip that would otherwise not go in at all.
+      let spending: Spending = 'quality';
+      for (;;) {
+        const who = spending === 'capped' ? `${backend} at a capped bitrate` : (backend ?? 'hap');
+        const attempt = await this.#prepare(item, probe, decided.to, backend, spending);
+        if (attempt.kind === 'over') {
+          // Stopped, cancelled, or no FFmpeg at all. `#prepare` has already said
+          // so where there was anything to say, and no other backend changes it.
           return null;
         }
-        return { ...attempt.probe, video: check };
-      }
+        if (attempt.kind === 'failed') {
+          // **This backend could not do it; the next one still might.** A wrong
+          // flag, a depth an encoder does not have, a driver that is not really
+          // there: all of them end here, and on a machine with two encoders this
+          // is the difference between a file an operator can upload and one they
+          // cannot. It used to end the item.
+          outcomes.push(`${who}: ${attempt.reason}`);
+          await this.#discardWorking(item);
+          break;
+        }
+        const check = await this.#measure(item, attempt.probe.video);
+        if (check === null) {
+          return null;
+        }
+        const problems = faults(check, decided.to);
+        if (problems.length === 0) {
+          item.byteSize = await this.ports.size(this.#source(item));
+          if (!this.#holds(item)) {
+            return null;
+          }
+          return { ...attempt.probe, video: check };
+        }
 
-      outcomes.push(
-        `${who} made a file the server would refuse (${problems
-          .map((fault) => `${fault.what}: wanted ${fault.wanted}, got ${fault.found}`)
-          .join('; ')})`,
-      );
-      // This backend produced something the server would refuse. Throw it away
-      // and try the next one; the source is still where it was.
-      await this.#discardWorking(item);
+        outcomes.push(
+          `${who} made a file the server would refuse (${problems
+            .map((fault) => `${fault.what}: wanted ${fault.wanted}, got ${fault.found}`)
+            .join('; ')})`,
+        );
+        // This backend produced something the server would refuse. Throw it
+        // away; the source is still where it was.
+        await this.#discardWorking(item);
+
+        // Over the ceiling and nothing else wrong: the same backend again,
+        // capped. Anything else wrong is something a bitrate will not fix, and
+        // HAP has no bitrate clause to fail.
+        const onlyTooMuch = problems.every((fault) => fault.what === 'bitrate');
+        if (spending === 'quality' && backend !== null && onlyTooMuch) {
+          spending = 'capped';
+          continue;
+        }
+        break;
+      }
     }
 
     this.#set(item, {
@@ -1361,11 +1397,15 @@ export function stageLine(item: QueueItem): string {
             : stage.to === 'hevc_10'
               ? 'HEVC 10-bit'
               : 'HEVC';
+      // The second encode of a clip that came out over the bitrate ceiling.
+      // Said, because otherwise a bar that reached the end starts again for
+      // no reason anybody can see.
+      const how = stage.capped === true ? `${as} again, at a lower bitrate` : as;
       if (stage.ofSeconds === null || stage.ofSeconds <= 0) {
-        return `Preparing as ${as}…`;
+        return `Preparing as ${how}…`;
       }
       const done = Math.round((stage.seconds / stage.ofSeconds) * 100);
-      return `Preparing as ${as} — ${Math.min(done, 100)}%`;
+      return `Preparing as ${how} — ${Math.min(done, 100)}%`;
     }
     case 'hashing':
       return `Processing — ${bytesLabel(stage.hashed)} of ${bytesLabel(stage.byteSize)}`;

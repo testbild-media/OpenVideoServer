@@ -147,13 +147,19 @@ describe('the FFmpeg the client brings with it', () => {
   // have: against a developer's FFmpeg it passed, against this one it refused
   // every clip. One nearly square, which is only relabelled, and one anamorphic,
   // which is widened to the width it is shown at.
-  for (const { fixture, width } of [
-    { fixture: 'refused-h264.mp4', width: 320 },
-    { fixture: 'refused-nearly-square-h264.mp4', width: 320 },
-    { fixture: 'refused-anamorphic-h264.mp4', width: 424 },
-  ]) {
+  //
+  // **And at a capped bitrate**, which is the second encode a clip gets when
+  // its first came out over the ceiling (the owner's 1.4 GB clip, 2026-10-20).
+  // On a runner with no GPU that is Kvazaar with `bitrate=` in place of `qp=`,
+  // a parameter string nothing else in this suite gives the shipped binary.
+  for (const { fixture, width, spending } of [
+    { fixture: 'refused-h264.mp4', width: 320, spending: 'quality' },
+    { fixture: 'refused-nearly-square-h264.mp4', width: 320, spending: 'quality' },
+    { fixture: 'refused-anamorphic-h264.mp4', width: 424, spending: 'quality' },
+    { fixture: 'refused-h264.mp4', width: 320, spending: 'capped' },
+  ] as const) {
     it.skipIf(!existsSync(bundled('ffmpeg')) || !existsSync(bundled('ffprobe')))(
-      `turns a file the server refuses into one it accepts: ${fixture}`,
+      `turns a file the server refuses into one it accepts: ${fixture}, ${spending}`,
       async (ctx) => {
         vi.resetModules();
         process.env['OVS_FFMPEG'] = bundled('ffmpeg');
@@ -221,6 +227,7 @@ describe('the FFmpeg the client brings with it', () => {
             () => undefined,
             undefined,
             size,
+            spending,
           );
           if (outcome.kind === 'prepared') {
             break;

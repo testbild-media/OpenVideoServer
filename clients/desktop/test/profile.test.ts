@@ -26,12 +26,14 @@ import {
   rateAsArgument,
   tagsFor,
   whyItStopped,
+  CAPPED_BITS_PER_SECOND,
   CONSTANT_QUALITY,
   CONVENTIONAL_TAGS,
   UPLOAD_CEILINGS,
   UPLOAD_CEILING_LABELS,
   HEVC_BACKENDS,
   MEDIA_FOUNDATION_QUALITY,
+  type HevcBackend,
 } from '../src/shared/encoder.js';
 import {
   faults,
@@ -442,6 +444,56 @@ describe('the ceiling an operator sets on an upload', () => {
   it('scales a HAP file too, which is the heaviest thing this client writes', () => {
     const args = hapArguments('in.mov', 'out.mov', RATE, [], { width: 1280, height: 720 });
     expect(args[args.indexOf('-vf') + 1]).toBe('scale=1280:720:flags=lanczos,setsar=1');
+  });
+});
+
+describe('a capped encode', () => {
+  const RATE = { numerator: 60, denominator: 1 };
+  const capped = (backend: HevcBackend) =>
+    hevcArguments('in.mov', 'out.mp4', backend, 8, RATE, CONVENTIONAL_TAGS, [], null, 'capped');
+  const after = (args: string[], flag: string) => args[args.indexOf(flag) + 1] ?? '';
+
+  it('asks for an average a tenth under the ceiling', () => {
+    expect(CAPPED_BITS_PER_SECOND).toBe(54_000_000);
+    expect(CAPPED_BITS_PER_SECOND).toBeLessThan(MOST_BITS_PER_SECOND);
+  });
+
+  it('gives Quick Sync an average and a peak, and no quality target to fight them', () => {
+    // With `-global_quality` beside a `-maxrate`, FFmpeg picks QVBR, which was
+    // measured spending its target on a clip that needed less.
+    const args = capped('hevc_qsv');
+    expect(after(args, '-b:v')).toBe('54000000');
+    expect(after(args, '-maxrate')).toBe('60000000');
+    expect(args).not.toContain('-global_quality');
+  });
+
+  it('gives Kvazaar a bitrate in place of its quantiser, and keeps everything else', () => {
+    const quality = after(hevcArguments('in.mov', 'out.mp4', 'libkvazaar', 8, RATE, CONVENTIONAL_TAGS), '-kvazaar-params');
+    const params = after(capped('libkvazaar'), '-kvazaar-params');
+    expect(params).toContain('bitrate=54000000');
+    expect(params).not.toMatch(/(^|,)qp=/);
+    // The same string with one setting swapped: the keyframes and the colour
+    // tags are what the server checks, and a second encode that lost them would
+    // be refused for something new.
+    expect(params.replace('bitrate=54000000', `qp=${CONSTANT_QUALITY}`)).toBe(quality);
+  });
+
+  it('caps NVENC, AMF and Media Foundation the same way, by average', () => {
+    expect(after(capped('hevc_nvenc'), '-b:v')).toBe('54000000');
+    expect(after(capped('hevc_nvenc'), '-maxrate')).toBe('60000000');
+    expect(capped('hevc_nvenc')).not.toContain('-cq');
+    expect(after(capped('hevc_amf'), '-rc')).toBe('vbr_peak');
+    expect(after(capped('hevc_amf'), '-b:v')).toBe('54000000');
+    expect(after(capped('hevc_mf'), '-rate_control')).toBe('u_vbr');
+    expect(after(capped('hevc_mf'), '-b:v')).toBe('54000000');
+  });
+
+  it('changes nothing about a first encode', () => {
+    // The ordinary clip is the one that must stay small.
+    const args = hevcArguments('in.mov', 'out.mp4', 'hevc_qsv', 8, RATE, CONVENTIONAL_TAGS);
+    expect(after(args, '-global_quality')).toBe(String(CONSTANT_QUALITY));
+    expect(after(args, '-b:v')).toBe('0');
+    expect(args).not.toContain('-maxrate');
   });
 });
 

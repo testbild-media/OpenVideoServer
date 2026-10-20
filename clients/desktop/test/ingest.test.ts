@@ -24,6 +24,7 @@ import {
   displayNameFor,
   fractionOf,
   kindFor,
+  stageLine,
   type FileFacts,
   type IngestPorts,
   type Probe,
@@ -31,7 +32,7 @@ import {
   type ProbeOutcome,
   type QueueItem,
 } from '../src/shared/ingest.js';
-import type { PreparedForm } from '../src/shared/encoder.js';
+import type { PreparedForm, Spending } from '../src/shared/encoder.js';
 import type { ProbedVideo } from '../src/shared/profile.js';
 
 /**
@@ -339,6 +340,11 @@ function harness(
     probe?: ProbeOutcome;
     /** What a second probe finds, once the file has been prepared. */
     afterPreparing?: ProbeOutcome;
+    /**
+     * What each preparation in turn reads back as, for a test about a second
+     * encode. Past its end, `afterPreparing` again.
+     */
+    afterEachPreparing?: readonly ProbeOutcome[];
     byteSize?: number;
     prepare?: PrepareOutcome;
     /** What each backend in turn comes to, for a test about falling through. */
@@ -361,6 +367,8 @@ function harness(
   const prepared: Array<{ path: string; to: PreparedForm; backend: string | null }> = [];
   /** The size each of those was asked to come out at, in the same order. */
   const sizes: Array<{ width: number; height: number } | null> = [];
+  /** And how each was to spend its bits, in the same order. */
+  const spendings: Spending[] = [];
   /** Every working file this machine was asked to remove. */
   const discarded: string[] = [];
   let probes = 0;
@@ -371,6 +379,10 @@ function harness(
       probes += 1;
       // The second read is of the prepared file, which is a different file and
       // may be a different answer.
+      const nth = options.afterEachPreparing?.[probes - 2];
+      if (probes > 1 && nth !== undefined) {
+        return Promise.resolve(nth);
+      }
       if (probes > 1 && options.afterPreparing !== undefined) {
         return Promise.resolve(options.afterPreparing);
       }
@@ -378,9 +390,10 @@ function harness(
     },
     encoders: () => Promise.resolve(options.encoders ?? ENCODES_EVERYTHING),
     keyframeInterval: () => Promise.resolve(options.keyframeInterval ?? 1),
-    prepare: (path, to, backend, _rate, _tags, onProgress, stop, size) => {
+    prepare: (path, to, backend, _rate, _tags, onProgress, stop, size, spending) => {
       prepared.push({ path, to, backend });
       sizes.push(size ?? null);
+      spendings.push(spending);
       onProgress(1);
       onProgress(4);
       if (options.prepareSlowly === true) {
@@ -417,7 +430,7 @@ function harness(
 
   const reports: QueueItem[][] = [];
   const queue = new IngestQueue(ports, (items) => reports.push(items));
-  return { queue, server, reports, byteSize, prepared, sizes, discarded };
+  return { queue, server, reports, byteSize, prepared, sizes, spendings, discarded };
 }
 
 /** Runs the queue until nothing in it is still moving. */
@@ -830,6 +843,100 @@ describe('the ingest queue', () => {
 
     expect(prepared.map((attempt) => attempt.backend)).toEqual(['hevc_nvenc', 'hevc_mf']);
     expect(items[0]?.stage.at).not.toBe('stopped');
+  });
+
+  describe('a clip that comes out over the bitrate ceiling', () => {
+    // The owner's 1.4 GB clip, 2026-10-20: Quick Sync made it 73.5 Mbit/s and
+    // Kvazaar 65.0, at the quality every clip is asked for, and the server
+    // takes sixty. Neither takes a peak in its quality mode.
+    const tooMuch = (bitsPerSecond: number): ProbeOutcome => ({
+      kind: 'read',
+      probe: prores({ video: reading({ bitsPerSecond }) }),
+    });
+    const fits: ProbeOutcome = { kind: 'read', probe: prores() };
+
+    it('is encoded again by the same backend, at an average under the ceiling', async () => {
+      const { queue, prepared, spendings, reports, discarded } = harness({
+        probe: { kind: 'read', probe: needsPreparing() },
+        afterEachPreparing: [tooMuch(73_500_000), fits],
+        encoders: ['hevc_qsv', 'libkvazaar'],
+      });
+      queue.add([{ path: '/media/gold.mov', name: 'gold.mov' }]);
+
+      const items = await settled(queue);
+
+      expect(prepared.map((attempt) => attempt.backend)).toEqual(['hevc_qsv', 'hevc_qsv']);
+      expect(spendings).toEqual(['quality', 'capped']);
+      expect(items[0]?.stage.at).toBe('ready');
+      // Both working files are removed: the first before the second is made,
+      // the second once it has been sent.
+      expect(discarded).toHaveLength(2);
+      // And the row says why its bar started again.
+      const second = reports
+        .flat()
+        .find((item) => item.stage.at === 'preparing' && item.stage.capped === true);
+      expect(second).toBeDefined();
+      expect(stageLine(second!)).toMatch(/^Preparing as HEVC again, at a lower bitrate/);
+    });
+
+    it('is not encoded again for a fault a bitrate will not fix', async () => {
+      // Over the ceiling *and* untagged: a capped encode by the same backend
+      // would be untagged too, so the next backend is the one to ask.
+      const { queue, prepared, spendings } = harness({
+        probe: { kind: 'read', probe: needsPreparing() },
+        afterEachPreparing: [
+          {
+            kind: 'read',
+            probe: prores({ video: reading({ bitsPerSecond: 73_500_000, primaries: '' }) }),
+          },
+          fits,
+        ],
+        encoders: ['hevc_qsv', 'libkvazaar'],
+      });
+      queue.add([{ path: '/media/gold.mov', name: 'gold.mov' }]);
+
+      const items = await settled(queue);
+
+      expect(prepared.map((attempt) => attempt.backend)).toEqual(['hevc_qsv', 'libkvazaar']);
+      expect(spendings).toEqual(['quality', 'quality']);
+      expect(items[0]?.stage.at).toBe('ready');
+    });
+
+    it('goes on to the next backend when even the capped encode is over', async () => {
+      const { queue, prepared, spendings } = harness({
+        probe: { kind: 'read', probe: needsPreparing() },
+        afterEachPreparing: [tooMuch(73_500_000), tooMuch(61_000_000), fits],
+        encoders: ['hevc_qsv', 'libkvazaar'],
+      });
+      queue.add([{ path: '/media/gold.mov', name: 'gold.mov' }]);
+
+      const items = await settled(queue);
+
+      expect(prepared.map((attempt) => attempt.backend)).toEqual([
+        'hevc_qsv',
+        'hevc_qsv',
+        'libkvazaar',
+      ]);
+      expect(spendings).toEqual(['quality', 'capped', 'quality']);
+      expect(items[0]?.stage.at).toBe('ready');
+    });
+
+    it('says what both encodes of every backend came to when none fits', async () => {
+      const { queue } = harness({
+        probe: { kind: 'read', probe: needsPreparing() },
+        afterPreparing: tooMuch(65_000_000),
+        encoders: ['hevc_qsv', 'libkvazaar'],
+      });
+      queue.add([{ path: '/media/gold.mov', name: 'gold.mov' }]);
+
+      const items = await settled(queue);
+
+      const stage = items[0]?.stage;
+      const reason = stage?.at === 'stopped' ? stage.reason : '';
+      expect(reason).toContain('hevc_qsv made a file');
+      expect(reason).toContain('hevc_qsv at a capped bitrate made a file');
+      expect(reason).toContain('libkvazaar at a capped bitrate made a file');
+    });
   });
 
   it('says what every backend said when every backend fails', async () => {
