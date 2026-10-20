@@ -507,7 +507,36 @@ bridge.onView = (listener) => {
 bridge.onTelemetry = () => () => {};
 bridge.onNdiSources = () => () => {};
 bridge.onConnectors = () => () => {};
-bridge.onIngest = () => () => {};
+// **An upload in progress**, for the press tool: a row whose progress moves ten
+// times a second, which is what the screen has to stay usable under. A folder
+// could not be named during an upload because every progress report redrew the
+// page and took the box away (owner, 2026-10-20). The overflow audit measures
+// a still page and does not ask for it.
+bridge.onIngest = (listener) => {
+  if (process.env.OVS_STUB_UPLOADING !== '1') {
+    return () => {};
+  }
+  let sent = 0;
+  const timer = setInterval(() => {
+    sent = (sent + 1_000_000) % 100_000_000;
+    listener([
+      {
+        id: 'UPLOAD1',
+        path: 'C:/media/clip.mov',
+        name: 'clip.mov',
+        folder: '',
+        byteSize: 100_000_000,
+        stage: { at: 'uploading', sent, byteSize: 100_000_000 },
+        upload: null,
+        prepared: null,
+        hand: null,
+        declaration: null,
+        stop: null,
+      },
+    ]);
+  }, 100);
+  return () => clearInterval(timer);
+};
 bridge.onFault = () => () => {};
 
 contextBridge.exposeInMainWorld('ovs', bridge);

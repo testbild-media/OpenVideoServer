@@ -234,7 +234,13 @@ export class MediaPanel {
         .map((item) => item.id),
     );
     this.#queue = items;
-    this.draw();
+    // **The queue and nothing else.** This used to redraw the whole page, and
+    // progress arrives many times a second during an upload — so the box a new
+    // folder is named in was rebuilt under somebody's fingers, lost its focus,
+    // and closed (owner, 2026-10-20: "immer sofort das Feld für die Eingabe
+    // weg, als würde irgendwer daneben drücken"). Nothing else on the page
+    // depends on where an upload has got to.
+    this.#drawQueue();
 
     // A file that has just become part of the library is a reason to ask what
     // the library holds. Asked once per file rather than on every progress
@@ -284,6 +290,13 @@ export class MediaPanel {
    * fifty clips two levels under it would be a lie.
    */
   #drawFolders(): void {
+    // Not while a folder is being named in it. A library that reloads because
+    // an upload finished must not take the box away from somebody typing: the
+    // tree is drawn again the moment the box closes, which is when what it
+    // shows can be read anyway.
+    if (this.#naming !== null && this.#ui.folders.contains(document.activeElement)) {
+      return;
+    }
     const counts = countsByFolder(this.#library);
     const rows: HTMLElement[] = [
       this.#folderRow({ path: ROOT_FOLDER, name: 'All media', depth: -1, children: [] }, this.#library.length),
@@ -610,15 +623,17 @@ export class MediaPanel {
     });
     box.addEventListener('blur', () => {
       const name = box.value.trim();
-      if (name === item.display_name) {
-        return;
-      }
       if (name === '') {
         this.#note('A name cannot be empty.');
         box.value = item.display_name;
+      } else if (name !== item.display_name) {
+        // Filing reloads the library, which draws the panel again.
+        void this.#fileItem(item.id, undefined, name);
         return;
       }
-      void this.#fileItem(item.id, undefined, name);
+      // Whatever arrived while this was being typed in — `#drawDetail` waits
+      // for nobody to be typing — now that nobody is.
+      queueMicrotask(() => this.#drawDetail());
     });
     row.append(box);
     return row;
@@ -1046,6 +1061,14 @@ export class MediaPanel {
   // --- one item --------------------------------------------------------------
 
   #drawDetail(): void {
+    // Not while the name is being typed into. Rebuilding the panel took the
+    // box away mid-word, and the box files what it holds when it loses focus —
+    // so a library reloading because an upload finished could rename a clip
+    // to half of what somebody was typing. The box draws the panel again when
+    // it closes.
+    if (this.#ui.detailFields.contains(document.activeElement)) {
+      return;
+    }
     const item = this.#library.find((each) => each.id === this.#selected) ?? null;
     this.#ui.detail.hidden = item === null;
     if (item === null) {

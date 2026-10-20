@@ -291,6 +291,24 @@ const CONTROLS = [
   // path goes back up, a search finds folders by name, and a clip or a folder
   // dragged onto a folder goes into it.
   {
+    // The owner, 2026-10-20: during an upload the box for a new folder closed
+    // as soon as it opened, as if somebody had clicked beside it.
+    what: 'name a folder mid-upload',
+    id: 'library-new-folder',
+    open: ['#mode-media'],
+    keeps: '#library-folders .folder-input',
+  },
+  {
+    // The same page, the other box on it: a clip's name, which is filed the
+    // moment the box loses focus — so a box taken away mid-word would rename
+    // the clip to half of what was being typed.
+    what: 'rename a clip mid-upload',
+    selector: '#media-fields .media-rename-box',
+    open: ['#mode-media', '#library-grid .media-card'],
+    prepare: "document.querySelector('#media-fields .media-rename-box').focus();",
+    keeps: '#media-fields .media-rename-box',
+  },
+  {
     what: 'open a folder tile',
     selector: '#library-grid .folder-tile:not(.up)',
     open: ['#mode-media'],
@@ -469,6 +487,31 @@ async function press(win, control) {
   }
   await new Promise((resolve) => setTimeout(resolve, 250));
 
+  // A control that opens a box to type into, which has to *stay* open while the
+  // page keeps receiving things — an upload's progress, ten times a second.
+  // Proved by the box still being there, and still being where the keys go,
+  // a second and a half later.
+  //
+  // **What was typed, not only where the focus is.** An offscreen window
+  // fires no blur when a focused box is taken out of the page, so the first
+  // version of this passed against the very code that lost the owner's box:
+  // the box was replaced by a fresh one every update, and the fresh one took
+  // the focus quietly. What the fresh one did not have was the text.
+  if (control.keeps) {
+    await win.webContents.executeJavaScript(
+      `(() => { const b = document.querySelector(${JSON.stringify(control.keeps)});` +
+        " if (b) { b.value = 'Typed by the probe'; b.dispatchEvent(new Event('input')); } })()",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    const kept = await win.webContents.executeJavaScript(
+      `(() => { const a = document.activeElement;` +
+        ` return a !== null && a.matches(${JSON.stringify(control.keeps)}) && a.value === 'Typed by the probe'; })()`,
+    );
+    return kept
+      ? { verdict: 'keeps', detail: `${control.keeps} still holds what was typed` }
+      : { verdict: 'LOST', detail: `${control.keeps} lost what was typed while the page updated` };
+  }
+
   // A control that changes what the screen says rather than what it sends:
   // opening a folder, searching for one. Proved by the words that appear.
   if (control.reveals) {
@@ -517,6 +560,10 @@ async function press(win, control) {
     ? { verdict: 'sends', detail: names }
     : { verdict: 'DEAD', detail: names === '' ? 'nothing at all' : names };
 }
+
+// The stub keeps an upload moving while this runs, so that every control is
+// pressed on a page that is being updated under it, as it is during a get-in.
+process.env.OVS_STUB_UPLOADING = '1';
 
 app.whenReady().then(async () => {
   const win = new BrowserWindow({
@@ -654,7 +701,7 @@ app.whenReady().then(async () => {
   let dead = bad;
   for (const control of CONTROLS) {
     const result = await press(win, control);
-    if (['DEAD', 'MISSING', 'BROKEN', 'OFFERED', 'SENT'].includes(result.verdict)) {
+    if (['DEAD', 'MISSING', 'BROKEN', 'OFFERED', 'SENT', 'LOST'].includes(result.verdict)) {
       dead += 1;
     }
     const pad = control.what.padEnd(22, ' ');
