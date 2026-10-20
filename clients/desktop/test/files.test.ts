@@ -139,100 +139,122 @@ describe('the FFmpeg the client brings with it', () => {
   // On a machine with no hardware encoder this goes down the software path,
   // which is the one that has to work everywhere (owner, 2026-10-13: "Software
   // Weg muss immer vorbereitet sein").
-  it.skipIf(!existsSync(bundled('ffmpeg')) || !existsSync(bundled('ffprobe')))(
-    'turns a file the server refuses into one it accepts',
-    async (ctx) => {
-      vi.resetModules();
-      process.env['OVS_FFMPEG'] = bundled('ffmpeg');
-      process.env['OVS_FFPROBE'] = bundled('ffprobe');
-      const client = await import('../src/main/files.js');
-      const { planFor } = await import('../src/shared/encoder.js');
-      const { faults } = await import('../src/shared/profile.js');
+  //
+  // **And with pixels that are not square**, which the server refuses and which
+  // neither the scale nor the encoder clears. The owner's ProRes at
+  // 112301:112320 came out of Quick Sync and Kvazaar exactly as it went in
+  // (2026-10-20), and the fix -- `setsar=1` -- was a filter this build did not
+  // have: against a developer's FFmpeg it passed, against this one it refused
+  // every clip. One nearly square, which is only relabelled, and one anamorphic,
+  // which is widened to the width it is shown at.
+  for (const { fixture, width } of [
+    { fixture: 'refused-h264.mp4', width: 320 },
+    { fixture: 'refused-nearly-square-h264.mp4', width: 320 },
+    { fixture: 'refused-anamorphic-h264.mp4', width: 424 },
+  ]) {
+    it.skipIf(!existsSync(bundled('ffmpeg')) || !existsSync(bundled('ffprobe')))(
+      `turns a file the server refuses into one it accepts: ${fixture}`,
+      async (ctx) => {
+        vi.resetModules();
+        process.env['OVS_FFMPEG'] = bundled('ffmpeg');
+        process.env['OVS_FFPROBE'] = bundled('ffprobe');
+        const client = await import('../src/main/files.js');
+        const { planFor, preparedSize } = await import('../src/shared/encoder.js');
+        const { faults } = await import('../src/shared/profile.js');
 
-      // H.264 with a fifteen-frame GOP: refused by the policy, and the shape of
-      // every clip an operator drops in. 320x240 rather than the renderer's
-      // 64x64 fixtures, because NVENC refuses a picture that small and a test
-      // whose first backend cannot take the input is measuring the input.
-      const clip = join(dirname(fileURLToPath(import.meta.url)), 'media', 'refused-h264.mp4');
+        // H.264 with a fifteen-frame GOP: refused by the policy, and the shape of
+        // every clip an operator drops in. 320x240 rather than the renderer's
+        // 64x64 fixtures, because NVENC refuses a picture that small and a test
+        // whose first backend cannot take the input is measuring the input.
+        const clip = join(dirname(fileURLToPath(import.meta.url)), 'media', fixture);
 
-      const read = await client.probeFile(clip);
-      if (read.kind !== 'read') {
-        throw new Error(`the fixture could not be probed: ${JSON.stringify(read)}`);
-      }
-      const measured = read.probe.video;
-      if (measured === null) {
-        throw new Error('the prober said nothing about the fixture it was given');
-      }
-      const video = { ...measured, keyframeInterval: await client.keyframeInterval(clip) };
-
-      const plan = planFor(video, new Set(await client.usableEncoders()));
-      if (plan.kind === 'unavailable') {
-        // **Not a skip when the binary has a software encoder in it.**
-        // `tools/build-ffmpeg.sh` refuses to produce one without `libkvazaar`,
-        // so on the build this client ships there is always a way through, and
-        // "this machine has no encoder" is only ever true of a developer's own
-        // FFmpeg. Skipping here would have turned the release that could
-        // prepare nothing into a green run (2026-10-13).
-        const { stdout } = await run(bundled('ffmpeg'), ['-hide_banner', '-encoders']);
-        if (/libkvazaar/.test(stdout)) {
-          throw new Error(
-            `the shipped FFmpeg has libkvazaar and the client cannot use it: ${plan.reason}`,
-          );
+        const read = await client.probeFile(clip);
+        if (read.kind !== 'read') {
+          throw new Error(`the fixture could not be probed: ${JSON.stringify(read)}`);
         }
-        ctx.skip();
-        return;
-      }
-      expect(plan.kind, 'an H.264 clip is not something the server takes').toBe('encode');
-      if (plan.kind !== 'encode') {
-        return;
-      }
+        const measured = read.probe.video;
+        if (measured === null) {
+          throw new Error('the prober said nothing about the fixture it was given');
+        }
+        const video = { ...measured, keyframeInterval: await client.keyframeInterval(clip) };
 
-      // Every backend in turn, which is what the queue does: one that cannot
-      // take this picture is not the end of the file, and on a machine with no
-      // hardware encoder the last one standing is the software path.
-      const attempts = plan.to === 'hap' ? [null] : plan.backends;
-      let outcome: Awaited<ReturnType<typeof client.prepareFile>> = { kind: 'unavailable' };
-      const refused: string[] = [];
-      for (const backend of attempts) {
-        outcome = await client.prepareFile(
-          clip,
-          plan.to,
-          backend,
-          read.probe.frameRate ?? { numerator: 25, denominator: 1 },
-          { range: 'tv', matrix: 'bt709', primaries: 'bt709', transfer: 'bt709' },
-          () => undefined,
+        const plan = planFor(video, new Set(await client.usableEncoders()));
+        if (plan.kind === 'unavailable') {
+          // **Not a skip when the binary has a software encoder in it.**
+          // `tools/build-ffmpeg.sh` refuses to produce one without `libkvazaar`,
+          // so on the build this client ships there is always a way through, and
+          // "this machine has no encoder" is only ever true of a developer's own
+          // FFmpeg. Skipping here would have turned the release that could
+          // prepare nothing into a green run (2026-10-13).
+          const { stdout } = await run(bundled('ffmpeg'), ['-hide_banner', '-encoders']);
+          if (/libkvazaar/.test(stdout)) {
+            throw new Error(
+              `the shipped FFmpeg has libkvazaar and the client cannot use it: ${plan.reason}`,
+            );
+          }
+          ctx.skip();
+          return;
+        }
+        expect(plan.kind, 'an H.264 clip is not something the server takes').toBe('encode');
+        if (plan.kind !== 'encode') {
+          return;
+        }
+
+        // Every backend in turn, which is what the queue does: one that cannot
+        // take this picture is not the end of the file, and on a machine with no
+        // hardware encoder the last one standing is the software path.
+        const attempts = plan.to === 'hap' ? [null] : plan.backends;
+        // Decided as the queue decides it, from the probe and with no ceiling.
+        const size = preparedSize(
+          { width: read.probe.width, height: read.probe.height, sampleAspect: measured.sampleAspect },
+          'source',
         );
-        if (outcome.kind === 'prepared') {
-          break;
+        let outcome: Awaited<ReturnType<typeof client.prepareFile>> = { kind: 'unavailable' };
+        const refused: string[] = [];
+        for (const backend of attempts) {
+          outcome = await client.prepareFile(
+            clip,
+            plan.to,
+            backend,
+            read.probe.frameRate ?? { numerator: 25, denominator: 1 },
+            { range: 'tv', matrix: 'bt709', primaries: 'bt709', transfer: 'bt709' },
+            () => undefined,
+            undefined,
+            size,
+          );
+          if (outcome.kind === 'prepared') {
+            break;
+          }
+          refused.push(`${backend ?? 'hap'}: ${JSON.stringify(outcome)}`);
         }
-        refused.push(`${backend ?? 'hap'}: ${JSON.stringify(outcome)}`);
-      }
-      expect(outcome.kind, `every backend refused it -- ${refused.join('; ')}`).toBe('prepared');
-      if (outcome.kind !== 'prepared') {
-        return;
-      }
+        expect(outcome.kind, `every backend refused it -- ${refused.join('; ')}`).toBe('prepared');
+        if (outcome.kind !== 'prepared') {
+          return;
+        }
 
-      try {
-        const again = await client.probeFile(outcome.path);
-        if (again.kind !== 'read') {
-          throw new Error(`what was written could not be read back: ${JSON.stringify(again)}`);
+        try {
+          const again = await client.probeFile(outcome.path);
+          if (again.kind !== 'read') {
+            throw new Error(`what was written could not be read back: ${JSON.stringify(again)}`);
+          }
+          const came = again.probe.video;
+          if (came === null) {
+            throw new Error('what was written told the prober nothing about its picture');
+          }
+          const written = {
+            ...came,
+            keyframeInterval: await client.keyframeInterval(outcome.path),
+          };
+          // The server's own verdict, asked of the file that would be sent to it.
+          expect(faults(written, plan.to)).toEqual([]);
+          expect(again.probe.width, 'the width it is shown at').toBe(width);
+        } finally {
+          await rm(dirname(outcome.path), { recursive: true, force: true });
         }
-        const came = again.probe.video;
-        if (came === null) {
-          throw new Error('what was written told the prober nothing about its picture');
-        }
-        const written = {
-          ...came,
-          keyframeInterval: await client.keyframeInterval(outcome.path),
-        };
-        // The server's own verdict, asked of the file that would be sent to it.
-        expect(faults(written, plan.to)).toEqual([]);
-      } finally {
-        await rm(dirname(outcome.path), { recursive: true, force: true });
-      }
-    },
-    120_000,
-  );
+      },
+      120_000,
+    );
+  }
 
   // The trial the client runs before it trusts an encoder. It fed
   // `-f lavfi -i testsrc2=...`, which this build has neither of, so every

@@ -261,7 +261,13 @@ readonly DEMUXERS="mov,matroska,mpegts,mpegvideo,avi,image2,image2pipe,png_pipe,
 # (owner, 2026-10-13, at a venue: a file that would not go in).
 readonly MUXERS="mov,mp4,null,rawvideo,image2"
 readonly PARSERS="h264,hevc,av1,vp9,vp8,mpegvideo,mpeg4video,vc1,mjpeg,png,dnxhd"
-readonly FILTERS="scale,format,null,copy,setpts,fps"
+# **`setsar` because the server takes square pixels only.** The client ends
+# every encode's filter chain with `setsar=1`: neither `scale` nor the encoder
+# clears a source's sample aspect, so without it a clip that came in
+# non-square went out non-square and was refused after a successful encode
+# (owner, 2026-10-20, a ProRes at 112301:112320). A build without it cannot
+# prepare any clip at all -- FFmpeg refuses the whole command line.
+readonly FILTERS="scale,format,null,copy,setpts,fps,setsar"
 readonly PROTOCOLS="file,pipe"
 
 # --- verifying, which is also what --check does on its own ------------------
@@ -399,6 +405,23 @@ verify() {
     for container in $(printf '%s' "$MUXERS" | tr ',' ' '); do
       if ! printf '%s\n' "$writes" | grep -qx "$container"; then
         echo "  no $container muxer" >&2
+        failures=$((failures + 1))
+      fi
+    done
+  fi
+
+  # And the filters, for the same reason as the muxers: the client names them
+  # on every command line it runs, and FFmpeg answers a filter it does not have
+  # by refusing the command rather than by leaving it out. The client's
+  # `setsar=1` was written against a developer's FFmpeg that had everything,
+  # and this build did not (2026-10-20).
+  if [ -x "$where/ffmpeg$EXE" ]; then
+    local filters
+    filters=$("${run[@]}" -hide_banner -filters 2>/dev/null | awk '{print $2}')
+    local filter
+    for filter in $(printf '%s' "$FILTERS" | tr ',' ' '); do
+      if ! printf '%s\n' "$filters" | grep -qx "$filter"; then
+        echo "  no $filter filter" >&2
         failures=$((failures + 1))
       fi
     done

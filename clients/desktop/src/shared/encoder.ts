@@ -291,36 +291,71 @@ const PICTURE_STEP = 8;
  * and is rounded to a multiple of eight, which can move it by at most four
  * pixels — a thousandth of the picture, against an encoder that would otherwise
  * refuse the file.
+ *
+ * **The shape is the one the picture is shown at**, which is its width times
+ * its sample aspect. Every prepared file has square pixels (`pictureArguments`),
+ * so a source whose pixels are not square is widened or narrowed to the width
+ * it was always meant to be seen at — a PAL widescreen 720×576 at 64:45 becomes
+ * 1024×576 — and its height is kept. A source whose shown width is within four
+ * pixels of its stored one is left at its size and only called square: that is
+ * the same tolerance as the rounding above, and it is every file whose aspect
+ * is a rounding error in whatever wrote it. The owner's ProRes at
+ * 112301:112320, 2026-10-20, is 1919.7 pixels wide by its own account.
  */
 export function preparedSize(
-  source: { width: number; height: number },
+  source: { width: number; height: number; sampleAspect?: readonly [number, number] },
   ceiling: UploadCeiling,
 ): { width: number; height: number } | null {
-  if (ceiling === 'source') {
-    return null;
-  }
   const { width, height } = source;
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
     // Nothing is known about the picture, so nothing is decided about it.
     return null;
   }
-  if (height <= ceiling) {
+  const shown = shownWidth(width, source.sampleAspect);
+  const tall = ceiling === 'source' ? height : Math.min(height, ceiling);
+  if (tall === height && Math.abs(shown - width) < PICTURE_STEP / 2) {
     return null;
   }
-  const scaled = Math.round((width * ceiling) / height);
+  const scaled = Math.round((shown * tall) / height);
   const stepped = Math.max(PICTURE_STEP, Math.round(scaled / PICTURE_STEP) * PICTURE_STEP);
-  return { width: stepped, height: ceiling };
+  return { width: stepped, height: tall };
 }
 
-/** The filter that puts a picture at `size`, for an encode that needs one. */
-function scaleArguments(size: { width: number; height: number } | null): string[] {
-  if (size === null) {
-    return [];
+/** How wide a picture is shown, which is its stored width for square pixels. */
+function shownWidth(width: number, sampleAspect: readonly [number, number] | undefined): number {
+  if (sampleAspect === undefined) {
+    return width;
   }
-  // Lanczos, because this only ever makes a picture smaller, and a soft
-  // downscale of a hard-edged graphic is where "the VJ loop looks mushy" comes
-  // from.
-  return ['-vf', `scale=${size.width}:${size.height}:flags=lanczos`];
+  const [numerator, denominator] = sampleAspect;
+  if (!(numerator > 0) || !(denominator > 0)) {
+    // Unspecified, which every tool reads as square.
+    return width;
+  }
+  return (width * numerator) / denominator;
+}
+
+/**
+ * The filter every prepared clip goes through: to `size` when it needs one,
+ * and to square pixels always.
+ *
+ * `setsar=1` is not implied by the scale. FFmpeg's `scale` keeps the shown
+ * shape by *rewriting* the sample aspect, and with no scale at all the encoder
+ * copies the source's; either way a file that came in non-square went out
+ * non-square, and the server refused it after a successful encode — the owner's
+ * ProRes on 2026-10-20, through Quick Sync and Kvazaar both. After the scale,
+ * because the scale is what moves the aspect, and because a width rounded to a
+ * multiple of eight leaves a remainder the scale would otherwise write down.
+ */
+function pictureArguments(size: { width: number; height: number } | null): string[] {
+  const square = 'setsar=1';
+  if (size === null) {
+    return ['-vf', square];
+  }
+  // Lanczos, because nearly every scale here makes a picture smaller, and a
+  // soft downscale of a hard-edged graphic is where "the VJ loop looks mushy"
+  // comes from. The one that does not — widening an anamorphic source — is a
+  // resample along one axis that Lanczos does as well as anything.
+  return ['-vf', `scale=${size.width}:${size.height}:flags=lanczos,${square}`];
 }
 
 export function hevcArguments(
@@ -372,7 +407,7 @@ export function hevcArguments(
 
   return [
     ...common(from, [...readAs, ...colour]),
-    ...scaleArguments(size),
+    ...pictureArguments(size),
     '-c:v',
     backend,
     ...qualityArguments(backend, MOST_BITS_PER_SECOND, rate, tags),
@@ -411,7 +446,7 @@ export function hapArguments(
 ): string[] {
   return [
     ...common(from, readAs),
-    ...scaleArguments(size),
+    ...pictureArguments(size),
     '-c:v',
     'hap',
     '-format',

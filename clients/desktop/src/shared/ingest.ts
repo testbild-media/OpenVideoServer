@@ -758,9 +758,15 @@ export class IngestQueue {
     // Decided here rather than in the encoder, because the probe is what knows
     // how big the picture is and this is the one place that has both. Never for
     // a still: the ceiling is what a clip may cost a frame, and a still is
-    // decoded once.
+    // decoded once. The sample aspect goes with the size, because a picture
+    // whose pixels are not square is prepared at the width it is shown at.
     const size =
-      to === 'png' ? null : preparedSize({ width: from.width, height: from.height }, this.#ceiling);
+      to === 'png'
+        ? null
+        : preparedSize(
+            { width: from.width, height: from.height, sampleAspect: from.video?.sampleAspect },
+            this.#ceiling,
+          );
 
     this.#set(item, { at: 'preparing', seconds: 0, ofSeconds, to });
     const stop = new AbortController();

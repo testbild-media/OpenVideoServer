@@ -430,18 +430,74 @@ describe('the ceiling an operator sets on an upload', () => {
     });
     const filter = args.indexOf('-vf');
     expect(filter).toBeGreaterThan(-1);
-    expect(args[filter + 1]).toBe('scale=1280:720:flags=lanczos');
+    expect(args[filter + 1]).toBe('scale=1280:720:flags=lanczos,setsar=1');
     expect(filter).toBeLessThan(args.indexOf('-c:v'));
   });
 
   it('says nothing about scaling when there is no ceiling to keep', () => {
     const args = hevcArguments('in.mp4', 'out.mp4', 'hevc_nvenc', 8, RATE, CONVENTIONAL_TAGS);
-    expect(args).not.toContain('-vf');
+    expect(args[args.indexOf('-vf') + 1]).toBe('setsar=1');
   });
 
   it('scales a HAP file too, which is the heaviest thing this client writes', () => {
     const args = hapArguments('in.mov', 'out.mov', RATE, [], { width: 1280, height: 720 });
-    expect(args[args.indexOf('-vf') + 1]).toBe('scale=1280:720:flags=lanczos');
+    expect(args[args.indexOf('-vf') + 1]).toBe('scale=1280:720:flags=lanczos,setsar=1');
+  });
+});
+
+describe('square pixels', () => {
+  const RATE = { numerator: 25, denominator: 1 };
+
+  it('calls every prepared file square, scaled or not, HEVC or HAP', () => {
+    // The owner's ProRes, 2026-10-20: a sample aspect of 112301:112320 went
+    // through Quick Sync and Kvazaar unchanged and the server refused both.
+    // FFmpeg's scale rewrites the aspect rather than clearing it, so the
+    // square has to come after the scale and be there without one.
+    for (const args of [
+      hevcArguments('in.mov', 'out.mp4', 'hevc_qsv', 8, RATE, CONVENTIONAL_TAGS),
+      hevcArguments('in.mov', 'out.mp4', 'libkvazaar', 8, RATE, CONVENTIONAL_TAGS, [], {
+        width: 1280,
+        height: 720,
+      }),
+      hapArguments('in.mov', 'out.mov', RATE),
+    ]) {
+      const filter = args[args.indexOf('-vf') + 1];
+      expect(filter).toMatch(/(^|,)setsar=1$/);
+    }
+  });
+
+  it('leaves a picture at its size when its aspect is a rounding error', () => {
+    // 1920 at 112301:112320 is shown 1919.7 wide. Scaling it to 1920 would be
+    // a resample of every frame for a third of a pixel.
+    expect(preparedSize({ width: 1920, height: 1080, sampleAspect: [112301, 112320] }, 'source')).toBeNull();
+    expect(preparedSize({ width: 3840, height: 2160, sampleAspect: [112301, 112320] }, 2160)).toBeNull();
+  });
+
+  it('widens an anamorphic picture to the width it is shown at', () => {
+    // PAL widescreen: 720 stored, 1024 shown, height kept.
+    expect(preparedSize({ width: 720, height: 576, sampleAspect: [64, 45] }, 'source')).toEqual({
+      width: 1024,
+      height: 576,
+    });
+    // PAL 4:3 is narrower than it is stored: 720 × 16/15 is 768.
+    expect(preparedSize({ width: 720, height: 576, sampleAspect: [16, 15] }, 1080)).toEqual({
+      width: 768,
+      height: 576,
+    });
+  });
+
+  it('takes the ceiling from the shown shape, not the stored one', () => {
+    // HDV: 1440 stored at 4:3 is 1920 shown, so 720 lines is 1280 across.
+    // From the stored shape it would be 960, and the picture squashed.
+    expect(preparedSize({ width: 1440, height: 1080, sampleAspect: [4, 3] }, 720)).toEqual({
+      width: 1280,
+      height: 720,
+    });
+  });
+
+  it('reads an unspecified aspect as square', () => {
+    expect(preparedSize({ width: 1920, height: 1080, sampleAspect: [0, 1] }, 'source')).toBeNull();
+    expect(preparedSize({ width: 1920, height: 1080, sampleAspect: [1, 1] }, 1080)).toBeNull();
   });
 });
 

@@ -359,6 +359,8 @@ function harness(
 
   /** Every file this machine was asked to prepare, and what it was asked for. */
   const prepared: Array<{ path: string; to: PreparedForm; backend: string | null }> = [];
+  /** The size each of those was asked to come out at, in the same order. */
+  const sizes: Array<{ width: number; height: number } | null> = [];
   /** Every working file this machine was asked to remove. */
   const discarded: string[] = [];
   let probes = 0;
@@ -376,8 +378,9 @@ function harness(
     },
     encoders: () => Promise.resolve(options.encoders ?? ENCODES_EVERYTHING),
     keyframeInterval: () => Promise.resolve(options.keyframeInterval ?? 1),
-    prepare: (path, to, backend, _rate, _tags, onProgress, stop) => {
+    prepare: (path, to, backend, _rate, _tags, onProgress, stop, size) => {
       prepared.push({ path, to, backend });
+      sizes.push(size ?? null);
       onProgress(1);
       onProgress(4);
       if (options.prepareSlowly === true) {
@@ -414,7 +417,7 @@ function harness(
 
   const reports: QueueItem[][] = [];
   const queue = new IngestQueue(ports, (items) => reports.push(items));
-  return { queue, server, reports, byteSize, prepared, discarded };
+  return { queue, server, reports, byteSize, prepared, sizes, discarded };
 }
 
 /** Runs the queue until nothing in it is still moving. */
@@ -578,6 +581,45 @@ describe('the ingest queue', () => {
     expect(server.created[0]).toMatchObject({ kind: 'video', codec: 'hevc' });
     // And the working file is gone.
     expect(discarded).toEqual(['/tmp/ovs-prepare-x/clip.hevc.mp4']);
+  });
+
+  it('prepares a picture whose pixels are not square at the width it is shown at', async () => {
+    // The sample aspect is in the probe and the size is decided in the queue;
+    // the encoder only squares what it is given. Leaving the aspect out of the
+    // queue's question would square a PAL widescreen clip by squashing it.
+    const { queue, sizes } = harness({
+      probe: {
+        kind: 'read',
+        probe: needsPreparing({
+          width: 720,
+          height: 576,
+          video: reading({ codec: 'vp9', sampleAspect: [64, 45] }),
+        }),
+      },
+      afterPreparing: { kind: 'read', probe: prores() },
+    });
+    queue.add([{ path: '/media/pal.mov', name: 'pal.mov' }]);
+
+    await settled(queue);
+
+    expect(sizes).toEqual([{ width: 1024, height: 576 }]);
+  });
+
+  it('prepares a file whose only fault is its sample aspect', async () => {
+    // The owner's ProRes, 2026-10-20, as the contract read it after Quick Sync
+    // had re-encoded it: everything right but 112301:112320. Not scaled — a
+    // third of a pixel is not worth resampling every frame for.
+    const { queue, prepared, sizes } = harness({
+      probe: { kind: 'read', probe: prores({ video: reading({ sampleAspect: [112301, 112320] }) }) },
+      afterPreparing: { kind: 'read', probe: prores() },
+    });
+    queue.add([{ path: '/media/blockbuster.mov', name: 'blockbuster.mov' }]);
+
+    const items = await settled(queue);
+
+    expect(prepared.map((attempt) => attempt.to)).toEqual(['hevc_8']);
+    expect(sizes).toEqual([null]);
+    expect(items[0]?.stage).toMatchObject({ at: 'ready' });
   });
 
   it('stops a preparation when the file is taken out of the queue', async () => {
