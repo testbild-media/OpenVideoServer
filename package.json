@@ -1,6 +1,6 @@
 {
   "name": "openvideoserver",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "private": true,
   "description": "OpenVideoServer workspace root for the TypeScript packages",
   "workspaces": [
