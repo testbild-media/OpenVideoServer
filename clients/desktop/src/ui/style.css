@@ -4406,10 +4406,17 @@ button.danger {
   border-color: var(--active);
 }
 
+/* **The card's width, said.** The card is a button, and a button does not
+   stretch its flex children: the box took its width from the still inside it,
+   and a moving preview has none of its own (it is sized against the box), so
+   the box was nothing wide and the card showed no picture at all. */
+
 .media-picture {
   display: flex;
   align-items: center;
   justify-content: center;
+  align-self: stretch;
+  width: 100%;
   aspect-ratio: 16 / 9;
   background: #06080c;
   border-radius: 3px;
@@ -4692,22 +4699,43 @@ details.work-row[open] > summary::before {
    was too short to give ten, so the box is always showing a whole frame and
    never a tenth of two. */
 
-.strip {
-  display: block;
+/* The box a strip is fitted into, which is whatever box the still would have
+   filled. A size container, so the frame inside can be sized against it. */
+
+.strip-frame {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 100%;
   height: 100%;
+  container-type: size;
+}
+
+/* One frame, at the clip's own shape and as large as fits — what
+   `object-fit: contain` does for the still beside it. `--frame` is the frame's
+   width over its height, read off the picture (strip.ts); until it has been,
+   16:9, which is most clips. Stretching the strip to the box instead showed a
+   4:3 or a square clip pulled sideways next to its own still. */
+
+.strip {
+  display: block;
+  width: min(100cqw, 100cqh * var(--frame, 1.7778));
+  height: min(100cqh, 100cqw / var(--frame, 1.7778));
   background-repeat: no-repeat;
-  /* Ten frames across, each the size of the box. */
+  /* Ten frames across, each the size of the frame. */
   background-size: 1000% 100%;
   background-position-x: 0%;
 }
 
-/* A pad plays while the pointer is on it, and shows its first frame otherwise.
-   The layer's own picture plays always: it is what the layer is doing, and a
-   picture of the show that only moves when somebody points at it is a picture
-   of the show nobody is watching. */
+/* A pad plays while the pointer is on it, and shows its first frame otherwise,
+   and so does a clip's tile in the library — in Live's browser and in MEDIA
+   alike (owner, 2026-10-20). The layer's own picture plays always: it is what
+   the layer is doing, and a picture of the show that only moves when somebody
+   points at it is a picture of the show nobody is watching. */
 
 .pad:hover .strip,
+.browser-tile:hover .strip,
+.media-card:hover .strip,
 .showing-picture .strip {
   /* Four frames a second — 250ms each, which is what was asked for — and
      `jump-none` because the ten positions have to include both ends: with the
@@ -4731,6 +4759,8 @@ details.work-row[open] > summary::before {
 
 @media (prefers-reduced-motion: reduce) {
   .pad:hover .strip,
+  .browser-tile:hover .strip,
+  .media-card:hover .strip,
   .showing-picture .strip {
     animation: none;
   }

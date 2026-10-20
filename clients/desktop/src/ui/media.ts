@@ -51,6 +51,7 @@ import {
   usageLine,
 } from '../shared/media.js';
 import { button, element, make } from './dom.js';
+import { paintStrip } from './strip.js';
 
 /** What the media page needs from the rest of the window. */
 export interface MediaDeps {
@@ -77,6 +78,11 @@ export class MediaPanel {
   #queue: QueueItem[] = [];
   /** A picture per item: absent means nobody has asked, null means there is none. */
   readonly #thumbnails = new Map<string, string | null>();
+  /**
+   * A clip's moving preview, the same way: absent means nobody has asked, and
+   * null means there is none or it is on its way. A still never has one.
+   */
+  readonly #strips = new Map<string, string | null>();
   /** What the server said uses each item, for the ones that have been asked about. */
   readonly #usage = new Map<string, string[]>();
   #selected: string | null = null;
@@ -194,6 +200,7 @@ export class MediaPanel {
       // is a screen an operator would act on.
       this.#library = [];
       this.#thumbnails.clear();
+      this.#strips.clear();
       this.#usage.clear();
       this.#selected = null;
       this.#libraryNote = 'Sign in to a server to see its library.';
@@ -986,7 +993,12 @@ export class MediaPanel {
 
     const frame = make('div', 'media-picture');
     const drawn = picture(item, this.#thumbnails.get(item.id) ?? null);
-    if (drawn.kind === 'picture') {
+    const strip = this.#strips.get(item.id) ?? null;
+    if (strip !== null) {
+      // A clip's moves, as on its pad in Live: its first frame, and the ten of
+      // them while the pointer is over the card (owner, 2026-10-20).
+      paintStrip(frame, strip);
+    } else if (drawn.kind === 'picture') {
       const image = document.createElement('img');
       image.src = drawn.src;
       image.alt = drawn.alt;
@@ -1044,6 +1056,24 @@ export class MediaPanel {
       const png = await this.#ovs.mediaThumbnail(item.id);
       // Content-addressed, so a picture never changes and is asked for once.
       this.#thumbnails.set(item.id, png);
+      this.#drawLibrary();
+    }
+    // **The moving previews after every still**, not beside each one. A strip
+    // is ten frames and only moves under the pointer; a library with no
+    // pictures yet is what an operator is actually looking at, so it fills in
+    // first. A still has no strip to ask for.
+    for (const item of this.#library) {
+      if (item.kind === 'image' || this.#strips.has(item.id)) {
+        continue;
+      }
+      // Marked before the wait, so a second pass started by a reload does not
+      // ask for the same one again.
+      this.#strips.set(item.id, null);
+      const strip = await this.#ovs.mediaStrip(item.id);
+      if (strip === null || !this.#library.some((each) => each.id === item.id)) {
+        continue;
+      }
+      this.#strips.set(item.id, strip);
       this.#drawLibrary();
     }
   }
@@ -1183,6 +1213,7 @@ export class MediaPanel {
     if (answer.ok) {
       this.#usage.delete(item.id);
       this.#thumbnails.delete(item.id);
+      this.#strips.delete(item.id);
       this.#selected = null;
       await this.load();
       // Every other screen holds its own copy of this list and read it when it

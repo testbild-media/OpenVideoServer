@@ -213,6 +213,32 @@ const item = (n) => ({
   folder: '',
 });
 
+// **Pictures, when asked for** (`OVS_STUB_STRIPS=1`): a still and a ten-frame
+// strip for each clip, every frame numbered and in its own colour, so a
+// screenshot says which frame a box is showing. Three shapes — 16:9, 4:3 and
+// square — because a strip stretched to a 16:9 box looked right for the first
+// and wrong for the other two, beside a still of the same clip that was not
+// (2026-10-20). Off by default: the overflow audit measures text, and the
+// press tool presses controls, and neither needs them.
+const PICTURES = process.env.OVS_STUB_STRIPS === '1';
+const SHAPES = { MEDIA1: [160, 90], MEDIA2: [120, 90], MEDIA13: [90, 90] };
+const COLOURS = ['#b33', '#b73', '#bb3', '#7b3', '#3b3', '#3b7', '#3bb', '#37b', '#33b', '#73b'];
+
+const stubPicture = (id, frames) => {
+  const [width, height] = SHAPES[id] ?? [160, 90];
+  const cells = Array.from(
+    { length: frames },
+    (_, n) =>
+      `<rect x="${n * width}" y="0" width="${width}" height="${height}" fill="${COLOURS[n]}"/>` +
+      `<text x="${n * width + width / 2}" y="${height * 0.7}" font-size="${height * 0.6}" ` +
+      `text-anchor="middle" fill="#fff" font-family="sans-serif">${n + 1}</text>`,
+  ).join('');
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width * frames}" height="${height}">` +
+    `${cells}</svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+};
+
 const effect = {
   type_id: 'ovs.colour_correct',
   version: 1,
@@ -398,8 +424,8 @@ const answers = {
       { size: { width: 3840, height: 2160 }, refresh: { numerator: 25, denominator: 1 } },
     ]),
   fixtures: async () => ok([]),
-  mediaThumbnail: async () => null,
-  mediaStrip: async () => null,
+  mediaThumbnail: async (id) => (PICTURES ? stubPicture(id, 1) : null),
+  mediaStrip: async (id) => (PICTURES ? stubPicture(id, 10) : null),
   exportShow: async () => ({ ok: true, value: null }),
   exportShowWithMedia: async () => ({ ok: true, value: null }),
   importShow: async () => ({ ok: true, value: null }),

@@ -176,6 +176,7 @@ import {
 import type { LayerView, ShowView, SlotView } from '../shared/view.js';
 import { emptyView } from '../shared/view.js';
 import { button, element, make } from './dom.js';
+import { paintStrip } from './strip.js';
 
 /** How often the still preview is refreshed while it is the one on screen. */
 const PREVIEW_INTERVAL_MS = 500;
@@ -2362,7 +2363,7 @@ export class LivePanel {
     const item = slot.source.mediaItemId;
     const strip = this.#strips.get(item) ?? null;
     if (strip !== null) {
-      this.#paintStrip(target, strip);
+      paintStrip(target, strip);
       return;
     }
     const thumbnail = this.#thumbnails.get(item) ?? null;
@@ -2377,34 +2378,6 @@ export class LivePanel {
     const picture = make('img');
     picture.src = thumbnail;
     picture.alt = '';
-    target.replaceChildren(picture);
-  }
-
-  /**
-   * Draws a clip's moving preview into a box, showing its first frame.
-   *
-   * **A strip rather than an animated image** (owner, 2026-09-23). What was
-   * asked for is a preview that plays while the pointer is over a pad and shows
-   * its first frame otherwise, and an animated image cannot be stopped on a
-   * frame: a browser plays one whenever it is on screen. Ten frames in one
-   * picture can — the box shows a tenth of it at a time, and stepping through
-   * those tenths is what playing means here.
-   *
-   * It is a background rather than an `img` for the same reason: which part of
-   * a picture is showing is a thing CSS can say and animate, and a frame is a
-   * whole number of steps rather than a position that drifts.
-   */
-  #paintStrip(target: HTMLElement, strip: string): void {
-    const url = `url("${strip}")`;
-    const existing = target.firstElementChild;
-    if (existing instanceof HTMLElement && existing.classList.contains('strip')) {
-      if (existing.style.backgroundImage !== url) {
-        existing.style.backgroundImage = url;
-      }
-      return;
-    }
-    const picture = make('span', 'strip');
-    picture.style.backgroundImage = url;
     target.replaceChildren(picture);
   }
 
@@ -2810,11 +2783,21 @@ export class LivePanel {
   /**
    * A library tile's picture, once the server has sent one.
    *
+   * **A clip's moves**, as its pad does: its first frame, and the ten of them
+   * while the pointer is over the tile (owner, 2026-10-20). A still has only
+   * its picture, and a clip whose strip has not arrived yet shows its still
+   * until it does.
+   *
    * Replaced only when it is not already there, so that a redraw does not hand
    * the element a new `<img>` and make the browser flicker.
    */
   #paintTilePicture(target: HTMLElement, mediaItemId: string): void {
     this.#askForThumbnail(mediaItemId);
+    const strip = this.#strips.get(mediaItemId) ?? null;
+    if (strip !== null) {
+      paintStrip(target, strip);
+      return;
+    }
     const thumbnail = this.#thumbnails.get(mediaItemId) ?? null;
     if (thumbnail === null) {
       return;
