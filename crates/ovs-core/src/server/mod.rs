@@ -145,6 +145,11 @@ pub fn router(state: AppState) -> Router {
             "/shows/{show_id}/layers/{layer_id}/slots/{slot_index}",
             put(show_edits::assign).delete(show_edits::clear),
         )
+        // A pad dragged onto another on the live matrix.
+        .route(
+            "/shows/{show_id}/layers/{layer_id}/slots/{slot_index}/move",
+            post(show_edits::move_slot),
+        )
         .route(
             "/shows/{show_id}/layers/{layer_id}/banks",
             put(show_edits::set_banks),

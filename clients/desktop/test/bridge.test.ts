@@ -222,6 +222,7 @@ describe('the bridge the window is given', () => {
       'mediaStrip',
       'mediaThumbnail',
       'mediaUsage',
+      'moveSlot',
       'networkModes',
       'onConnectors',
       'onFault',

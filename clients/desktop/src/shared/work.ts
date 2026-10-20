@@ -795,7 +795,49 @@ export function matchingEffects(tiles: readonly EffectTile[], query: string): Ef
  */
 export type Dragged =
   | { of: 'source'; source: SlotSource; name: string }
-  | { of: 'effect'; typeId: string; version: number; name: string };
+  | { of: 'effect'; typeId: string; version: number; name: string }
+  /**
+   * A pad of the matrix itself, picked up to move it to another pad (owner,
+   * 2026-10-21: "Slot 1 per Drag and Drop auf Slot 10 schieben").
+   */
+  | { of: 'pad'; layerId: string; slotIndex: number; name: string };
+
+/** What dropping a pad on a pad comes to. */
+export type PadDropVerdict =
+  | { do: 'move' }
+  | { do: 'swap'; with: string }
+  | { do: 'nothing' }
+  | { do: 'refuse'; because: string };
+
+/**
+ * Whether a pad can be moved where it was dropped, and what that will do.
+ *
+ * **Within its own layer.** A slot is a layer's: its effects are drawn on that
+ * layer's bus and a desk patched to the layer counts its pads. Carrying one to
+ * another layer is copying a clip there, which the browser already does.
+ *
+ * A pad that is taken swaps rather than being overwritten, so a drop that
+ * missed by one pad is undone by dropping it back.
+ */
+export function dropPadOnPad(
+  carried: { layerId: string; slotIndex: number },
+  onto: { layerId: string; slotIndex: number; holdingName: string | null },
+): PadDropVerdict {
+  if (carried.layerId !== onto.layerId) {
+    return {
+      do: 'refuse',
+      because:
+        'A slot moves within its own layer. To have the clip on another layer too, drag it there from the browser.',
+    };
+  }
+  if (onto.slotIndex === BLACK_SLOT_INDEX) {
+    return { do: 'refuse', because: 'Slot 0 is permanently black on every layer and holds nothing.' };
+  }
+  if (carried.slotIndex === onto.slotIndex) {
+    return { do: 'nothing' };
+  }
+  return onto.holdingName === null ? { do: 'move' } : { do: 'swap', with: onto.holdingName };
+}
 
 /** What dropping an effect on a pad comes to. */
 export type EffectDropVerdict = { do: 'add' } | { do: 'refuse'; because: string };

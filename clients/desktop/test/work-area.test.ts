@@ -34,6 +34,7 @@ import {
   chooseTab,
   editTarget,
   dropOnPad,
+  dropPadOnPad,
   effectChains,
   generatorLines,
   dropEffectOnPad,
@@ -821,6 +822,42 @@ describe('dragging a clip onto a pad', () => {
       locked: false,
     });
     expect(wire).toEqual({ kind: 'generator', type_id: 'ovs.solid_colour', version: 1 });
+  });
+});
+
+describe('dragging a pad onto a pad', () => {
+  // Owner, 2026-10-21: "Slot 1 per Drag and Drop auf Slot 10 schieben".
+  const carried = { layerId: 'L1', slotIndex: 1 };
+
+  it('moves to an empty pad of its own layer', () => {
+    expect(dropPadOnPad(carried, { layerId: 'L1', slotIndex: 10, holdingName: null })).toEqual({
+      do: 'move',
+    });
+  });
+
+  it('swaps with a pad that is taken, and says with what', () => {
+    // Never an overwrite: a drop that missed by one pad loses nothing.
+    expect(
+      dropPadOnPad(carried, { layerId: 'L1', slotIndex: 10, holdingName: 'Upstage wash' }),
+    ).toEqual({ do: 'swap', with: 'Upstage wash' });
+  });
+
+  it('does nothing when it is put down where it was picked up', () => {
+    expect(dropPadOnPad(carried, { layerId: 'L1', slotIndex: 1, holdingName: 'itself' })).toEqual({
+      do: 'nothing',
+    });
+  });
+
+  it('stays in its own layer, and says how to put the clip on another', () => {
+    const verdict = dropPadOnPad(carried, { layerId: 'L2', slotIndex: 10, holdingName: null });
+    expect(verdict.do).toBe('refuse');
+    expect(verdict.do === 'refuse' && verdict.because).toContain('browser');
+  });
+
+  it('never lands on slot 0', () => {
+    expect(
+      dropPadOnPad(carried, { layerId: 'L1', slotIndex: BLACK_SLOT_INDEX, holdingName: null }).do,
+    ).toBe('refuse');
   });
 });
 

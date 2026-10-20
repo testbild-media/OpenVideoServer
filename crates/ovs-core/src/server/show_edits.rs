@@ -3,6 +3,7 @@
 //! ```text
 //! PUT    /shows/{id}/layers/{l}/slots/{n}              put a source in a slot
 //! DELETE /shows/{id}/layers/{l}/slots/{n}              take what is in it out
+//! POST   /shows/{id}/layers/{l}/slots/{n}/move         move it to another pad
 //! POST   /shows/{id}/layers/{l}/effects                add an effect to a layer
 //! DELETE /shows/{id}/layers/{l}/effects/{e}            take one off again
 //! POST   /shows/{id}/layers/{l}/slots/{n}/effects      add an effect to a slot
@@ -47,10 +48,10 @@ use axum::http::HeaderMap;
 use axum::Json;
 use ovs_proto::http::{
     AddEffectRequest, AddEffectResponse, AssignSlotRequest, AssignSlotResponse, LockTarget,
-    OrderEffectsRequest, OrderEffectsResponse, SetBanksRequest, SetLockRequest, SetLockResponse,
-    SetMappingRequest, SetSlotRequest,
+    MoveSlotRequest, MoveSlotResponse, OrderEffectsRequest, OrderEffectsResponse, SetBanksRequest,
+    SetLockRequest, SetLockResponse, SetMappingRequest, SetSlotRequest,
 };
-use ovs_types::config::{EffectInstance, Layer, Show, Slot, SourceRef};
+use ovs_types::config::{EffectInstance, Layer, Show, Slot, SlotMove, SourceRef};
 use ovs_types::id::{EffectInstanceId, LayerId, ShowId};
 use ovs_types::time::Timestamp;
 
@@ -261,6 +262,67 @@ pub async fn clear(
     Ok(Json(AssignSlotResponse {
         updated_at,
         replaced: Some(slot.source),
+    }))
+}
+
+/// Moves a slot to another pad of the same layer.
+///
+/// A pad dragged onto another on the live matrix (owner, 2026-10-21). The whole
+/// slot goes, and a pad that is taken swaps with it ([`Layer::move_slot`]).
+/// A layer showing either of the two goes with what it was showing, so the
+/// picture on stage does not change because somebody tidied the matrix.
+///
+/// A locked effect or generator in either slot refuses the move, as it
+/// refuses being moved any other way: its place is the slot's number.
+///
+/// # Errors
+///
+/// Returns [`ApiFailure`] when the show or layer is not there, when either
+/// index is not one a layer can hold, when there is nothing at the pad named,
+/// or when something locked would move.
+pub async fn move_slot(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((show_id, layer_id, slot_index)): Path<(String, String, u16)>,
+    Json(request): Json<MoveSlotRequest>,
+) -> ApiResult<Json<MoveSlotResponse>> {
+    authenticate(&state, &headers)?;
+    let target = target(&show_id, &layer_id, slot_index)?;
+    let to = request.to;
+    Layer::check_slot_index(to)
+        .map_err(|error| ApiFailure::bad_request("invalid_slot", error.to_string()))?;
+
+    let mut show = document(&state, target.show_id)?;
+    let moved = layer_of(&mut show, target.layer_id)?
+        .move_slot(target.slot_index, to)
+        .map_err(|error| ApiFailure::bad_request("invalid_slot", error.to_string()))?;
+
+    let swapped = match moved {
+        SlotMove::Nothing if target.slot_index == to => {
+            // Dropped where it was picked up. Nothing is stored, as for a clear
+            // of an empty pad: an edit that changed nothing must not read to
+            // every other client as a show that has just moved.
+            return Ok(Json(MoveSlotResponse {
+                updated_at: show.updated_at,
+                swapped: false,
+            }));
+        }
+        SlotMove::Nothing => {
+            return Err(ApiFailure::bad_request(
+                "empty_slot",
+                format!("slot {} has nothing in it to move", target.slot_index),
+            ));
+        }
+        SlotMove::Moved => false,
+        SlotMove::Swapped => true,
+    };
+
+    let updated_at = store(&state, show, |current| {
+        current.follow_moved_slot(target.layer_id, target.slot_index, to);
+    })?;
+    Ok(Json(MoveSlotResponse {
+        updated_at,
+        swapped,
     }))
 }
 

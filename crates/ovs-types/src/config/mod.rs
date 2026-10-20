@@ -30,7 +30,7 @@ pub use generators::{
     manifest, Choice, GeneratorManifest, ParameterDefinition, ParameterKind,
     PUBLISHED as GENERATORS,
 };
-pub use layer::{BlendMode, Layer, Route, SlotIndexError};
+pub use layer::{BlendMode, Layer, Route, SlotIndexError, SlotMove};
 pub use output::{
     ConnectorRole, Destination, DisplayMode, OutputConfig, OutputIdentity, TestPatternMode,
     NETWORK_MODES,

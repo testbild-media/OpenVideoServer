@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MoveSlotRequest",
+  "description": "Moves a slot to another pad of the same layer, with everything it carries.\n\nA pad dragged onto another on the live matrix (owner, 2026-10-21: \"Slot 1 per Drag and Drop auf Slot 10 schieben\"). A pad that is taken swaps with the one that moves, rather than being overwritten.",
+  "type": "object",
+  "required": [
+    "to"
+  ],
+  "properties": {
+    "to": {
+      "description": "The pad it goes to, between 1 and `Layer::MAX_SLOT_INDEX`.",
+      "type": "integer",
+      "format": "uint16",
+      "minimum": 0.0
+    }
+  }
+}

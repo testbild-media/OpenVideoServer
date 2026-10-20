@@ -24,6 +24,17 @@ const fn one_bank() -> u16 {
     1
 }
 
+/// What moving a slot came to ([`Layer::move_slot`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SlotMove {
+    /// Nothing moved: there was nothing at the pad, or it was dropped on itself.
+    Nothing,
+    /// It went to a pad that was empty.
+    Moved,
+    /// The pad it went to had a slot of its own, which went the other way.
+    Swapped,
+}
+
 /// Why a slot index was refused.
 ///
 /// Its own type rather than a string, because two callers act on it
@@ -339,6 +350,44 @@ impl Layer {
         Some(self.slots.remove(at))
     }
 
+    /// Moves a slot to another pad of this layer, with everything it carries.
+    ///
+    /// **The whole slot goes**: the source, how it plays, its effects and the
+    /// name the pad was given. Dragging a pad from 1 to 10 is moving the thing
+    /// an operator built there, not its clip alone (owner, 2026-10-21).
+    ///
+    /// **A pad that is taken swaps rather than being overwritten.** The slot
+    /// that was at `to` goes to `from`, so a drag that missed by one pad loses
+    /// nothing and is undone by dragging back. Replacing what is in a pad is
+    /// what dropping a clip from the browser does, and that asks first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SlotIndexError`] for slot 0 and for anything past the last
+    /// bank, at either end.
+    pub fn move_slot(&mut self, from: u16, to: u16) -> Result<SlotMove, SlotIndexError> {
+        Self::check_slot_index(from)?;
+        Self::check_slot_index(to)?;
+        if from == to {
+            return Ok(SlotMove::Nothing);
+        }
+        let Some(moving) = self.slots.iter().position(|slot| slot.index == from) else {
+            return Ok(SlotMove::Nothing);
+        };
+        let taken = self.slots.iter().position(|slot| slot.index == to);
+        self.slots[moving].index = to;
+        if let Some(other) = taken {
+            self.slots[other].index = from;
+        }
+        // Kept in index order, as `assign_slot` keeps it.
+        self.slots.sort_by_key(|slot| slot.index);
+        Ok(if taken.is_some() {
+            SlotMove::Swapped
+        } else {
+            SlotMove::Moved
+        })
+    }
+
     /// Whether a slot index is one a layer could hold.
     ///
     /// # Errors
@@ -559,6 +608,89 @@ mod tests {
         // The reference mock-up shows seven banks; nothing stops an eighth.
         assert_eq!(Layer::bank_of(85), Some(7));
         assert_eq!(Layer::bank_of(1000), Some(83));
+    }
+
+    #[test]
+    fn a_slot_moves_to_an_empty_pad_with_everything_it_carries() {
+        let mut layer = Layer::new("Layer 1", 0);
+        let clip = MediaItemId::new();
+        let mut slot = Slot::media(1, clip);
+        slot.name = Some("Upstage wash".to_owned());
+        slot.playback_mode = crate::config::PlaybackMode::Bounce;
+        layer.slots.push(slot);
+
+        assert_eq!(layer.move_slot(1, 10), Ok(SlotMove::Moved));
+
+        assert!(layer.slot(1).is_none(), "the pad it left is empty");
+        let moved = layer.slot(10).expect("it is at 10");
+        assert_eq!(
+            moved.source,
+            SourceRef::Media {
+                media_item_id: clip
+            }
+        );
+        assert_eq!(moved.name.as_deref(), Some("Upstage wash"));
+        assert_eq!(moved.playback_mode, crate::config::PlaybackMode::Bounce);
+    }
+
+    #[test]
+    fn a_slot_dropped_on_a_taken_pad_swaps_with_it() {
+        // Nothing is lost to a drag that missed by one pad.
+        let mut layer = Layer::new("Layer 1", 0);
+        let (first, tenth) = (MediaItemId::new(), MediaItemId::new());
+        layer.slots.push(Slot::media(1, first));
+        layer.slots.push(Slot::media(10, tenth));
+
+        assert_eq!(layer.move_slot(1, 10), Ok(SlotMove::Swapped));
+
+        assert_eq!(
+            layer.slot(10).map(|slot| slot.source.clone()),
+            Some(SourceRef::Media {
+                media_item_id: first
+            })
+        );
+        assert_eq!(
+            layer.slot(1).map(|slot| slot.source.clone()),
+            Some(SourceRef::Media {
+                media_item_id: tenth
+            })
+        );
+        assert_eq!(layer.slots.len(), 2);
+    }
+
+    #[test]
+    fn slots_stay_in_index_order_after_a_move() {
+        // The document reads the way the matrix draws, as `assign_slot` keeps it.
+        let mut layer = Layer::new("Layer 1", 0);
+        for index in [1, 2, 3] {
+            layer.slots.push(Slot::media(index, MediaItemId::new()));
+        }
+        layer.move_slot(1, 30).expect("moves");
+        let order: Vec<u16> = layer.slots.iter().map(|slot| slot.index).collect();
+        assert_eq!(order, vec![2, 3, 30]);
+        assert_eq!(layer.bank_count(), 3, "slot 30 is in the third bank");
+    }
+
+    #[test]
+    fn moving_nothing_or_onto_itself_changes_nothing() {
+        let mut layer = Layer::new("Layer 1", 0);
+        layer.slots.push(Slot::media(1, MediaItemId::new()));
+        let before = layer.clone();
+        assert_eq!(layer.move_slot(5, 6), Ok(SlotMove::Nothing));
+        assert_eq!(layer.move_slot(1, 1), Ok(SlotMove::Nothing));
+        assert_eq!(layer, before);
+    }
+
+    #[test]
+    fn a_move_to_slot_zero_or_past_the_last_bank_is_refused() {
+        let mut layer = Layer::new("Layer 1", 0);
+        layer.slots.push(Slot::media(1, MediaItemId::new()));
+        assert_eq!(layer.move_slot(1, 0), Err(SlotIndexError::Black));
+        assert!(matches!(
+            layer.move_slot(1, Layer::MAX_SLOT_INDEX + 1),
+            Err(SlotIndexError::PastTheLastBank { .. })
+        ));
+        assert!(layer.slot(1).is_some(), "it stayed where it was");
     }
 
     #[test]

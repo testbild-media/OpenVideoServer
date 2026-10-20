@@ -547,6 +547,16 @@ body {
   font-weight: 700;
 }
 
+/* A bank the show has not opened yet: on the bar so it can be reached (owner,
+   2026-10-21), and dashed and dim so it does not read as one with pads in it.
+   Pressing it opens it, which is why it is not disabled. */
+
+.bank.closed:not(.on) {
+  border-style: dashed;
+  color: var(--dim);
+  opacity: 0.7;
+}
+
 #matrix {
   overflow-y: auto;
   /* **The gutter is there whether or not it is scrolling.** A pad's size is

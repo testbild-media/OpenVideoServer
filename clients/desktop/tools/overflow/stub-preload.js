@@ -470,6 +470,7 @@ const CALLS = [
   'runShow',
   'saveShow',
   'setBanks',
+  'moveSlot',
   'setDmxProtocols',
   'setLock',
   'setMapping',

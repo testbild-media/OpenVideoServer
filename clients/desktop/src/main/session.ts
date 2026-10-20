@@ -18,6 +18,7 @@ import type {
   AddEffectResponse,
   OrderEffectsResponse,
   AssignSlotResponse,
+  MoveSlotResponse,
   ImportShowResponse,
   ShowExport,
   OutputConfig,
@@ -560,6 +561,16 @@ export class Session {
     banks: number,
   ): Promise<Answer<AssignSlotResponse>> {
     return this.#answer((api) => api.setBanks(showId, layerId, banks));
+  }
+
+  /** Moves a slot to another pad of the same layer. */
+  moveSlot(
+    showId: string,
+    layerId: string,
+    from: number,
+    to: number,
+  ): Promise<Answer<MoveSlotResponse>> {
+    return this.#answer((api) => api.moveSlot(showId, layerId, from, to));
   }
 
   /** Puts a mapping on the wall without saving the show. */

@@ -479,6 +479,29 @@ impl AuthoritativeState {
         }
     }
 
+    /// Keeps a layer on what it is showing when the slot under it moves.
+    ///
+    /// For a pad dragged to another pad. A layer showing slot 1 when slot 1 is
+    /// moved to 10 goes to 10 with it, and one showing 10 when 1 and 10 swap
+    /// goes to 1: **an edit does not change what is on stage**, which is the
+    /// rule a save already keeps. Left alone, the layer would show whatever
+    /// had arrived at its old number — nothing, or the other clip.
+    ///
+    /// The clip starts its pass again, because a new slot number is a new pass
+    /// to the renderer, as it is when a pad is pressed.
+    ///
+    /// Publishes nothing on its own, like [`black_out_slot`](Self::black_out_slot):
+    /// [`replace_show`](Self::replace_show) carries it out with the document.
+    pub fn follow_moved_slot(&mut self, layer_id: LayerId, from: u16, to: u16) {
+        if let Some(live) = self.layers.get_mut(&layer_id) {
+            if live.active_slot == from {
+                live.active_slot = to;
+            } else if live.active_slot == to {
+                live.active_slot = from;
+            }
+        }
+    }
+
     /// Closes the loaded show, leaving the outputs black.
     ///
     /// Returns `None` when no show was open, so closing twice does not

@@ -257,6 +257,20 @@ describe('the HTTP client', () => {
     expect(calls[0]!.init!.body).toBe(JSON.stringify({ banks: 3 }));
   });
 
+  it('moves a slot by naming the pad it leaves in the path and the one it goes to in the body', async () => {
+    const { calls, fetchImpl } = recorder([
+      () => new Response(JSON.stringify({ updated_at: 4, swapped: false }), { status: 200 }),
+    ]);
+    const api = new ServerApi('http://server:7420', fetchImpl);
+
+    const answer = await api.moveSlot('SHOW', 'LAYER', 1, 10);
+
+    expect(calls[0]!.url).toBe('http://server:7420/api/v1/shows/SHOW/layers/LAYER/slots/1/move');
+    expect(calls[0]!.init!.method).toBe('POST');
+    expect(calls[0]!.init!.body).toBe(JSON.stringify({ to: 10 }));
+    expect(answer.swapped).toBe(false);
+  });
+
   it('escapes identifiers rather than pasting them into a path', async () => {
     const { calls, fetchImpl } = recorder([() => new Response(null, { status: 204 })]);
     const api = new ServerApi('http://server:7420', fetchImpl);

@@ -17,8 +17,8 @@ use ovs_core::{router, AppState};
 use ovs_db::Database;
 use ovs_proto::http::{
     AssignSlotRequest, CreateAccountRequest, LockTarget, LoginRequest, LoginResponse,
-    OrderEffectsRequest, SaveShowRequest, SelectSlotRequest, SetLockRequest, UpdateEffectRequest,
-    UpdateLayerRequest, UpdateMasterRequest,
+    MoveSlotRequest, OrderEffectsRequest, SaveShowRequest, SelectSlotRequest, SetLockRequest,
+    UpdateEffectRequest, UpdateLayerRequest, UpdateMasterRequest,
 };
 use ovs_types::config::layer::SlotControl;
 use ovs_types::config::patch::FixtureTarget;
@@ -720,4 +720,24 @@ async fn a_locked_generator_stays_in_its_slot() {
         &harness.show().layers[0].slots[0].source,
         SourceRef::Generator { locked: true, type_id, .. } if type_id == "ovs.solid_colour"
     ));
+
+    // Nor is it dragged to another pad, by itself or by a slot swapping
+    // into its place (2026-10-21): its place is its slot's number.
+    let (status, body) = harness
+        .post(&format!("{slot}/move"), &MoveSlotRequest { to: 10 })
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(code(&body), "locked");
+    // Slot 2, the clip beside it, dragged onto it.
+    let neighbour = format!("/api/v1/shows/{show_id}/layers/{layer_id}/slots/2");
+    let (status, body) = harness
+        .post(&format!("{neighbour}/move"), &MoveSlotRequest { to: 1 })
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(code(&body), "locked");
+    assert_eq!(
+        harness.show().layers[0].slots[0].index,
+        1,
+        "still at slot 1"
+    );
 }

@@ -564,6 +564,26 @@ pub struct SetBanksRequest {
     /// How many banks to show, between one and `Layer::MAX_BANKS`.
     pub banks: u16,
 }
+
+/// Moves a slot to another pad of the same layer, with everything it carries.
+///
+/// A pad dragged onto another on the live matrix (owner, 2026-10-21: "Slot 1
+/// per Drag and Drop auf Slot 10 schieben"). A pad that is taken swaps with the
+/// one that moves, rather than being overwritten.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct MoveSlotRequest {
+    /// The pad it goes to, between 1 and `Layer::MAX_SLOT_INDEX`.
+    pub to: u16,
+}
+
+/// Result of moving a slot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct MoveSlotResponse {
+    /// When the server recorded the edit.
+    pub updated_at: Timestamp,
+    /// The pad it went to had a slot of its own, which is now where this one was.
+    pub swapped: bool,
+}
 // --- /media --------------------------------------------------------------
 
 /// The media library.

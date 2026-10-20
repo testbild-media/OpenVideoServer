@@ -50,6 +50,8 @@ import type {
   SaveShowRequest,
   SelectSlotRequest,
   SetBanksRequest,
+  MoveSlotRequest,
+  MoveSlotResponse,
   SourceRef,
   StateSnapshot,
   StatusResponse,
@@ -463,6 +465,18 @@ export class ServerApi {
       `/shows/${encodeURIComponent(showId)}/layers/${encodeURIComponent(layerId)}/banks`,
       body,
     );
+  }
+
+  /**
+   * Moves a slot to another pad of the same layer, with everything it carries.
+   *
+   * A pad dragged onto another (owner, 2026-10-21). A pad that is taken swaps
+   * with the one that moves, and a layer showing either goes with what it was
+   * showing.
+   */
+  moveSlot(showId: string, layerId: string, from: number, to: number): Promise<MoveSlotResponse> {
+    const body: MoveSlotRequest = { to };
+    return this.#request('POST', `${this.#slotPath(showId, layerId, from)}/move`, body);
   }
 
   /**

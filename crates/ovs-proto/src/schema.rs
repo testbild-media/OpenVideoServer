@@ -176,6 +176,14 @@ pub fn generate_protocol() -> Vec<GeneratedSchema> {
             "set-banks-request.schema.json",
             crate::http::SetBanksRequest
         ),
+        schema!(
+            "move-slot-request.schema.json",
+            crate::http::MoveSlotRequest
+        ),
+        schema!(
+            "move-slot-response.schema.json",
+            crate::http::MoveSlotResponse
+        ),
         schema!("set-slot-request.schema.json", crate::http::SetSlotRequest),
         schema!(
             "set-mapping-request.schema.json",

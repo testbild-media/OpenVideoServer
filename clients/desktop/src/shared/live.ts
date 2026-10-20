@@ -23,6 +23,7 @@
 
 import {
   BLACK_SLOT_INDEX,
+  MAX_BANKS,
   SLOTS_PER_BANK,
 } from './limits.js';
 import type { ParameterValue, Transform2D } from '@ovs/schema';
@@ -495,6 +496,26 @@ export function slotBanks(layers: readonly LayerView[]): SlotBank[] {
   const count = Math.max(asked, Math.ceil(highest / SLOTS_PER_BANK), 1);
   const banks: SlotBank[] = [];
   for (let bank = 0; bank < count; bank += 1) {
+    const first = bank * SLOTS_PER_BANK + 1;
+    const last = first + SLOTS_PER_BANK - 1;
+    banks.push({ first, last, label: `${first}–${last}` });
+  }
+  return banks;
+}
+
+/**
+ * Every bank there can be, up to slot 84, whether the show has opened it yet.
+ *
+ * **The bar offers all seven** (owner, 2026-10-21): "Slots 1-12 sind immer
+ * sichtbar als Tab, aber alle anderen bis 84 sind nicht sichtbar. Da komme ich
+ * nicht hin." A bank was opened by right-clicking a pad, which nothing on the
+ * screen said, so the matrix looked as though it ended at twelve. Which of
+ * these are open is still `slotBanks`'s answer: a closed one is shown so that
+ * it can be reached, and opening it is still a deliberate act.
+ */
+export function allBanks(): SlotBank[] {
+  const banks: SlotBank[] = [];
+  for (let bank = 0; bank < MAX_BANKS; bank += 1) {
     const first = bank * SLOTS_PER_BANK + 1;
     const last = first + SLOTS_PER_BANK - 1;
     banks.push({ first, last, label: `${first}–${last}` });

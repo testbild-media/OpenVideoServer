@@ -15,6 +15,7 @@ import { describe, expect, it } from 'vitest';
 import type { LayerLive, ParameterValue, Show, ServerMessage } from '@ovs/schema';
 import {
   PendingControls,
+  allBanks,
   bpmLine,
   controlKey,
   crossfaderLine,
@@ -42,7 +43,12 @@ import {
   valueOf,
   type ControlId,
 } from '../src/shared/live.js';
-import { MAX_SPEED_SCALE, MIN_SPEED_SCALE } from '../src/shared/limits.js';
+import {
+  MAX_BANKS,
+  MAX_SLOT_INDEX,
+  MAX_SPEED_SCALE,
+  MIN_SPEED_SCALE,
+} from '../src/shared/limits.js';
 import { apply, emptyState } from '../src/shared/mirror.js';
 import type { Command } from '../src/shared/types.js';
 import { emptyView, toView, type LayerView, type MasterView, type ShowView } from '../src/shared/view.js';
@@ -308,6 +314,18 @@ describe('the matrix', () => {
     const asked = loaded();
     const layers = asked.layers.map((layer) => ({ ...layer, banks: 3 }));
     expect(slotBanks(layers).map((bank) => bank.label)).toEqual(['1–12', '13–24', '25–36']);
+  });
+
+  it('puts every bank up to slot 84 on the bar, opened or not', () => {
+    // Owner, 2026-10-21: "alle anderen bis 84 sind nicht sichtbar. Da komme
+    // ich nicht hin." The bar showed only opened banks, and the one way to
+    // open another was a right-click nothing on the screen mentioned.
+    const bar = allBanks();
+    expect(bar).toHaveLength(MAX_BANKS);
+    expect(bar[0]).toEqual({ first: 1, last: 12, label: '1–12' });
+    expect(bar[bar.length - 1]).toEqual({ first: 73, last: MAX_SLOT_INDEX, label: '73–84' });
+    // Which are open is still the show's: one bank here, seven on the bar.
+    expect(slotBanks(loaded().layers)).toHaveLength(1);
   });
 
   it('still shows every slot of a document written before layers had a bank count', () => {

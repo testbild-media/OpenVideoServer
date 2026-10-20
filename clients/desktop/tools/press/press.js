@@ -367,6 +367,35 @@ const CONTROLS = [
     turn: { value: 'Unterordner', event: 'input' },
     reveals: { selector: '.browser-folder .folder-tile-name', text: 'Unterordner' },
   },
+  // --- the matrix's own drag, and its banks (owner, 2026-10-21) ---
+  {
+    what: 'move a pad to an empty pad',
+    selector: '#matrix > .layer:nth-child(2) .pad:not(.empty)',
+    drag: '#matrix > .layer:nth-child(2) .pad.empty',
+    call: 'moveSlot',
+  },
+  {
+    // A slot moves within its own layer: carried to another layer's pad, it
+    // must send nothing, and say why instead.
+    what: "a pad onto another layer's",
+    selector: '#matrix > .layer:nth-child(2) .pad:not(.empty)',
+    drag: '#matrix > .layer:nth-child(3) .pad.empty',
+    call: 'moveSlot',
+    expect: 'nothing',
+  },
+  {
+    // A bank not opened yet is on the bar, and pressing it opens it.
+    what: 'open a closed bank',
+    selector: '#banks .bank.closed',
+    call: 'setBanks',
+  },
+  {
+    // And back, which the probes after this need: they press pads with
+    // something in them, and the bank just opened has none.
+    what: 'page back to the first bank',
+    selector: '#banks .bank:first-child',
+    reveals: { selector: '#matrix .pad:not(.empty) .pad-label', text: '1 ·' },
+  },
   // Emptying a pad. Last in this list on purpose: every probe above it works
   // on a pad with something in it, and this one takes that away. A probe that
   // quietly broke the ones after it would read as a bug in whatever ran next.

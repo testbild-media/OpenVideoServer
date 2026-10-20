@@ -363,6 +363,11 @@ function registerHandlers(): void {
       session.setBanks(showId, layerId, banks),
   );
   ipcMain.handle(
+    'ovs:move-slot',
+    (_event, showId: string, layerId: string, from: number, to: number) =>
+      session.moveSlot(showId, layerId, from, to),
+  );
+  ipcMain.handle(
     'ovs:remove-effect',
     (
       _event,

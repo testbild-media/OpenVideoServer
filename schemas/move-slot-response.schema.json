@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MoveSlotResponse",
+  "description": "Result of moving a slot.",
+  "type": "object",
+  "required": [
+    "swapped",
+    "updated_at"
+  ],
+  "properties": {
+    "swapped": {
+      "description": "The pad it went to had a slot of its own, which is now where this one was.",
+      "type": "boolean"
+    },
+    "updated_at": {
+      "description": "When the server recorded the edit.",
+      "type": "integer",
+      "format": "int64"
+    }
+  }
+}

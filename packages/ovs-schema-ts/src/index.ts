@@ -136,6 +136,12 @@ export type {
   MediaUsageResponse,
 } from './media-usage.js';
 export type {
+  MoveSlotRequest,
+} from './move-slot-request.js';
+export type {
+  MoveSlotResponse,
+} from './move-slot-response.js';
+export type {
   NetworkChangeResponse,
 } from './network-change-response.js';
 export type {

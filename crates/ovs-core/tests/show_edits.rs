@@ -14,8 +14,8 @@ use ovs_core::{router, AppState};
 use ovs_db::Database;
 use ovs_proto::http::{
     AddEffectRequest, AddEffectResponse, AssignSlotRequest, AssignSlotResponse,
-    CreateAccountRequest, LoginRequest, LoginResponse, SelectSlotRequest, SetBanksRequest,
-    SetMappingRequest, SetSlotRequest,
+    CreateAccountRequest, LoginRequest, LoginResponse, MoveSlotRequest, MoveSlotResponse,
+    SelectSlotRequest, SetBanksRequest, SetMappingRequest, SetSlotRequest,
 };
 use ovs_proto::realtime::{ServerMessage, StateChange};
 use ovs_types::config::{
@@ -885,6 +885,160 @@ async fn a_generator_dropped_on_a_pad_is_given_an_identity_on_disk() {
         running, on_disk,
         "the row and the running show disagree about what the generator is called"
     );
+}
+
+// --- moving a pad (owner, 2026-10-21: "Slot 1 per Drag and Drop auf Slot 10") --
+
+impl Harness {
+    async fn move_slot(&self, from: u16, to: u16) -> (StatusCode, serde_json::Value) {
+        self.post(
+            &format!("{}/move", self.slot_path(from)),
+            &MoveSlotRequest { to },
+        )
+        .await
+    }
+
+    async fn select(&self, slot_index: u16) {
+        let (status, _) = self
+            .post(
+                &format!("/api/v1/live/layers/{}/slot", self.layer_id),
+                &SelectSlotRequest { slot_index },
+            )
+            .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+    }
+}
+
+#[tokio::test]
+async fn a_slot_dragged_to_an_empty_pad_goes_there_whole_and_on_disk() {
+    let harness = Harness::start().await;
+
+    let (status, body) = harness.move_slot(1, 10).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let answer: MoveSlotResponse = serde_json::from_value(body).expect("a move response");
+    assert!(!answer.swapped, "pad 10 was empty");
+
+    assert!(harness.running_slot(1).is_none(), "pad 1 is empty now");
+    let moved = harness.running_slot(10).expect("slot 10 has it");
+    assert_eq!(moved.media_item_id(), Some(harness.original));
+    // How it was set up went with it.
+    assert_eq!(moved.playback_mode, PlaybackMode::Bounce);
+    assert_eq!(moved.sync, SlotSync::BeatSync { beats: 16 });
+    assert_eq!(
+        harness
+            .stored_slot(10)
+            .and_then(|slot| slot.media_item_id()),
+        Some(harness.original),
+        "a move that is not on disk is undone by the next restart"
+    );
+    assert!(harness.stored_slot(1).is_none());
+}
+
+#[tokio::test]
+async fn a_slot_dragged_onto_a_taken_pad_swaps_with_it() {
+    let harness = Harness::start().await;
+    let (status, _) = harness
+        .assign(
+            10,
+            SourceRef::Media {
+                media_item_id: harness.clip,
+            },
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = harness.move_slot(1, 10).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let answer: MoveSlotResponse = serde_json::from_value(body).expect("a move response");
+    assert!(answer.swapped);
+
+    assert_eq!(
+        harness
+            .running_slot(10)
+            .and_then(|slot| slot.media_item_id()),
+        Some(harness.original)
+    );
+    assert_eq!(
+        harness
+            .running_slot(1)
+            .and_then(|slot| slot.media_item_id()),
+        Some(harness.clip),
+        "what was at 10 is at 1, not gone"
+    );
+}
+
+#[tokio::test]
+async fn the_layer_showing_a_moved_slot_goes_with_it() {
+    // An edit does not change what is on stage. Left where it was, the layer
+    // would show whatever arrived at its old number — here, nothing.
+    let harness = Harness::start().await;
+    harness.select(1).await;
+
+    let (status, body) = harness.move_slot(1, 10).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(harness.layer_live().active_slot, 10);
+
+    // And the other way round: a layer on the pad that is swapped *into*
+    // follows what it was showing to the pad that one left.
+    let (status, _) = harness
+        .assign(
+            3,
+            SourceRef::Media {
+                media_item_id: harness.clip,
+            },
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = harness.move_slot(3, 10).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(harness.layer_live().active_slot, 3);
+    assert_eq!(
+        harness
+            .running_slot(3)
+            .and_then(|slot| slot.media_item_id()),
+        Some(harness.original),
+        "slot 3 now holds what the layer was showing"
+    );
+}
+
+#[tokio::test]
+async fn a_layer_on_another_pad_is_left_where_it_is() {
+    let harness = Harness::start().await;
+    harness.select(5).await;
+    let before = harness.layer_live();
+
+    let (status, _) = harness.move_slot(1, 10).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(harness.layer_live(), before);
+}
+
+#[tokio::test]
+async fn moving_an_empty_pad_says_so_and_dropping_one_on_itself_stores_nothing() {
+    let harness = Harness::start().await;
+
+    let (status, body) = harness.move_slot(4, 10).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["code"], "empty_slot", "{body}");
+
+    let mut updates = harness.watch();
+    let (status, body) = harness.move_slot(1, 1).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        next_change(&mut updates).is_none(),
+        "a drop where it was picked up is not a change to publish"
+    );
+    assert!(harness.running_slot(1).is_some());
+}
+
+#[tokio::test]
+async fn a_move_to_slot_zero_or_past_the_last_bank_is_refused() {
+    let harness = Harness::start().await;
+    for to in [0, Layer::MAX_SLOT_INDEX + 1] {
+        let (status, body) = harness.move_slot(1, to).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert_eq!(body["code"], "invalid_slot", "{body}");
+    }
+    assert!(harness.running_slot(1).is_some(), "it stayed where it was");
 }
 
 #[tokio::test]

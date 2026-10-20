@@ -18,6 +18,7 @@ import type {
   SetLockRequest,
   SetLockResponse,
   AssignSlotResponse,
+  MoveSlotResponse,
   OutputConfig,
   Piece,
   SetSlotRequest,
@@ -204,6 +205,16 @@ export interface OvsBridge {
     layerId: string,
     banks: number,
   ): Promise<Answer<AssignSlotResponse>>;
+  /**
+   * Moves a slot to another pad of the same layer, with everything it carries.
+   * A pad that is taken swaps with it.
+   */
+  moveSlot(
+    showId: string,
+    layerId: string,
+    from: number,
+    to: number,
+  ): Promise<Answer<MoveSlotResponse>>;
   /**
    * Which DMX-over-IP protocols reach the show, and setting them.
    *
@@ -429,6 +440,8 @@ const bridge: OvsBridge = {
   setLock: (showId, request) => ipcRenderer.invoke('ovs:set-lock', showId, request),
   setBanks: (showId, layerId, banks) =>
     ipcRenderer.invoke('ovs:set-banks', showId, layerId, banks),
+  moveSlot: (showId, layerId, from, to) =>
+    ipcRenderer.invoke('ovs:move-slot', showId, layerId, from, to),
   showFolders: () => ipcRenderer.invoke('ovs:show-folders'),
   createShowFolder: (path) => ipcRenderer.invoke('ovs:show-folder-create', path),
   deleteShow: (showId) => ipcRenderer.invoke('ovs:show-delete', showId),

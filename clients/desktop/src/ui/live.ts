@@ -88,6 +88,7 @@ import {
   rateNote,
   readingNote,
   reportedBy,
+  allBanks,
   slotBanks,
   showTempo,
   speedLabel,
@@ -145,6 +146,7 @@ import {
   editTarget,
   dropEffectOnPad,
   dropOnPad,
+  dropPadOnPad,
   effectChains,
   effectTiles,
   generatorLines,
@@ -658,8 +660,10 @@ export class LivePanel {
 
   /** Which bank of slots the matrix is showing, counting from zero. */
   #bank = 0;
-  /** The banks the open show has slots for, worked out once per redraw. */
+  /** Every bank the bar offers, opened or not, worked out once per redraw. */
   #banks: SlotBank[] = [];
+  /** How many of those the open show has opened, counting from the first. */
+  #opened = 1;
   /** Which layer the OPTIONS tab is about. */
   #selected: string | null = null;
   /**
@@ -1630,31 +1634,61 @@ export class LivePanel {
     }
   }
 
+  /**
+   * The bank bar: all seven, up to slot 84, with the ones not opened yet dimmed.
+   *
+   * **Every bank is on the bar** (owner, 2026-10-21): only the opened ones
+   * were, and a bank was opened by right-clicking a pad, which nothing on the
+   * screen said — so the matrix looked as though it ended at twelve. A closed
+   * bank is opened by pressing it, on every layer at once, which is what the
+   * right-click did and still does.
+   *
+   * While a pad is being carried, holding it over a bank pages there, so a
+   * slot can be moved from 1 to 30 in one drag.
+   */
   #drawBanks(): void {
-    const banks = slotBanks(this.#view.layers);
+    this.#opened = slotBanks(this.#view.layers).length;
+    const banks = allBanks();
     this.#banks = banks;
     if (this.#bank >= banks.length) {
       this.#bank = 0;
     }
-    const wanted = banks.map((bank) => bank.label).join(',');
-    if (this.#ui.banks.dataset['shape'] !== wanted) {
-      this.#ui.banks.dataset['shape'] = wanted;
+    if (this.#ui.banks.childElementCount !== banks.length) {
       this.#ui.banks.replaceChildren(
-        ...banks.map((bank, index) =>
-          button(
-            bank.label,
-            () => {
+        ...banks.map((bank, index) => {
+          const node = button(bank.label, () => void this.#pageTo(index), { className: 'bank' });
+          node.addEventListener('dragenter', () => {
+            if (this.#dragging?.of === 'pad' && this.#bank !== index) {
               this.#bank = index;
               this.#render();
-            },
-            { className: 'bank', title: `Slots ${bank.first} to ${bank.last}` },
-          ),
-        ),
+            }
+          });
+          return node;
+        }),
       );
     }
     [...this.#ui.banks.children].forEach((node, index) => {
+      const bank = banks[index];
+      if (!(node instanceof HTMLElement) || bank === undefined) {
+        return;
+      }
+      const open = index < this.#opened;
       node.classList.toggle('on', index === this.#bank);
+      node.classList.toggle('closed', !open);
+      node.title = open
+        ? `Slots ${bank.first} to ${bank.last}`
+        : `Slots ${bank.first} to ${bank.last} — not opened yet. Press to open them on every layer.`;
     });
+  }
+
+  /** Shows one bank, opening it on every layer first when it is not open yet. */
+  async #pageTo(index: number): Promise<void> {
+    if (index < this.#opened) {
+      this.#bank = index;
+      this.#render();
+      return;
+    }
+    await this.#openBanks(index + 1);
   }
 
   /** The bank currently on screen. Worked out once per redraw, in `#drawBanks`. */
@@ -2236,10 +2270,33 @@ export class LivePanel {
     node.append(picture, label);
 
     const nextBank = 'Right-click for the next bank.';
-    const selects = pad.empty ? '' : ' Playing it sets it up in OPTIONS.';
+    const selects = pad.empty
+      ? ''
+      : ' Playing it sets it up in OPTIONS. Drag it onto another pad of this layer to move it there.';
     node.title = pad.empty
       ? `${layer.name}, slot ${pad.index} — empty, so playing it shows nothing. Drag a clip from the browser onto it. ${nextBank}`
       : `${layer.name}, slot ${pad.index}.${selects} ${nextBank}`;
+
+    // **A pad is picked up and put down elsewhere** (owner, 2026-10-21:
+    // "Slot 1 per Drag and Drop auf Slot 10 schieben"). Only one with
+    // something in it: an empty pad has nothing to move.
+    if (!pad.empty) {
+      node.draggable = true;
+      node.addEventListener('dragstart', (event) => {
+        this.#cancelReplace();
+        const name = pad.slot === null ? `Slot ${pad.index}` : this.#sourceName(pad.slot);
+        this.#dragging = { of: 'pad', layerId: layer.id, slotIndex: pad.index, name };
+        const transfer = event.dataTransfer;
+        if (transfer !== null) {
+          transfer.effectAllowed = 'move';
+          transfer.setData('text/plain', name);
+        }
+      });
+      node.addEventListener('dragend', () => {
+        this.#dragging = null;
+        this.#clearDropTargets();
+      });
+    }
 
     // **The two halves of a pad say two different things** (owner,
     // 2026-09-23). The picture lights when the slot is actually on stage; the
@@ -2291,12 +2348,18 @@ export class LivePanel {
 
     {
       node.addEventListener('dragover', (event) => {
-        if (this.#dragging === null) {
+        const carried = this.#dragging;
+        if (carried === null) {
+          return;
+        }
+        // A pad moves within its own layer, so a pad of another layer is not
+        // somewhere it can land and does not light up as one.
+        if (carried.of === 'pad' && carried.layerId !== layer.id) {
           return;
         }
         event.preventDefault();
         if (event.dataTransfer !== null) {
-          event.dataTransfer.dropEffect = 'copy';
+          event.dataTransfer.dropEffect = carried.of === 'pad' ? 'move' : 'copy';
         }
         node.classList.add('drop-target');
       });
@@ -3026,6 +3089,24 @@ export class LivePanel {
     }
     const held = layer.slots.find((slot) => slot.index === slotIndex) ?? null;
 
+    if (carried.of === 'pad') {
+      this.#dragging = null;
+      const verdict = dropPadOnPad(carried, {
+        layerId: layer.id,
+        slotIndex,
+        holdingName: held === null ? null : this.#sourceName(held),
+      });
+      if (verdict.do === 'refuse') {
+        this.#note(verdict.because);
+        return;
+      }
+      if (verdict.do === 'nothing') {
+        return;
+      }
+      void this.#movePad(layer.id, carried.slotIndex, slotIndex);
+      return;
+    }
+
     if (carried.of === 'effect') {
       // An effect stacks on what the pad plays. It never replaces it, so
       // there is nothing to ask about.
@@ -3065,6 +3146,43 @@ export class LivePanel {
       return;
     }
     void this.#assign(layer.id, slotIndex, source);
+  }
+
+  /**
+   * Moves a slot to another pad of its layer, and says what the server said.
+   *
+   * A bank the pad was carried into that is not open yet is opened first, on
+   * every layer, as pressing it would: the matrix pages as one strip, and a
+   * slot in a bank only one layer has is a page of one row.
+   *
+   * OPTIONS stays on what it was showing. A slot that moved is the same slot
+   * at another number, and an operator setting it up should not find the
+   * panel describing whatever arrived at the old one.
+   */
+  async #movePad(layerId: string, from: number, to: number): Promise<void> {
+    const showId = this.#view.showId;
+    if (showId === null) {
+      this.#note('No show is open, so there is no slot to move.');
+      return;
+    }
+    const bank = Math.ceil(to / SLOTS_PER_BANK);
+    if (bank > this.#opened) {
+      await this.#openBanks(bank);
+    }
+    const answer = await this.#ovs.moveSlot(showId, layerId, from, to);
+    if (!answer.ok) {
+      this.#note(answer.message);
+      return;
+    }
+    if (this.#selected === layerId) {
+      if (this.#selectedSlot === from) {
+        this.#selectedSlot = to;
+      } else if (this.#selectedSlot === to && answer.value.swapped) {
+        this.#selectedSlot = from;
+      }
+    }
+    // What the pads show next comes back over the socket, as everything on
+    // this screen does.
   }
 
   /** Sends the assignment, and says what the server said. */
@@ -3258,12 +3376,21 @@ export class LivePanel {
    * refused, so the others still gain theirs.
    */
   async #addBank(): Promise<void> {
+    await this.#openBanks(this.#opened + 1);
+  }
+
+  /**
+   * Opens every bank up to `wanted` on every layer, and pages to the last.
+   *
+   * Every layer for the reason `#addBank` gives: the matrix pages as one
+   * strip, so a bank opened on one layer alone is a page of one row.
+   */
+  async #openBanks(wanted: number): Promise<void> {
     const showId = this.#view.showId;
     if (showId === null) {
       this.#note('No show is open, so there is no matrix to extend.');
       return;
     }
-    const wanted = this.#banks.length + 1;
     if (wanted > MAX_BANKS) {
       this.#note(`A layer holds ${MAX_BANKS} banks, so slot ${MAX_SLOT_INDEX} is the last one.`);
       return;
@@ -3280,8 +3407,10 @@ export class LivePanel {
       }
     }
     // The strip is drawn from the mirror, so the new bank appears when the
-    // server says it is there. Paging to it is this client's own business.
+    // server says it is there. Paging to it is this client's own business —
+    // and drawn now, because a layer that already had the bank sends nothing.
     this.#bank = wanted - 1;
+    this.#render();
   }
 
   /**
