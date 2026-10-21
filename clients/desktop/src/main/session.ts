@@ -563,14 +563,15 @@ export class Session {
     return this.#answer((api) => api.setBanks(showId, layerId, banks));
   }
 
-  /** Moves a slot to another pad of the same layer. */
+  /** Moves a slot to another pad, of its own layer or `toLayer`. */
   moveSlot(
     showId: string,
     layerId: string,
     from: number,
     to: number,
+    toLayer: string,
   ): Promise<Answer<MoveSlotResponse>> {
-    return this.#answer((api) => api.moveSlot(showId, layerId, from, to));
+    return this.#answer((api) => api.moveSlot(showId, layerId, from, to, toLayer));
   }
 
   /** Puts a mapping on the wall without saving the show. */

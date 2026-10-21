@@ -375,13 +375,15 @@ const CONTROLS = [
     call: 'moveSlot',
   },
   {
-    // A slot moves within its own layer: carried to another layer's pad, it
-    // must send nothing, and say why instead.
+    // And to another layer's pad (owner, 2026-10-21: "von einem Layer auf
+    // einen anderen Layer packen"), which was refused at first.
     what: "a pad onto another layer's",
     selector: '#matrix > .layer:nth-child(2) .pad:not(.empty)',
     drag: '#matrix > .layer:nth-child(3) .pad.empty',
     call: 'moveSlot',
-    expect: 'nothing',
+    // (showId, layerId, from, to, toLayer): the layer it goes to is not the
+    // one it left, which a move within the row would also have reached.
+    args: (args) => typeof args[4] === 'string' && args[4] !== args[1],
   },
   {
     // A bank not opened yet is on the bar, and pressing it opens it.
@@ -568,10 +570,14 @@ async function press(win, control) {
     ),
   );
 
-  const reached = after.some((entry) =>
-    control.call !== undefined
-      ? entry.call === control.call
-      : entry.call === 'run' && entry.args[0]?.do === control.sends,
+  // `args`, where a probe has one, is what the call has to have been asked:
+  // reaching the bridge with the wrong question is not reaching it.
+  const reached = after.some(
+    (entry) =>
+      (control.call !== undefined
+        ? entry.call === control.call
+        : entry.call === 'run' && entry.args[0]?.do === control.sends) &&
+      (control.args === undefined || control.args(entry.args)),
   );
   const names = after
     .map((entry) => (entry.call === 'run' ? `run:${entry.args[0]?.do}` : entry.call))

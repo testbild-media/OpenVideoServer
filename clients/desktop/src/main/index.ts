@@ -364,8 +364,8 @@ function registerHandlers(): void {
   );
   ipcMain.handle(
     'ovs:move-slot',
-    (_event, showId: string, layerId: string, from: number, to: number) =>
-      session.moveSlot(showId, layerId, from, to),
+    (_event, showId: string, layerId: string, from: number, to: number, toLayer: string) =>
+      session.moveSlot(showId, layerId, from, to, toLayer),
   );
   ipcMain.handle(
     'ovs:remove-effect',

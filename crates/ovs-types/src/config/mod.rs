@@ -38,8 +38,8 @@ pub use output::{
 pub use patch::FixtureInstance;
 pub use piece::{Piece, PieceSource};
 pub use show::{
-    Composition, CrossfaderCurve, DmxProtocols, MasterConfig, Show, ShowSettings, StartupPolicy,
-    MAX_BPM, MAX_SPEED_SCALE, MIN_BPM, MIN_SPEED_SCALE,
+    Composition, CrossfaderCurve, DmxProtocols, MasterConfig, Show, ShowSettings, SlotMoveError,
+    StartupPolicy, MAX_BPM, MAX_SPEED_SCALE, MIN_BPM, MIN_SPEED_SCALE,
 };
 pub use slot::{
     ParameterMap, ParameterValue, PlaybackDirection, PlaybackMode, Slot, SlotSync, SourceRef,

@@ -812,9 +812,11 @@ export type PadDropVerdict =
 /**
  * Whether a pad can be moved where it was dropped, and what that will do.
  *
- * **Within its own layer.** A slot is a layer's: its effects are drawn on that
- * layer's bus and a desk patched to the layer counts its pads. Carrying one to
- * another layer is copying a clip there, which the browser already does.
+ * **To any pad, on its own layer or another** (owner, 2026-10-21: "ich kann
+ * keinen Slot von einem Layer auf einen anderen Layer packen.. das sollte
+ * ebenfalls möglich sein"). It was its own layer only, on the reasoning that
+ * the browser already puts a clip on another layer — which copies the clip
+ * and leaves behind everything the slot was set up with.
  *
  * A pad that is taken swaps rather than being overwritten, so a drop that
  * missed by one pad is undone by dropping it back.
@@ -823,17 +825,10 @@ export function dropPadOnPad(
   carried: { layerId: string; slotIndex: number },
   onto: { layerId: string; slotIndex: number; holdingName: string | null },
 ): PadDropVerdict {
-  if (carried.layerId !== onto.layerId) {
-    return {
-      do: 'refuse',
-      because:
-        'A slot moves within its own layer. To have the clip on another layer too, drag it there from the browser.',
-    };
-  }
   if (onto.slotIndex === BLACK_SLOT_INDEX) {
     return { do: 'refuse', because: 'Slot 0 is permanently black on every layer and holds nothing.' };
   }
-  if (carried.slotIndex === onto.slotIndex) {
+  if (carried.layerId === onto.layerId && carried.slotIndex === onto.slotIndex) {
     return { do: 'nothing' };
   }
   return onto.holdingName === null ? { do: 'move' } : { do: 'swap', with: onto.holdingName };

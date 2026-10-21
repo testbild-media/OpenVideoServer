@@ -3,7 +3,7 @@
 //! ```text
 //! PUT    /shows/{id}/layers/{l}/slots/{n}              put a source in a slot
 //! DELETE /shows/{id}/layers/{l}/slots/{n}              take what is in it out
-//! POST   /shows/{id}/layers/{l}/slots/{n}/move         move it to another pad
+//! POST   /shows/{id}/layers/{l}/slots/{n}/move         move it to another pad, any layer
 //! POST   /shows/{id}/layers/{l}/effects                add an effect to a layer
 //! DELETE /shows/{id}/layers/{l}/effects/{e}            take one off again
 //! POST   /shows/{id}/layers/{l}/slots/{n}/effects      add an effect to a slot
@@ -51,7 +51,7 @@ use ovs_proto::http::{
     MoveSlotRequest, MoveSlotResponse, OrderEffectsRequest, OrderEffectsResponse, SetBanksRequest,
     SetLockRequest, SetLockResponse, SetMappingRequest, SetSlotRequest,
 };
-use ovs_types::config::{EffectInstance, Layer, Show, Slot, SlotMove, SourceRef};
+use ovs_types::config::{EffectInstance, Layer, Show, Slot, SlotMove, SlotMoveError, SourceRef};
 use ovs_types::id::{EffectInstanceId, LayerId, ShowId};
 use ovs_types::time::Timestamp;
 
@@ -265,21 +265,27 @@ pub async fn clear(
     }))
 }
 
-/// Moves a slot to another pad of the same layer.
+/// Moves a slot to another pad, of the same layer or another.
 ///
 /// A pad dragged onto another on the live matrix (owner, 2026-10-21). The whole
-/// slot goes, and a pad that is taken swaps with it ([`Layer::move_slot`]).
-/// A layer showing either of the two goes with what it was showing, so the
-/// picture on stage does not change because somebody tidied the matrix.
+/// slot goes, and a pad that is taken swaps with it ([`Show::move_slot`]).
+///
+/// **What is on stage.** Within a layer, a layer showing either of the two
+/// goes with what it was showing, so the picture does not change because
+/// somebody tidied the matrix. Across two layers that cannot be kept: the clip
+/// has left the layer that was showing it. A layer showing either slot is
+/// taken to black, as one showing a slot that is emptied is — black is the
+/// one answer that is never wrong, and the other choice would be a layer
+/// starting a clip nobody pressed.
 ///
 /// A locked effect or generator in either slot refuses the move, as it
-/// refuses being moved any other way: its place is the slot's number.
+/// refuses being moved any other way: its place is its layer and its slot.
 ///
 /// # Errors
 ///
-/// Returns [`ApiFailure`] when the show or layer is not there, when either
-/// index is not one a layer can hold, when there is nothing at the pad named,
-/// or when something locked would move.
+/// Returns [`ApiFailure`] when the show or either layer is not there, when
+/// either index is not one a layer can hold, when there is nothing at the pad
+/// named, or when something locked would move.
 pub async fn move_slot(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -289,16 +295,21 @@ pub async fn move_slot(
     authenticate(&state, &headers)?;
     let target = target(&show_id, &layer_id, slot_index)?;
     let to = request.to;
+    let to_layer = request.to_layer.unwrap_or(target.layer_id);
     Layer::check_slot_index(to)
         .map_err(|error| ApiFailure::bad_request("invalid_slot", error.to_string()))?;
 
     let mut show = document(&state, target.show_id)?;
-    let moved = layer_of(&mut show, target.layer_id)?
-        .move_slot(target.slot_index, to)
-        .map_err(|error| ApiFailure::bad_request("invalid_slot", error.to_string()))?;
+    let moved = show
+        .move_slot((target.layer_id, target.slot_index), (to_layer, to))
+        .map_err(|error| match error {
+            SlotMoveError::UnknownLayer(_) => ApiFailure::not_found(error.to_string()),
+            SlotMoveError::Index(_) => ApiFailure::bad_request("invalid_slot", error.to_string()),
+        })?;
 
+    let across = to_layer != target.layer_id;
     let swapped = match moved {
-        SlotMove::Nothing if target.slot_index == to => {
+        SlotMove::Nothing if target.slot_index == to && !across => {
             // Dropped where it was picked up. Nothing is stored, as for a clear
             // of an empty pad: an edit that changed nothing must not read to
             // every other client as a show that has just moved.
@@ -318,7 +329,12 @@ pub async fn move_slot(
     };
 
     let updated_at = store(&state, show, |current| {
-        current.follow_moved_slot(target.layer_id, target.slot_index, to);
+        if across {
+            current.black_out_slot(target.layer_id, target.slot_index);
+            current.black_out_slot(to_layer, to);
+        } else {
+            current.follow_moved_slot(target.layer_id, target.slot_index, to);
+        }
     })?;
     Ok(Json(MoveSlotResponse {
         updated_at,

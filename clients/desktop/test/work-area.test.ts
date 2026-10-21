@@ -848,10 +848,15 @@ describe('dragging a pad onto a pad', () => {
     });
   });
 
-  it('stays in its own layer, and says how to put the clip on another', () => {
-    const verdict = dropPadOnPad(carried, { layerId: 'L2', slotIndex: 10, holdingName: null });
-    expect(verdict.do).toBe('refuse');
-    expect(verdict.do === 'refuse' && verdict.because).toContain('browser');
+  it('moves to another layer as well, and swaps with what is there', () => {
+    // Owner, 2026-10-21: "von einem Layer auf einen anderen Layer packen".
+    expect(dropPadOnPad(carried, { layerId: 'L2', slotIndex: 10, holdingName: null })).toEqual({
+      do: 'move',
+    });
+    expect(dropPadOnPad(carried, { layerId: 'L2', slotIndex: 1, holdingName: 'Haze' })).toEqual({
+      do: 'swap',
+      with: 'Haze',
+    });
   });
 
   it('never lands on slot 0', () => {

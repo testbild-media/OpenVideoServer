@@ -271,6 +271,20 @@ describe('the HTTP client', () => {
     expect(answer.swapped).toBe(false);
   });
 
+  it('names the layer a slot goes to only when it is another one', async () => {
+    const { calls, fetchImpl } = recorder([
+      () => new Response(JSON.stringify({ updated_at: 4, swapped: true }), { status: 200 }),
+      () => new Response(JSON.stringify({ updated_at: 5, swapped: false }), { status: 200 }),
+    ]);
+    const api = new ServerApi('http://server:7420', fetchImpl);
+
+    await api.moveSlot('SHOW', 'LAYER', 1, 10, 'OTHER');
+    await api.moveSlot('SHOW', 'LAYER', 1, 10, 'LAYER');
+
+    expect(calls[0]!.init!.body).toBe(JSON.stringify({ to: 10, to_layer: 'OTHER' }));
+    expect(calls[1]!.init!.body).toBe(JSON.stringify({ to: 10 }));
+  });
+
   it('escapes identifiers rather than pasting them into a path', async () => {
     const { calls, fetchImpl } = recorder([() => new Response(null, { status: 204 })]);
     const api = new ServerApi('http://server:7420', fetchImpl);

@@ -676,6 +676,10 @@ async fn a_locked_generator_stays_in_its_slot() {
     let SourceRef::Generator { instance_id, .. } = show.layers[0].slots[0].source else {
         unreachable!("set above");
     };
+    // A second layer, for the move across.
+    let other = Layer::new("Other", 1);
+    let other_id = other.id;
+    show.layers.push(other);
     harness.open(show);
 
     let (status, body) = send(
@@ -724,14 +728,38 @@ async fn a_locked_generator_stays_in_its_slot() {
     // Nor is it dragged to another pad, by itself or by a slot swapping
     // into its place (2026-10-21): its place is its slot's number.
     let (status, body) = harness
-        .post(&format!("{slot}/move"), &MoveSlotRequest { to: 10 })
+        .post(
+            &format!("{slot}/move"),
+            &MoveSlotRequest {
+                to: 10,
+                to_layer: None,
+            },
+        )
         .await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     assert_eq!(code(&body), "locked");
     // Slot 2, the clip beside it, dragged onto it.
     let neighbour = format!("/api/v1/shows/{show_id}/layers/{layer_id}/slots/2");
     let (status, body) = harness
-        .post(&format!("{neighbour}/move"), &MoveSlotRequest { to: 1 })
+        .post(
+            &format!("{neighbour}/move"),
+            &MoveSlotRequest {
+                to: 1,
+                to_layer: None,
+            },
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(code(&body), "locked");
+    // Nor to another layer, which is the same place with a different layer.
+    let (status, body) = harness
+        .post(
+            &format!("{slot}/move"),
+            &MoveSlotRequest {
+                to: 1,
+                to_layer: Some(other_id),
+            },
+        )
         .await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     assert_eq!(code(&body), "locked");

@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "MoveSlotRequest",
-  "description": "Moves a slot to another pad of the same layer, with everything it carries.\n\nA pad dragged onto another on the live matrix (owner, 2026-10-21: \"Slot 1 per Drag and Drop auf Slot 10 schieben\"). A pad that is taken swaps with the one that moves, rather than being overwritten.",
+  "description": "Moves a slot to another pad, of the same layer or another, with everything it carries.\n\nA pad dragged onto another on the live matrix (owner, 2026-10-21: \"Slot 1 per Drag and Drop auf Slot 10 schieben\", and then \"von einem Layer auf einen anderen Layer\"). A pad that is taken swaps with the one that moves, rather than being overwritten.",
   "type": "object",
   "required": [
     "to"
@@ -12,6 +12,24 @@
       "type": "integer",
       "format": "uint16",
       "minimum": 0.0
+    },
+    "to_layer": {
+      "description": "The layer it goes to. Absent is the layer it is on.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/LayerId"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "LayerId": {
+      "description": "LayerId (ULID, 26 characters)",
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
     }
   }
 }

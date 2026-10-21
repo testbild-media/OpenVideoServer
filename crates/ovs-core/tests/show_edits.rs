@@ -893,9 +893,70 @@ impl Harness {
     async fn move_slot(&self, from: u16, to: u16) -> (StatusCode, serde_json::Value) {
         self.post(
             &format!("{}/move", self.slot_path(from)),
-            &MoveSlotRequest { to },
+            &MoveSlotRequest { to, to_layer: None },
         )
         .await
+    }
+
+    async fn move_across(
+        &self,
+        from: u16,
+        to_layer: LayerId,
+        to: u16,
+    ) -> (StatusCode, serde_json::Value) {
+        self.post(
+            &format!("{}/move", self.slot_path(from)),
+            &MoveSlotRequest {
+                to,
+                to_layer: Some(to_layer),
+            },
+        )
+        .await
+    }
+
+    /// Adds a second, empty layer to the open show, stored and running.
+    fn second_layer(&self) -> LayerId {
+        let mut show = self
+            .state
+            .with_state(|current| current.show().cloned())
+            .expect("a show is open");
+        let layer = Layer::new("Layer 2", 1);
+        let id = layer.id;
+        show.layers.push(layer);
+        let updated_at = self
+            .state
+            .with_database(|database| database.save_show(&show))
+            .expect("stores");
+        let show = Show { updated_at, ..show };
+        self.state.mutate_state(|current| {
+            let change = current.replace_show(show);
+            ((), Some(change))
+        });
+        id
+    }
+
+    /// One slot of any layer of the running document.
+    fn slot_on(&self, layer_id: LayerId, slot_index: u16) -> Option<Slot> {
+        self.state.with_state(|current| {
+            current
+                .show()
+                .and_then(|show| show.layer(layer_id))
+                .and_then(|layer| layer.slot(slot_index))
+                .cloned()
+        })
+    }
+
+    fn live_of(&self, layer_id: LayerId) -> ovs_types::live::LayerLive {
+        self.state
+            .with_state(|current| {
+                current
+                    .snapshot()
+                    .layers
+                    .iter()
+                    .find(|live| live.layer_id == layer_id)
+                    .copied()
+            })
+            .expect("the layer has live state")
     }
 
     async fn select(&self, slot_index: u16) {
@@ -1028,6 +1089,122 @@ async fn moving_an_empty_pad_says_so_and_dropping_one_on_itself_stores_nothing()
         "a drop where it was picked up is not a change to publish"
     );
     assert!(harness.running_slot(1).is_some());
+}
+
+// --- across layers (owner, 2026-10-21: "von einem Layer auf einen anderen") ---
+
+#[tokio::test]
+async fn a_slot_dragged_to_another_layer_goes_there_whole_and_on_disk() {
+    let harness = Harness::start().await;
+    let other = harness.second_layer();
+
+    let (status, body) = harness.move_across(1, other, 3).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    assert!(harness.running_slot(1).is_none(), "it left the first layer");
+    let moved = harness
+        .slot_on(other, 3)
+        .expect("the second layer has it at 3");
+    assert_eq!(moved.media_item_id(), Some(harness.original));
+    assert_eq!(moved.playback_mode, PlaybackMode::Bounce);
+    let stored = harness
+        .state
+        .with_database(|database| database.load_show(harness.show_id))
+        .expect("loads");
+    assert_eq!(
+        stored
+            .layer(other)
+            .and_then(|layer| layer.slot(3))
+            .and_then(Slot::media_item_id),
+        Some(harness.original),
+        "a move that is not on disk is undone by the next restart"
+    );
+}
+
+#[tokio::test]
+async fn a_slot_dropped_on_a_taken_pad_of_another_layer_swaps_across() {
+    let harness = Harness::start().await;
+    let other = harness.second_layer();
+    // Something on the second layer's pad 3 to swap with.
+    let (status, body) = harness
+        .put(
+            &format!("/api/v1/shows/{}/layers/{other}/slots/3", harness.show_id),
+            &AssignSlotRequest {
+                source: SourceRef::Media {
+                    media_item_id: harness.clip,
+                },
+            },
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let (status, body) = harness.move_across(1, other, 3).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let answer: MoveSlotResponse = serde_json::from_value(body).expect("a move response");
+    assert!(answer.swapped);
+    assert_eq!(
+        harness
+            .slot_on(other, 3)
+            .and_then(|slot| slot.media_item_id()),
+        Some(harness.original)
+    );
+    assert_eq!(
+        harness
+            .running_slot(1)
+            .and_then(|slot| slot.media_item_id()),
+        Some(harness.clip),
+        "what was on the second layer is on the first, where this one was"
+    );
+}
+
+#[tokio::test]
+async fn a_layer_showing_a_slot_that_leaves_it_goes_to_black() {
+    // The clip has left the layer that was showing it, so that layer cannot
+    // go on showing it. Black, as for a slot that is emptied — not whatever
+    // arrived in its place, which would be a clip nobody pressed.
+    let harness = Harness::start().await;
+    let other = harness.second_layer();
+    harness.select(1).await;
+
+    let (status, body) = harness.move_across(1, other, 3).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(harness.layer_live().active_slot, 0);
+    assert_eq!(
+        harness.live_of(other).active_slot,
+        0,
+        "the layer it arrived on does not start it either"
+    );
+}
+
+#[tokio::test]
+async fn a_layer_on_the_pad_a_slot_arrives_at_goes_to_black_rather_than_start_it() {
+    let harness = Harness::start().await;
+    let other = harness.second_layer();
+    let (status, _) = harness
+        .post(
+            &format!("/api/v1/live/layers/{other}/slot"),
+            &SelectSlotRequest { slot_index: 3 },
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    harness.select(5).await;
+
+    let (status, body) = harness.move_across(1, other, 3).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(harness.live_of(other).active_slot, 0);
+    assert_eq!(
+        harness.layer_live().active_slot,
+        5,
+        "the first layer was on another pad and is left there"
+    );
+}
+
+#[tokio::test]
+async fn a_move_to_a_layer_the_show_does_not_have_is_not_found() {
+    let harness = Harness::start().await;
+    let (status, body) = harness.move_across(1, LayerId::new(), 3).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert!(harness.running_slot(1).is_some(), "it stayed where it was");
 }
 
 #[tokio::test]

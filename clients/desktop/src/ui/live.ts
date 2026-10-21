@@ -2272,7 +2272,7 @@ export class LivePanel {
     const nextBank = 'Right-click for the next bank.';
     const selects = pad.empty
       ? ''
-      : ' Playing it sets it up in OPTIONS. Drag it onto another pad of this layer to move it there.';
+      : ' Playing it sets it up in OPTIONS. Drag it onto another pad, on this layer or another, to move it there.';
     node.title = pad.empty
       ? `${layer.name}, slot ${pad.index} — empty, so playing it shows nothing. Drag a clip from the browser onto it. ${nextBank}`
       : `${layer.name}, slot ${pad.index}.${selects} ${nextBank}`;
@@ -2350,11 +2350,6 @@ export class LivePanel {
       node.addEventListener('dragover', (event) => {
         const carried = this.#dragging;
         if (carried === null) {
-          return;
-        }
-        // A pad moves within its own layer, so a pad of another layer is not
-        // somewhere it can land and does not light up as one.
-        if (carried.of === 'pad' && carried.layerId !== layer.id) {
           return;
         }
         event.preventDefault();
@@ -3103,7 +3098,7 @@ export class LivePanel {
       if (verdict.do === 'nothing') {
         return;
       }
-      void this.#movePad(layer.id, carried.slotIndex, slotIndex);
+      void this.#movePad(carried.layerId, carried.slotIndex, layer.id, slotIndex);
       return;
     }
 
@@ -3149,17 +3144,18 @@ export class LivePanel {
   }
 
   /**
-   * Moves a slot to another pad of its layer, and says what the server said.
+   * Moves a slot to another pad, of its layer or another, and says what the
+   * server said.
    *
    * A bank the pad was carried into that is not open yet is opened first, on
    * every layer, as pressing it would: the matrix pages as one strip, and a
    * slot in a bank only one layer has is a page of one row.
    *
    * OPTIONS stays on what it was showing. A slot that moved is the same slot
-   * at another number, and an operator setting it up should not find the
-   * panel describing whatever arrived at the old one.
+   * somewhere else, and an operator setting it up should not find the panel
+   * describing whatever arrived at the old place.
    */
-  async #movePad(layerId: string, from: number, to: number): Promise<void> {
+  async #movePad(fromLayer: string, from: number, toLayer: string, to: number): Promise<void> {
     const showId = this.#view.showId;
     if (showId === null) {
       this.#note('No show is open, so there is no slot to move.');
@@ -3169,17 +3165,17 @@ export class LivePanel {
     if (bank > this.#opened) {
       await this.#openBanks(bank);
     }
-    const answer = await this.#ovs.moveSlot(showId, layerId, from, to);
+    const answer = await this.#ovs.moveSlot(showId, fromLayer, from, to, toLayer);
     if (!answer.ok) {
       this.#note(answer.message);
       return;
     }
-    if (this.#selected === layerId) {
-      if (this.#selectedSlot === from) {
-        this.#selectedSlot = to;
-      } else if (this.#selectedSlot === to && answer.value.swapped) {
-        this.#selectedSlot = from;
-      }
+    if (this.#selected === fromLayer && this.#selectedSlot === from) {
+      this.#selected = toLayer;
+      this.#selectedSlot = to;
+    } else if (this.#selected === toLayer && this.#selectedSlot === to && answer.value.swapped) {
+      this.#selected = fromLayer;
+      this.#selectedSlot = from;
     }
     // What the pads show next comes back over the socket, as everything on
     // this screen does.

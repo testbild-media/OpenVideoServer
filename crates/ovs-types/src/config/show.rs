@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::layer::Layer;
+use crate::config::layer::{Layer, SlotIndexError, SlotMove};
 use crate::config::output::OutputConfig;
 use crate::config::patch::{FixtureInstance, FixtureTarget};
 use crate::config::piece::Piece;
@@ -17,6 +17,26 @@ use crate::geometry::{FrameRate, SizePx};
 use crate::id::{LayerId, MediaItemId, OutputId, ShowId};
 use crate::time::Timestamp;
 use crate::version::SHOW_SCHEMA_VERSION;
+
+/// Why a slot could not be moved ([`Show::move_slot`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SlotMoveError {
+    /// The show has no layer by this identity.
+    UnknownLayer(LayerId),
+    /// An index no layer can hold, at one end or the other.
+    Index(SlotIndexError),
+}
+
+impl std::fmt::Display for SlotMoveError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownLayer(id) => write!(f, "layer {id} is not in this show"),
+            Self::Index(error) => error.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for SlotMoveError {}
 
 /// Lowest master BPM the clock accepts.
 pub const MIN_BPM: f64 = 20.0;
@@ -367,6 +387,57 @@ impl Show {
     #[must_use]
     pub fn layer(&self, id: LayerId) -> Option<&Layer> {
         self.layers.iter().find(|layer| layer.id == id)
+    }
+
+    /// Moves a slot to a pad of any layer, with everything it carries.
+    ///
+    /// Within a layer this is [`Layer::move_slot`]; across two it is the same
+    /// gesture (owner, 2026-10-21: "ich kann keinen Slot von einem Layer auf
+    /// einen anderen Layer packen.. das sollte ebenfalls möglich sein"). The
+    /// whole slot goes — source, how it plays, its effects and its name — and
+    /// a pad that is taken swaps with it rather than being overwritten, so the
+    /// slot that was there goes to the layer and pad this one left.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SlotMoveError`] for a layer the show does not have, and for an
+    /// index a layer cannot hold at either end. Nothing is moved when it fails.
+    pub fn move_slot(
+        &mut self,
+        from: (LayerId, u16),
+        to: (LayerId, u16),
+    ) -> Result<SlotMove, SlotMoveError> {
+        let ((from_layer, from_index), (to_layer, to_index)) = (from, to);
+        Layer::check_slot_index(from_index).map_err(SlotMoveError::Index)?;
+        Layer::check_slot_index(to_index).map_err(SlotMoveError::Index)?;
+        let position = |id: LayerId| {
+            self.layers
+                .iter()
+                .position(|layer| layer.id == id)
+                .ok_or(SlotMoveError::UnknownLayer(id))
+        };
+        let source = position(from_layer)?;
+        let target = position(to_layer)?;
+        if source == target {
+            return self.layers[source]
+                .move_slot(from_index, to_index)
+                .map_err(SlotMoveError::Index);
+        }
+
+        let Some(mut moving) = self.layers[source].clear_slot(from_index) else {
+            return Ok(SlotMove::Nothing);
+        };
+        let other = self.layers[target].clear_slot(to_index);
+        moving.index = to_index;
+        self.layers[target].put_slot(moving);
+        Ok(match other {
+            Some(mut other) => {
+                other.index = from_index;
+                self.layers[source].put_slot(other);
+                SlotMove::Swapped
+            }
+            None => SlotMove::Moved,
+        })
     }
 
     /// Settles anything an older build left behind in this document.
@@ -1256,5 +1327,96 @@ mod tests {
         });
         let errors = show.validate().expect_err("several problems");
         assert!(errors.len() >= 4, "expected several problems, got {errors}");
+    }
+
+    /// A show of two layers, slot 1 filled on the first and slot 4 on the second.
+    fn two_layers() -> (Show, LayerId, LayerId, MediaItemId, MediaItemId) {
+        let mut show = Show::new("Show");
+        let (first, second) = (MediaItemId::new(), MediaItemId::new());
+        let mut upper = Layer::new("Upper", 1);
+        let mut slot = Slot::media(1, first);
+        slot.name = Some("Upstage wash".to_owned());
+        upper.slots.push(slot);
+        let mut lower = Layer::new("Lower", 0);
+        lower.slots.push(Slot::media(4, second));
+        let (upper_id, lower_id) = (upper.id, lower.id);
+        show.layers.push(lower);
+        show.layers.push(upper);
+        (show, upper_id, lower_id, first, second)
+    }
+
+    #[test]
+    fn a_slot_moves_to_another_layer_with_everything_it_carries() {
+        let (mut show, upper, lower, first, _) = two_layers();
+
+        assert_eq!(show.move_slot((upper, 1), (lower, 10)), Ok(SlotMove::Moved));
+
+        assert!(show.layer(upper).expect("upper").slot(1).is_none());
+        let moved = show
+            .layer(lower)
+            .expect("lower")
+            .slot(10)
+            .expect("it is at 10");
+        assert_eq!(moved.media_item_id(), Some(first));
+        assert_eq!(moved.name.as_deref(), Some("Upstage wash"));
+        assert!(show.validate().is_ok());
+    }
+
+    #[test]
+    fn a_slot_dropped_on_a_taken_pad_of_another_layer_swaps_across() {
+        let (mut show, upper, lower, first, second) = two_layers();
+
+        assert_eq!(
+            show.move_slot((upper, 1), (lower, 4)),
+            Ok(SlotMove::Swapped)
+        );
+
+        let at = |layer: LayerId, index: u16| {
+            show.layer(layer)
+                .and_then(|layer| layer.slot(index))
+                .and_then(Slot::media_item_id)
+        };
+        assert_eq!(at(lower, 4), Some(first));
+        assert_eq!(
+            at(upper, 1),
+            Some(second),
+            "what was there went the other way"
+        );
+        assert!(show.validate().is_ok());
+    }
+
+    #[test]
+    fn the_same_layer_named_twice_is_a_move_within_it() {
+        let (mut show, upper, _, first, _) = two_layers();
+        assert_eq!(show.move_slot((upper, 1), (upper, 9)), Ok(SlotMove::Moved));
+        let layer = show.layer(upper).expect("upper");
+        assert_eq!(layer.slot(9).and_then(Slot::media_item_id), Some(first));
+    }
+
+    #[test]
+    fn a_move_naming_a_layer_the_show_does_not_have_moves_nothing() {
+        let (mut show, upper, _, _, _) = two_layers();
+        let before = show.clone();
+        let stranger = LayerId::new();
+        assert_eq!(
+            show.move_slot((upper, 1), (stranger, 3)),
+            Err(SlotMoveError::UnknownLayer(stranger))
+        );
+        assert_eq!(
+            show.move_slot((upper, 1), (upper, 0)),
+            Err(SlotMoveError::Index(SlotIndexError::Black))
+        );
+        assert_eq!(show, before);
+    }
+
+    #[test]
+    fn an_empty_pad_moved_to_another_layer_is_nothing() {
+        let (mut show, upper, lower, _, _) = two_layers();
+        let before = show.clone();
+        assert_eq!(
+            show.move_slot((upper, 7), (lower, 4)),
+            Ok(SlotMove::Nothing)
+        );
+        assert_eq!(show, before);
     }
 }

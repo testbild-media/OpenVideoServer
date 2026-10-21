@@ -341,6 +341,17 @@ impl Layer {
         Ok(None)
     }
 
+    /// Puts a whole slot in at its own index, in index order.
+    ///
+    /// For a slot arriving from another layer ([`crate::config::Show::move_slot`]),
+    /// whose pad here the caller has already emptied.
+    pub(crate) fn put_slot(&mut self, slot: Slot) {
+        let at = self
+            .slots
+            .partition_point(|existing| existing.index < slot.index);
+        self.slots.insert(at, slot);
+    }
+
     /// Empties a slot, leaving the pad unassigned.
     ///
     /// Returns what was in it, so clearing twice is not an error, does not

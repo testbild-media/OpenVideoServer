@@ -468,14 +468,23 @@ export class ServerApi {
   }
 
   /**
-   * Moves a slot to another pad of the same layer, with everything it carries.
+   * Moves a slot to another pad, of its own layer or `toLayer`, with
+   * everything it carries.
    *
    * A pad dragged onto another (owner, 2026-10-21). A pad that is taken swaps
-   * with the one that moves, and a layer showing either goes with what it was
-   * showing.
+   * with the one that moves. Within a layer, a layer showing either goes with
+   * what it was showing; across two, a layer showing either goes to black.
    */
-  moveSlot(showId: string, layerId: string, from: number, to: number): Promise<MoveSlotResponse> {
-    const body: MoveSlotRequest = { to };
+  moveSlot(
+    showId: string,
+    layerId: string,
+    from: number,
+    to: number,
+    toLayer: string = layerId,
+  ): Promise<MoveSlotResponse> {
+    // The layer only when it is another one, which is what the server reads
+    // an absent one as anyway.
+    const body: MoveSlotRequest = toLayer === layerId ? { to } : { to, to_layer: toLayer };
     return this.#request('POST', `${this.#slotPath(showId, layerId, from)}/move`, body);
   }
 

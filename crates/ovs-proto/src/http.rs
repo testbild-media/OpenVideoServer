@@ -11,7 +11,7 @@ use ovs_types::config::{
     ConnectorRole, DmxProtocols, ParameterMap, Route, Show, SourceRef, StartupPolicy,
 };
 use ovs_types::geometry::{FrameRate, SizePx, Transform2D};
-use ovs_types::id::{AccountId, EffectInstanceId, MediaItemId, OutputId, ShowId};
+use ovs_types::id::{AccountId, EffectInstanceId, LayerId, MediaItemId, OutputId, ShowId};
 use ovs_types::media::{MediaItem, MediaKind};
 use ovs_types::telemetry::ServerTelemetry;
 use ovs_types::time::Timestamp;
@@ -565,15 +565,20 @@ pub struct SetBanksRequest {
     pub banks: u16,
 }
 
-/// Moves a slot to another pad of the same layer, with everything it carries.
+/// Moves a slot to another pad, of the same layer or another, with everything
+/// it carries.
 ///
 /// A pad dragged onto another on the live matrix (owner, 2026-10-21: "Slot 1
-/// per Drag and Drop auf Slot 10 schieben"). A pad that is taken swaps with the
-/// one that moves, rather than being overwritten.
+/// per Drag and Drop auf Slot 10 schieben", and then "von einem Layer auf einen
+/// anderen Layer"). A pad that is taken swaps with the one that moves, rather
+/// than being overwritten.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct MoveSlotRequest {
     /// The pad it goes to, between 1 and `Layer::MAX_SLOT_INDEX`.
     pub to: u16,
+    /// The layer it goes to. Absent is the layer it is on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to_layer: Option<LayerId>,
 }
 
 /// Result of moving a slot.
