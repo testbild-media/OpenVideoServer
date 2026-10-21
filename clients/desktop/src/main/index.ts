@@ -31,6 +31,7 @@ import type { DroppedFile, HandDeclaration } from '../shared/ingest.js';
 import type { Answer, Command, CommandResult } from '../shared/types.js';
 import type { OpenSocket, RealtimeSocket } from '../shared/connection.js';
 import { files } from './files.js';
+import { printSheet, type PrintHow } from './print.js';
 import { Session, signInFailure } from './session.js';
 
 /** The window, while there is one. */
@@ -439,6 +440,11 @@ function registerHandlers(): void {
   ipcMain.handle('ovs:show-import', () => loadShowPackage());
   ipcMain.handle('ovs:show-bundle', (_event, showId: string, suggested: string) =>
     saveShowBundle(showId, suggested),
+  );
+  // The DMX patch table, printed or kept as a PDF. The window builds the sheet;
+  // this is only the printer.
+  ipcMain.handle('ovs:print-sheet', (_event, html: string, how: PrintHow, suggested: string) =>
+    printSheet(String(html), how === 'pdf' ? 'pdf' : 'print', String(suggested), window),
   );
 
   // Media ingest. The window sends paths and the main process does everything

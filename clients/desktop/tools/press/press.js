@@ -255,6 +255,24 @@ const CONTROLS = [
     call: 'setTestPattern',
     open: ['#mode-settings', '#tab-mapping'],
   },
+  // --- the patch as a table (owner, 2026-10-21) ---
+  //
+  // (html, how, suggested): a whole sheet with a row in it, asked for the way
+  // the button says. A sheet with no table would mean the show in hand never
+  // reached it, which is the failure a press alone would not see.
+  {
+    what: 'print the patch',
+    id: 'patch-print',
+    call: 'printSheet',
+    open: ['#mode-settings', '#tab-dmx'],
+    args: (args) => args[1] === 'print' && /<table>[\s\S]*<td/.test(args[0]),
+  },
+  {
+    what: 'save the patch as a PDF',
+    id: 'patch-pdf',
+    call: 'printSheet',
+    args: (args) => args[1] === 'pdf' && /<table>[\s\S]*<td/.test(args[0]),
+  },
   // Setting an output's mode. The one control in this panel that reaches a
   // cable: the fields used to send on every change, so getting from one
   // resolution to another took the panel through the sizes in between and made

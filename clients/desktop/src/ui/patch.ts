@@ -44,6 +44,8 @@ import type {
 } from '@ovs/schema';
 
 import type { Edit } from '../shared/editor.js';
+import { patchSheet, sheetFileName } from '../shared/patch-sheet.js';
+import type { Answer } from '../shared/types.js';
 import {
   MAX_DMX_ADDRESS,
   MAX_UNIVERSE,
@@ -112,6 +114,12 @@ export interface PatchDeps {
    */
   dmxProtocols: () => Promise<DmxProtocols | null>;
   setDmxProtocols: (protocols: DmxProtocols) => Promise<DmxProtocols | null>;
+  /** Prints a sheet, or keeps it as a PDF and opens it. */
+  printSheet: (
+    html: string,
+    how: 'print' | 'pdf',
+    suggested: string,
+  ) => Promise<Answer<string | null>>;
 }
 
 /** Something in this show a fixture can be patched to. */
@@ -164,6 +172,8 @@ export class PatchPanel {
     channelGrid: element('patch-channels-grid'),
     artnet: element<HTMLButtonElement>('dmx-artnet'),
     sacn: element<HTMLButtonElement>('dmx-sacn'),
+    print: element<HTMLButtonElement>('patch-print'),
+    pdf: element<HTMLButtonElement>('patch-pdf'),
     protocolsNote: element('dmx-protocols-note'),
   };
 
@@ -202,6 +212,33 @@ export class PatchPanel {
     });
     this.#ui.artnet.addEventListener('click', () => void this.#toggleProtocol('artnet'));
     this.#ui.sacn.addEventListener('click', () => void this.#toggleProtocol('sacn'));
+    this.#ui.print.addEventListener('click', () => void this.#printSheet('print'));
+    this.#ui.pdf.addEventListener('click', () => void this.#printSheet('pdf'));
+  }
+
+  /**
+   * The patch as a table, on paper or as a PDF (owner, 2026-10-21).
+   *
+   * Built from the document in hand, the same one this page shows — so a patch
+   * being worked on prints as it is on screen, and the sheet says so when the
+   * server has not got it yet.
+   */
+  async #printSheet(how: 'print' | 'pdf'): Promise<void> {
+    const show = this.#deps.show();
+    if (show === null) {
+      this.#deps.note('Open a show in Settings to print its patch.');
+      return;
+    }
+    const html = patchSheet(show, this.#deps.catalogue(), {
+      now: new Date(),
+      unsaved: this.#deps.dirty(),
+    });
+    const answer = await this.#deps.printSheet(html, how, sheetFileName(show));
+    if (!answer.ok) {
+      this.#deps.note(answer.message);
+    } else if (answer.value !== null) {
+      this.#deps.note(`The patch is saved as ${answer.value}.`);
+    }
   }
 
   // --- what reaches this show -------------------------------------------------

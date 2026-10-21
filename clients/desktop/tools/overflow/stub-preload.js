@@ -339,7 +339,21 @@ const document_ = {
       mode: { size: { width: 1920, height: 1080 }, refresh: { numerator: 60, denominator: 1 } },
     },
   ],
-  fixture_patch: [],
+  // One patched fixture, so the patch page has a block to draw and its printed
+  // table a row to print (2026-10-21): a sheet of "nothing is patched" proves
+  // only that the button reached the bridge.
+  fixture_patch: [
+    {
+      id: 'FIXTURE1',
+      type_id: 'ovs.master',
+      version: 1,
+      target: { kind: 'master' },
+      universe: 1,
+      start_address: 1,
+      footprint: 9,
+      enabled: true,
+    },
+  ],
   settings: { auto_save: true, notes: '' },
 };
 
@@ -471,6 +485,7 @@ const CALLS = [
   'saveShow',
   'setBanks',
   'moveSlot',
+  'printSheet',
   'setDmxProtocols',
   'setLock',
   'setMapping',

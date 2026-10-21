@@ -672,7 +672,16 @@
         </section>
 
         <section id="patch-document">
-          <div class="panel-head"><h2>Document</h2></div>
+          <div class="panel-head">
+            <h2>Document</h2>
+            <!--
+              The patch as a table: universe, start address, channels, fixture
+              and what it belongs to (owner, 2026-10-21) — on paper, or as a
+              PDF that opens once it is written.
+            -->
+            <button id="patch-print" type="button" class="small" title="Print the patch as a table">Print</button>
+            <button id="patch-pdf" type="button" class="small" title="Save the patch as a PDF table and open it">PDF</button>
+          </div>
           <div id="patch-document-fields"></div>
           <p id="patch-document-note"></p>
           <ul id="patch-errors" aria-live="polite"></ul>

@@ -46,6 +46,7 @@ import {
   unpatchFixture,
   type FixtureCatalogue,
 } from '../src/shared/patch.js';
+import { belongsTo, patchSheet, sheetFileName, sheetRows } from '../src/shared/patch-sheet.js';
 
 /** A master personality with a footprint nothing in this build has. */
 const DESK_MASTER: Personality = {
@@ -1035,5 +1036,156 @@ describe('what a console can reach on a generator in a slot', () => {
     // Found, so neither "not published" nor anything about its channels.
     expect(patchProblems(document, catalogue)).toEqual([]);
     expect(fixtureName(saved, catalogue)).toBe('Strobe');
+  });
+});
+
+// --- the patch as a table to print (owner, 2026-10-21) ---------------------------
+
+describe('the printed patch', () => {
+  /**
+   * A rig with one of everything the table names differently: the master, a
+   * layer, an effect on a layer's own chain, one on a slot, a generator, a
+   * parked entry and two that overlap — added out of address order.
+   */
+  function printed(): { document: Show; ids: Record<string, string> } {
+    const upper = layerAt('Upper', 1);
+    const lower = layerAt('Lower <b>&</b>', 0);
+    const onLayer = effectInstance(DESK_EFFECT.type_id, 1);
+    const onSlot = effectInstance(DESK_EFFECT.type_id, 1);
+    upper.effects.push(onLayer);
+    const generatorId = newId();
+    upper.slots.push(
+      {
+        index: 3,
+        source: { kind: 'media', media_item_id: newId() },
+        effects: [onSlot],
+        playback_mode: 'loop',
+        direction: 'forward',
+        transform: { ...IDENTITY_TRANSFORM },
+      },
+      {
+        index: 7,
+        source: { kind: 'generator', instance_id: generatorId, type_id: 'ovs.solid_colour', version: 1 },
+        effects: [],
+        playback_mode: 'loop',
+        direction: 'forward',
+        transform: { ...IDENTITY_TRANSFORM },
+      },
+    );
+    const at = (
+      start: number,
+      target: FixtureInstance['target'],
+      personality: Personality,
+      overrides: Partial<FixtureInstance> = {},
+    ): FixtureInstance =>
+      entry({
+        type_id: personality.type_id,
+        version: personality.version,
+        footprint: personality.footprint,
+        target,
+        start_address: start,
+        ...overrides,
+      });
+    const document = show({
+      layers: [lower, upper],
+      fixture_patch: [
+        at(101, { kind: 'effect', effect_instance_id: onSlot.id }, DESK_EFFECT),
+        at(1, { kind: 'master' }, DESK_MASTER),
+        at(21, { kind: 'layer', layer_id: upper.id }, DESK_LAYER),
+        at(41, { kind: 'layer', layer_id: lower.id }, DESK_LAYER, { universe: 2 }),
+        at(100, { kind: 'effect', effect_instance_id: onLayer.id }, DESK_EFFECT),
+        at(200, { kind: 'generator', generator_instance_id: generatorId }, DESK_EFFECT, {
+          type_id: 'ovs.solid_colour',
+          footprint: 4,
+        }),
+        at(300, { kind: 'layer', layer_id: newId() }, DESK_LAYER, { enabled: false }),
+      ],
+    });
+    return { document, ids: { upper: upper.id, lower: lower.id } };
+  }
+
+  it('lists every patched fixture by universe and then by address', () => {
+    const rows = sheetRows(printed().document, catalogueWithEffect());
+    expect(rows.map((row) => [row.universe, row.start])).toEqual([
+      [1, 1],
+      [1, 21],
+      [1, 100],
+      [1, 101],
+      [1, 200],
+      [1, 300],
+      [2, 41],
+    ]);
+  });
+
+  it('gives universe, start address, channel count and the fixture’s name', () => {
+    const rows = sheetRows(printed().document, catalogueWithEffect());
+    expect(rows[0]).toMatchObject({ universe: 1, start: 1, channels: 7, fixture: 'Desk Master' });
+    expect(rows[1]).toMatchObject({ universe: 1, start: 21, channels: 20, fixture: 'Desk Layer' });
+  });
+
+  it('says which layer an effect or a generator belongs to, and which slot', () => {
+    // The owner's "+ welcher Effekt zu welchem Layer gehört".
+    const { document } = printed();
+    const rows = sheetRows(document, catalogueWithEffect());
+    expect(rows.map((row) => row.belongsTo)).toEqual([
+      'Master',
+      'Upper',
+      'Upper (the layer)',
+      'Upper, slot 3',
+      'Upper, slot 7',
+      'a layer this show no longer has',
+      'Lower <b>&</b>',
+    ]);
+    expect(belongsTo(document, { kind: 'effect', effect_instance_id: newId() })).toBe(
+      'an effect this show no longer has',
+    );
+  });
+
+  it('marks a parked entry and two that want the same channels', () => {
+    const rows = sheetRows(printed().document, catalogueWithEffect());
+    expect(rows.find((row) => row.start === 300)?.remark).toBe('parked');
+    // 100–101 and 101–102: one channel shared, and both say with what.
+    expect(rows.find((row) => row.start === 100)?.remark).toBe('overlaps Desk Wobble');
+    expect(rows.find((row) => row.start === 101)?.remark).toBe('overlaps Desk Wobble');
+    expect(rows.find((row) => row.start === 21)?.remark).toBe('');
+  });
+
+  it('names a fixture by its type when the server does not publish it', () => {
+    const rows = sheetRows(printed().document, catalogueWithEffect());
+    expect(rows.find((row) => row.start === 200)?.fixture).toBe('ovs.solid_colour');
+  });
+
+  it('is a document of its own with a row per fixture and nothing in it that runs', () => {
+    const html = patchSheet(printed().document, catalogueWithEffect(), {
+      now: new Date(2026, 9, 21, 14, 5),
+      unsaved: false,
+    });
+    expect(html.startsWith('<!doctype html>')).toBe(true);
+    expect(html).toContain('<th class="num">Universe</th>');
+    expect(html.match(/<tr>|<tr class=/g)).toHaveLength(1 + 7);
+    expect(html).toContain('2026-10-21 14:05');
+    expect(html).not.toMatch(/<script/i);
+    // A layer called something with markup in it is printed as the words.
+    expect(html).toContain('Lower &lt;b&gt;&amp;&lt;/b&gt;');
+    expect(html).not.toContain('<b>&</b>');
+  });
+
+  it('says so when it prints changes the server has not got, or names by type', () => {
+    const { document } = printed();
+    const unsaved = patchSheet(document, catalogueWithEffect(), { now: new Date(), unsaved: true });
+    expect(unsaved).toContain('not been saved to the server yet');
+    const unnamed = patchSheet(document, emptyFixtures(), { now: new Date(), unsaved: false });
+    expect(unnamed).toContain('named by type');
+  });
+
+  it('says plainly when nothing is patched', () => {
+    const html = patchSheet(show(), catalogue(), { now: new Date(), unsaved: false });
+    expect(html).toContain('Nothing in this show is patched.');
+    expect(html).not.toContain('<table');
+  });
+
+  it('is kept under the show’s name, with nothing in it a file name may not hold', () => {
+    expect(sheetFileName(show({ name: 'Gala: 21/10 "final"' }))).toBe('Gala 21 10 final - DMX patch');
+    expect(sheetFileName(show({ name: '   ' }))).toBe('Show - DMX patch');
   });
 });

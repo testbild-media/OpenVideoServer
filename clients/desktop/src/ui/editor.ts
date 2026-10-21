@@ -298,6 +298,7 @@ export class EditorPanel {
       liveShowId: () => this.#liveShowId(),
       dmxProtocols: () => this.#dmxProtocols(),
       setDmxProtocols: (protocols) => this.#setDmxProtocols(protocols),
+      printSheet: (html, how, suggested) => this.#ovs.printSheet(html, how, suggested),
     });
 
     this.#ui.newShowForm.addEventListener('submit', (event) => {

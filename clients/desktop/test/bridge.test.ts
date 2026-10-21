@@ -237,6 +237,7 @@ describe('the bridge the window is given', () => {
       'pickImage',
       'pickMedia',
       'preview',
+      'printSheet',
       'removeEffect',
       'removeIngest',
       'renameFolder',

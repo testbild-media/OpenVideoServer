@@ -323,6 +323,12 @@ export interface OvsBridge {
    * show (owner, 2026-09-23).
    */
   exportShowWithMedia(showId: string, suggested: string): Promise<Answer<string | null>>;
+  /**
+   * Prints a sheet this window built, or keeps it as a PDF the operator names
+   * and opens it. The DMX patch table (owner, 2026-10-21). Answers the PDF's
+   * path, or null for a print or a save thought better of.
+   */
+  printSheet(html: string, how: 'print' | 'pdf', suggested: string): Promise<Answer<string | null>>;
 
   // Media ingest. The window hands over paths and is told what is happening to
   // them; probing, hashing, uploading and verifying are the main process's, as
@@ -477,6 +483,7 @@ const bridge: OvsBridge = {
   importShow: () => ipcRenderer.invoke('ovs:show-import'),
   exportShowWithMedia: (showId, suggested) =>
     ipcRenderer.invoke('ovs:show-bundle', showId, suggested),
+  printSheet: (html, how, suggested) => ipcRenderer.invoke('ovs:print-sheet', html, how, suggested),
   pickMedia: () => ipcRenderer.invoke('ovs:ingest-pick'),
   pathForFile: (file) => webUtils.getPathForFile(file),
   ingest: (files, folder) => ipcRenderer.invoke('ovs:ingest-add', files, folder ?? ''),
