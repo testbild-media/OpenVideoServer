@@ -156,6 +156,16 @@ const CONTROLS = [
   // because the generator probes above leave the panel on a slot and a slot
   // chain has one effect on it -- which cannot be reordered.
   {
+    // Folded until opened, and still open after OPTIONS has gone to a slot
+    // and come back to the layer, which draws the chain again (owner,
+    // 2026-10-21). First in this group, because it is the one that needs the
+    // chain untouched by anybody.
+    what: 'an effect stays as it was left',
+    selector: '.options-column details.work-row',
+    open: '.options-subject button',
+    folds: ['.pad:not(.empty) .pad-label', '.options-subject button'],
+  },
+  {
     what: "an effect's parameter",
     // `details.work-row`: an effect's row is a fold, and the generator's row in
     // the other column is a plain div. A closed fold still has its fields.
@@ -484,6 +494,42 @@ async function press(win, control) {
     return { verdict: 'skipped', detail: 'disabled, and says so' };
   }
 
+  // **A fold that has to come back the way it was left** (owner, 2026-10-21):
+  // an effect folded up by hand came open again on every rebuild of OPTIONS.
+  // Folded at first, opened by the probe, then the panel drawn again by the
+  // steps in `folds` — and it has to be open still. The old element is marked
+  // first, and one that was never replaced is BROKEN rather than kept: a fold
+  // nobody drew again proves nothing about drawing.
+  if (control.folds) {
+    const read =
+      `(() => { const n = ${find}; if (!n) return null;` +
+      ' return { open: n.open === true, old: n.dataset.probe === "before" }; })()';
+    const first = await win.webContents.executeJavaScript(read);
+    if (first.open) {
+      return { verdict: 'OPENED', detail: 'unfolded before anybody opened it' };
+    }
+    await win.webContents.executeJavaScript(
+      `(() => { const n = ${find}; n.dataset.probe = "before"; n.open = true; })()`,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    for (const step of control.folds) {
+      await win.webContents.executeJavaScript(
+        `(() => { const n = document.querySelector(${JSON.stringify(step)}); if (n) n.click(); })()`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    const after = await win.webContents.executeJavaScript(read);
+    if (after === null) {
+      return { verdict: 'MISSING', detail: 'gone after it was drawn again' };
+    }
+    if (after.old) {
+      return { verdict: 'BROKEN', detail: 'never drawn again, so this proves nothing' };
+    }
+    return after.open
+      ? { verdict: 'keeps', detail: 'still unfolded after it was drawn again' }
+      : { verdict: 'LOST', detail: 'folded again when it was drawn again' };
+  }
+
   const measure = control.changes
     ? `(() => { const n = document.querySelector(${JSON.stringify(control.changes)});` +
       ' if (!n) return null; const r = n.getBoundingClientRect();' +
@@ -622,6 +668,12 @@ app.whenReady().then(async () => {
     }
   });
 
+  // **What the last run left behind is not this run's.** The window keeps what
+  // an operator unfolded (OPTIONS' effects, 2026-10-21) in its own storage,
+  // and that storage outlives the run: the second run found an effect open
+  // that nobody in it had opened, and a probe that says "folded until opened"
+  // has to start from a window nobody has used.
+  await win.webContents.session.clearStorageData({ storages: ['localstorage'] });
   await win.loadFile(join(CLIENT, 'dist/ui/index.html'));
   await new Promise((resolve) => setTimeout(resolve, 600));
   await win.webContents.executeJavaScript(
@@ -736,7 +788,7 @@ app.whenReady().then(async () => {
   let dead = bad;
   for (const control of CONTROLS) {
     const result = await press(win, control);
-    if (['DEAD', 'MISSING', 'BROKEN', 'OFFERED', 'SENT', 'LOST'].includes(result.verdict)) {
+    if (['DEAD', 'MISSING', 'BROKEN', 'OFFERED', 'SENT', 'LOST', 'OPENED'].includes(result.verdict)) {
       dead += 1;
     }
     const pad = control.what.padEnd(22, ' ');

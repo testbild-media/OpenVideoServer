@@ -177,6 +177,7 @@ import {
 } from '../shared/work.js';
 import type { LayerView, ShowView, SlotView } from '../shared/view.js';
 import { emptyView } from '../shared/view.js';
+import { OPEN_EFFECTS_KEY, OpenFolds } from '../shared/open-folds.js';
 import { button, element, make } from './dom.js';
 import { paintStrip } from './strip.js';
 
@@ -660,6 +661,8 @@ export class LivePanel {
 
   /** Which bank of slots the matrix is showing, counting from zero. */
   #bank = 0;
+  /** Which effects in OPTIONS the operator has unfolded, by instance. */
+  readonly #openEffects = new OpenFolds(OPEN_EFFECTS_KEY);
   /** Every bank the bar offers, opened or not, worked out once per redraw. */
   #banks: SlotBank[] = [];
   /** How many of those the open show has opened, counting from the first. */
@@ -4304,12 +4307,23 @@ export class LivePanel {
    * is what folding is and the browser already knows how to do it — including
    * from the keyboard.
    *
-   * Open when it is switched on: a chain is usually read to find the effect
-   * that is doing something.
+   * **Folded unless the operator opened it, and kept the way they left it**
+   * (owner, 2026-10-21). It was open whenever the effect was on, set afresh on
+   * every rebuild — so a lock, an unlock or a move of any effect unfolded the
+   * whole chain again, and every slot change did the same to the next one.
+   * Which effects are open is remembered by the effect's own identity
+   * (`#openEffects`), so a chain looks the way it was left when its slot comes
+   * back, and after the client is started again.
    */
   #buildEffect(effect: EffectLine, nodes: EffectsNodes, chain: ChainLine): HTMLElement {
     const entry = make('details', 'work-row');
-    (entry as HTMLDetailsElement).open = effect.enabled;
+    (entry as HTMLDetailsElement).open = this.#openEffects.has(effect.id);
+    // `toggle` fires for a fold the operator opened or closed, and for the
+    // one set just above — which is the remembered state, so writing it back
+    // changes nothing.
+    entry.addEventListener('toggle', () => {
+      this.#openEffects.remember(effect.id, (entry as HTMLDetailsElement).open);
+    });
     const head = make('summary', 'work-row-head');
     head.append(make('span', 'work-row-name', effect.name));
     head.append(make('span', 'work-row-where', effect.enabled ? 'on' : 'off — the chain skips it'));
