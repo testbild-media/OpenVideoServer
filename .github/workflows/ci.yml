@@ -25,7 +25,14 @@ jobs:
   rust:
     # Debian is the production target, so the primary job runs on Linux even
     # though development happens on Windows.
-    runs-on: ubuntu-latest
+    #
+    # **Ubuntu 24.04 by name, not `ubuntu-latest`.** This job compiles against
+    # the image's own FFmpeg, and `ubuntu-latest` began moving to Ubuntu 26 on
+    # 2026-10-19: FFmpeg 8 there has no `avfft.h`, which `ffmpeg-sys-next` 7.1
+    # generates bindings for, so the 0.3.8 commit failed in Lint without a line
+    # of it being looked at. The package builds its own FFmpeg 7.1 in Debian
+    # and was never affected. Moving off 24.04 means ffmpeg-next 8 first.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
