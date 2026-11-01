@@ -499,6 +499,85 @@ describe('a live effect change, from the operator’s control to the wire', () =
   });
 });
 
+describe('a session the server no longer knows', () => {
+  // The owner, 2026-11-01: "Mussten uns während der Show neu einloggen." A
+  // server restart forgets every session; the client signs in again with what
+  // the operator typed and carries on, rather than showing the sign-in form.
+  const refused = () => json({ code: 'invalid_token', message: 'the session has expired' }, 401);
+
+  it('signs in again once and repeats the command', async () => {
+    const { calls, fetchImpl } = recorder([
+      () => json({ token: 'FIRST', account_id: 'A', expires_at: 1 }),
+      () => json({ account: { role: 'operator' } }),
+      refused,
+      () => json({ token: 'SECOND', account_id: 'A', expires_at: 1 }),
+      () => new Response(null, { status: 204 }),
+    ]);
+    const session = await signedIn(fetchImpl);
+
+    await expect(session.run({ do: 'set_master', field: 'freeze', value: true } as never)).resolves.toEqual({
+      ok: true,
+    });
+
+    const login = calls.filter((call) => call.url.endsWith('/auth/login'));
+    expect(login).toHaveLength(2);
+    expect(login[1]!.init!.body).toBe(
+      JSON.stringify({ username: 'operator', password: 'correct horse battery staple' }),
+    );
+    // The repeat carries the fresh token.
+    const last = calls[calls.length - 1]!;
+    expect(new Headers(last.init!.headers).get('authorization')).toBe('Bearer SECOND');
+    session.disconnect();
+  });
+
+  it('asks the operator when the password itself is refused', async () => {
+    // Changed by an administrator: trying it again would be guessing.
+    const { calls, fetchImpl } = recorder([
+      () => json({ token: 'FIRST', account_id: 'A', expires_at: 1 }),
+      () => json({ account: { role: 'operator' } }),
+      refused,
+      () => json({ code: 'invalid_credentials', message: 'invalid username or password' }, 401),
+      refused,
+    ]);
+    const session = await signedIn(fetchImpl);
+
+    const first = await session.run({ do: 'tap' } as never);
+    expect(first).toMatchObject({ ok: false, code: 'invalid_token' });
+    const second = await session.run({ do: 'tap' } as never);
+    expect(second).toMatchObject({ ok: false, code: 'invalid_token' });
+    // One attempt with the old password, and no second one.
+    expect(calls.filter((call) => call.url.endsWith('/auth/login'))).toHaveLength(2);
+    session.disconnect();
+  });
+
+  it('does not sign in again for a refusal that is not about the session', async () => {
+    const { calls, fetchImpl } = recorder([
+      () => json({ token: 'FIRST', account_id: 'A', expires_at: 1 }),
+      () => json({ account: { role: 'operator' } }),
+      () => json({ code: 'held_by_desk', message: 'the desk holds this' }, 409),
+    ]);
+    const session = await signedIn(fetchImpl);
+
+    const answer = await session.run({ do: 'tap' } as never);
+    expect(answer).toMatchObject({ ok: false, code: 'held_by_desk' });
+    expect(calls.filter((call) => call.url.endsWith('/auth/login'))).toHaveLength(1);
+    session.disconnect();
+  });
+
+  it('forgets what was typed on sign-out', async () => {
+    const { calls, fetchImpl } = recorder([
+      () => json({ token: 'FIRST', account_id: 'A', expires_at: 1 }),
+      () => json({ account: { role: 'operator' } }),
+    ]);
+    const session = await signedIn(fetchImpl);
+    session.disconnect();
+
+    const answer = await session.run({ do: 'tap' } as never);
+    expect(answer).toMatchObject({ ok: false, code: 'not_connected' });
+    expect(calls.filter((call) => call.url.endsWith('/auth/login'))).toHaveLength(1);
+  });
+});
+
 describe('the media endpoints', () => {
   it('sends a chunk as bytes at the offset it belongs at', async () => {
     // Not as JSON: a chunk of a ProRes file encoded as JSON would be a third

@@ -54,7 +54,7 @@ function snapshot(sequence: number): ServerMessage {
 }
 
 /** A connection wired to a fake socket and fake timers. */
-function harness() {
+function harness(renew?: () => Promise<string | null>) {
   const sockets: FakeSocket[] = [];
   const statuses: ConnectionStatus[] = [];
   const faults: Array<{ code: string; message: string }> = [];
@@ -75,6 +75,7 @@ function harness() {
     },
     schedule: (callback, ms) => setTimeout(callback, ms),
     cancel: (timer) => clearTimeout(timer),
+    ...(renew === undefined ? {} : { renew }),
     listener: {
       status: (status) => statuses.push(status),
       state: (state) => states.push(state.sequence),
@@ -169,6 +170,79 @@ describe('a refusal', () => {
     const last = statuses[statuses.length - 1]!;
     expect(last.state).toBe('refused');
     expect(last.state === 'refused' && last.reason).toContain('sign in');
+    vi.advanceTimersByTime(60_000);
+    expect(sockets).toHaveLength(1);
+  });
+
+  it('renews a session the server forgot, and goes live again with the fresh one', async () => {
+    // The owner, 2026-11-01: signed out in the middle of a show. A server that
+    // restarts — an update — forgets every session, and the next attempt was
+    // final. Now it asks for a fresh one, once, and carries on.
+    const renew = vi.fn(async () => 'fresh');
+    const { connection, sockets, statuses } = harness(renew);
+    connection.start();
+    sockets[0]!.handlers.opened();
+    sockets[0]!.receive({ result: 'unauthenticated' } satisfies ServerHello);
+    // The server closes the socket it refused: not a drop to retry with the
+    // token it just turned down.
+    sockets[0]!.handlers.closed('refused');
+    await vi.waitFor(() => expect(sockets).toHaveLength(2));
+
+    sockets[1]!.handlers.opened();
+    expect(sockets[1]!.messages()[0]).toMatchObject({ token: 'fresh' });
+    sockets[1]!.receive(ACCEPTED);
+    expect(statuses[statuses.length - 1]!.state).toBe('live');
+    expect(statuses.some((status) => status.state === 'refused')).toBe(false);
+    expect(renew).toHaveBeenCalledTimes(1);
+
+    // And nothing else opens. Ten seconds rather than a minute: past twelve
+    // without a pong the heartbeat rightly takes the socket for dead.
+    vi.advanceTimersByTime(10_000);
+    expect(sockets).toHaveLength(2);
+  });
+
+  it('ignores the refused socket closing after the fresh one is open', async () => {
+    const { connection, sockets, statuses } = harness(async () => 'fresh');
+    connection.start();
+    sockets[0]!.handlers.opened();
+    sockets[0]!.receive({ result: 'unauthenticated' } satisfies ServerHello);
+    await vi.waitFor(() => expect(sockets).toHaveLength(2));
+    sockets[1]!.handlers.opened();
+    sockets[1]!.receive(ACCEPTED);
+
+    // The old socket's close arrives late.
+    sockets[0]!.handlers.closed('refused');
+    expect(statuses[statuses.length - 1]!.state).toBe('live');
+    vi.advanceTimersByTime(10_000);
+    expect(sockets).toHaveLength(2);
+  });
+
+  it('is final when the fresh session is refused as well', async () => {
+    // A password changed by an administrator: a fresh token that is turned
+    // down too is the operator's to answer, and asking again would loop.
+    const renew = vi.fn(async () => 'fresh');
+    const { connection, sockets, statuses } = harness(renew);
+    connection.start();
+    sockets[0]!.handlers.opened();
+    sockets[0]!.receive({ result: 'unauthenticated' } satisfies ServerHello);
+    await vi.waitFor(() => expect(sockets).toHaveLength(2));
+    sockets[1]!.handlers.opened();
+    sockets[1]!.receive({ result: 'unauthenticated' } satisfies ServerHello);
+
+    expect(statuses[statuses.length - 1]!.state).toBe('refused');
+    expect(renew).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(60_000);
+    expect(sockets).toHaveLength(2);
+  });
+
+  it('is final when there is no fresh session to be had', async () => {
+    const { connection, sockets, statuses } = harness(async () => null);
+    connection.start();
+    sockets[0]!.handlers.opened();
+    sockets[0]!.receive({ result: 'unauthenticated' } satisfies ServerHello);
+    await vi.waitFor(() =>
+      expect(statuses[statuses.length - 1]!.state).toBe('refused'),
+    );
     vi.advanceTimersByTime(60_000);
     expect(sockets).toHaveLength(1);
   });

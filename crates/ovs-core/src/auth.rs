@@ -13,10 +13,13 @@ use ovs_types::time::Timestamp;
 use rand::rand_core::TryRng;
 use rand::rngs::SysRng;
 
-/// How long an issued token stays valid.
+/// How long a token stays valid **since it was last used**.
 ///
-/// Long enough to cover a show without an operator being signed out mid-cue,
-/// short enough that a token left on a laptop does not stay useful for weeks.
+/// Every use pushes its end back by this much ([`crate::session::Sessions::account_for`]),
+/// so a token in use never ends mid-show; one left on a laptop stops working
+/// this long after anybody last used it. It used to count from signing in,
+/// which signed the owner's operator out during the evening's show after a
+/// morning's get-in (2026-11-01).
 pub const TOKEN_LIFETIME_MS: i64 = 12 * 60 * 60 * 1000;
 
 /// Minimum password length accepted at setup.

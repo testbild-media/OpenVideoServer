@@ -100,6 +100,25 @@ export class Session {
   #status: ConnectionStatus = { state: 'offline' };
   /** Whether the account signed in may administer the server. */
   #mayAdminister = false;
+  /**
+   * The sign-in this session was opened with, so that a session the server no
+   * longer knows is renewed without the operator.
+   *
+   * **The owner, 2026-11-01: "Automatischer Logout des Clients ist nervig.
+   * Mussten uns während der Show neu einloggen."** A server forgets every
+   * session when it restarts — an update does that — and a session it does
+   * know ends after twelve unused hours; either way the client was showing a
+   * sign-in form in the middle of a show. Signing in again with what the
+   * operator typed is what they would have done, so this does it for them.
+   *
+   * Held in this process only, for as long as the session is open: never sent
+   * to the window, never written anywhere, and forgotten on sign-out. A
+   * password that no longer works — changed by an administrator — is not
+   * tried twice; the operator is asked, as before.
+   */
+  #credentials: { username: string; password: string } | null = null;
+  /** A renewal in flight, which every request that was refused waits for. */
+  #renewing: Promise<boolean> | null = null;
 
   /**
    * Files on their way into the library.
@@ -161,6 +180,7 @@ export class Session {
     const api = new ServerApi(serverOrigin(address), this.environment.fetch);
     await api.logIn(username, password);
     this.#api = api;
+    this.#credentials = { username, password };
     // Whether to offer the lock on an effect or a generator at all. Asked once
     // per sign-in, because a role is changed by signing in again; a server
     // that cannot say is one this client offers nothing it may refuse.
@@ -174,6 +194,9 @@ export class Session {
       token: api.token ?? '',
       clientVersion: this.environment.clientVersion,
       open: this.environment.open,
+      // A socket the server refused for its session — after a restart, say —
+      // reconnects with a fresh one rather than asking the operator.
+      renew: async () => ((await this.#renew()) ? (this.#api?.token ?? null) : null),
       listener: {
         status: (status) => {
           this.#status = status;
@@ -210,6 +233,8 @@ export class Session {
 
     const api = this.#api;
     this.#api = null;
+    this.#credentials = null;
+    this.#renewing = null;
     // Best effort: a server that cannot be reached cannot be told, and the
     // token is forgotten here either way.
     void api?.logOut().catch(() => undefined);
@@ -229,7 +254,7 @@ export class Session {
     try {
       // A tap answers with the tempo it produced and whether it produced one;
       // everything else answers with "carried out" and nothing more.
-      const tap = await this.#dispatch(api, command);
+      const tap = await this.#renewingOnRefusal(() => this.#dispatch(api, command));
       return tap === null ? { ok: true } : { ok: true, tap };
     } catch (error) {
       if (error instanceof ApiFailure) {
@@ -273,7 +298,7 @@ export class Session {
     }
 
     try {
-      const minted = await api.streamTicket(surface);
+      const minted = await this.#renewingOnRefusal(() => api.streamTicket(surface));
       return streamTicket(minted.ticket);
     } catch (error) {
       // Said out loud rather than swallowed: the panel would otherwise show five
@@ -430,7 +455,64 @@ export class Session {
     if (api === null) {
       return Promise.reject(new Error('this client is not connected to a server'));
     }
-    return work(api);
+    return this.#renewingOnRefusal(() => work(api));
+  }
+
+  /**
+   * Runs one request, and once more after signing in again when the server
+   * refused it for its session.
+   *
+   * Only for a session the server no longer knows (401, `invalid_token` or
+   * `unauthorised`). A wrong password is `invalid_credentials` and is the
+   * operator's to answer; anything else is the request's own failure.
+   */
+  async #renewingOnRefusal<T>(work: () => Promise<T>): Promise<T> {
+    try {
+      return await work();
+    } catch (error) {
+      if (!sessionGone(error) || !(await this.#renew())) {
+        throw error;
+      }
+      return work();
+    }
+  }
+
+  /**
+   * Signs in again with what this session was opened with, and hands the
+   * fresh token to the realtime socket. One at a time: every request refused
+   * while it runs waits for the same answer rather than signing in again
+   * itself.
+   */
+  #renew(): Promise<boolean> {
+    if (this.#renewing !== null) {
+      return this.#renewing;
+    }
+    const api = this.#api;
+    const credentials = this.#credentials;
+    if (api === null || credentials === null) {
+      return Promise.resolve(false);
+    }
+    const renewing = api
+      .logIn(credentials.username, credentials.password)
+      .then(
+        () => true,
+        (error: unknown) => {
+          // The password itself is refused: it has been changed, or the
+          // account removed. Trying it again would be guessing; forgetting it
+          // means the operator is asked, which is what they would expect.
+          if (error instanceof ApiFailure && error.code === 'invalid_credentials') {
+            this.#credentials = null;
+          }
+          return false;
+        },
+      )
+      .finally(() => {
+        if (this.#renewing === renewing) {
+          this.#renewing = null;
+        }
+      });
+    this.#renewing = renewing;
+    return renewing;
   }
 
   // --- the show editor ---------------------------------------------------
@@ -747,7 +829,7 @@ export class Session {
       };
     }
     try {
-      return { ok: true, value: await work(api) };
+      return { ok: true, value: await this.#renewingOnRefusal(() => work(api)) };
     } catch (error) {
       if (error instanceof ApiFailure) {
         return { ok: false, code: error.code, message: error.message, details: error.details };
@@ -863,6 +945,18 @@ export class Session {
 }
 
 /** Turns anything thrown while signing in into something an operator can read. */
+/**
+ * Whether a request was refused because the server no longer knows the
+ * session — expired, or forgotten in a restart — rather than for itself.
+ */
+function sessionGone(error: unknown): boolean {
+  return (
+    error instanceof ApiFailure &&
+    error.status === 401 &&
+    (error.code === 'invalid_token' || error.code === 'unauthorised')
+  );
+}
+
 export function signInFailure(error: unknown): SignInFailure {
   if (error instanceof ApiFailure) {
     // Whether the server needs setting up at all is not something a refused

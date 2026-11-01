@@ -124,7 +124,8 @@ async fn serve(mut socket: WebSocket, state: AppState, local: bool) {
             },
             incoming = socket.recv() => match incoming {
                 Some(Ok(Message::Text(text))) => {
-                    if !handle_client_message(&mut socket, &state, &text).await {
+                    let token = (!local).then_some(hello.token.as_str());
+                    if !handle_client_message(&mut socket, &state, &text, token).await {
                         return;
                     }
                 }
@@ -147,7 +148,12 @@ async fn read_hello(socket: &mut WebSocket) -> Option<ClientHello> {
 }
 
 /// Handles one client message. Returns false when the connection should close.
-async fn handle_client_message(socket: &mut WebSocket, state: &AppState, text: &str) -> bool {
+async fn handle_client_message(
+    socket: &mut WebSocket,
+    state: &AppState,
+    text: &str,
+    token: Option<&str>,
+) -> bool {
     let Ok(message) = serde_json::from_str::<ClientMessage>(text) else {
         // Anything the socket does not accept is almost always a command, and
         // saying "malformed" to a client that sent a perfectly good one would
@@ -163,7 +169,18 @@ async fn handle_client_message(socket: &mut WebSocket, state: &AppState, text: &
     };
 
     match message {
-        ClientMessage::Ping { nonce } => send_json(socket, &ServerMessage::Pong { nonce }).await,
+        ClientMessage::Ping { nonce } => {
+            // **A client watching is a client using its session** (owner,
+            // 2026-11-01: signed out in the middle of a show). It pings every
+            // five seconds while it is connected, and each one keeps the token
+            // alive, so a window left on the Live screen all evening is not
+            // signed out by the hours it spent only watching. A token that
+            // has already ended stays ended: this only extends a live one.
+            if let Some(token) = token {
+                let _ = touch(state, token);
+            }
+            send_json(socket, &ServerMessage::Pong { nonce }).await
+        }
         ClientMessage::Resynchronise => {
             let snapshot = state.authoritative().snapshot();
             send_json(socket, &ServerMessage::Snapshot(Box::new(snapshot))).await
@@ -194,9 +211,15 @@ fn reject_unauthenticated() -> ServerHello {
     ServerHello::Unauthenticated
 }
 
-/// Returns whether a token is currently valid.
+/// Returns whether a token is currently valid, which also keeps it so.
 #[must_use]
 fn is_authenticated(state: &AppState, token: &str) -> bool {
+    touch(state, token)
+}
+
+/// Uses a token: true while it is valid, and valid for another lifetime from
+/// now ([`crate::session::Sessions::account_for`]).
+fn touch(state: &AppState, token: &str) -> bool {
     state
         .with_sessions(|sessions| sessions.account_for(token, Timestamp::now()))
         .is_ok()

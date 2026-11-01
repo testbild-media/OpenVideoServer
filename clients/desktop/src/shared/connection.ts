@@ -87,6 +87,17 @@ export interface ConnectionOptions {
   clientVersion: string;
   open: OpenSocket;
   listener: ConnectionListener;
+  /**
+   * A fresh session token, when the server refused this one, or null when
+   * there is none to be had.
+   *
+   * A server forgets every session when it restarts, and ends one that has
+   * gone unused; the socket's next attempt is then refused, and without this
+   * the operator was sent back to the sign-in form in the middle of a show
+   * (owner, 2026-11-01). With it, the socket asks once for a new token and
+   * reconnects; only a second refusal reaches the operator.
+   */
+  renew?: () => Promise<string | null>;
   /** Defaults to `setTimeout`/`clearTimeout`. */
   schedule?: (callback: () => void, ms: number) => Timer;
   cancel?: (timer: Timer) => void;
@@ -122,6 +133,18 @@ export class Connection {
   #pingNonce = 0;
   /** When a ping was last answered, on the injected clock's terms. */
   #outstandingPings = 0;
+  /** The session token the next handshake carries. */
+  #token: string;
+  /** A fresh token is being asked for; the refused socket's close is not a drop. */
+  #renewing = false;
+  /** One renewal per refusal: a fresh token that is refused too is final. */
+  #renewed = false;
+  /**
+   * Which socket is the current one. A socket replaced while it was still
+   * closing — the refused one, after a fresh session — must not be able to
+   * report its close as the new one's.
+   */
+  #generation = 0;
 
   private readonly schedule: (callback: () => void, ms: number) => Timer;
   private readonly cancel: (timer: Timer) => void;
@@ -129,6 +152,7 @@ export class Connection {
   constructor(private readonly options: ConnectionOptions) {
     this.schedule = options.schedule ?? ((callback, ms) => setTimeout(callback, ms));
     this.cancel = options.cancel ?? ((timer) => clearTimeout(timer));
+    this.#token = options.token;
   }
 
   /** What the operator is currently being told. */
@@ -168,10 +192,13 @@ export class Connection {
     this.#outstandingPings = 0;
     this.#announce({ state: 'connecting' });
 
+    this.#generation += 1;
+    const generation = this.#generation;
+    const current = () => generation === this.#generation;
     this.#socket = this.options.open(this.options.url, {
-      opened: () => this.#onOpen(),
-      received: (text) => this.#onText(text),
-      closed: (reason) => this.#onClose(reason),
+      opened: () => current() && this.#onOpen(),
+      received: (text) => current() && this.#onText(text),
+      closed: (reason) => current() && this.#onClose(reason),
     });
   }
 
@@ -179,7 +206,7 @@ export class Connection {
     // The token goes in the handshake rather than a header or a query string:
     // the one would not survive a browser, the other would be written into
     // every access log between here and the server.
-    this.#socket?.send(clientHello(this.options.token, this.options.clientVersion));
+    this.#socket?.send(clientHello(this.#token, this.options.clientVersion));
   }
 
   #onText(text: string): void {
@@ -207,6 +234,7 @@ export class Connection {
       case 'accepted':
         this.#handshaken = true;
         this.#attempt = 0;
+        this.#renewed = false;
         this.#state = emptyState();
         this.#announce({ state: 'live', serverVersion: hello.server_version });
         this.#startHeartbeat();
@@ -218,7 +246,7 @@ export class Connection {
         );
         break;
       case 'unauthenticated':
-        this.#refuse('the server did not accept this session; sign in again');
+        this.#renewOrRefuse();
         break;
       case 'not_ready':
         // Temporary by definition: the server is still starting.
@@ -295,7 +323,46 @@ export class Connection {
     this.#send({ type: 'resynchronise' });
   }
 
+  /**
+   * The session was refused: asks for a fresh one and reconnects with it, or
+   * says so when there is none — or when a fresh one was refused as well.
+   */
+  #renewOrRefuse(): void {
+    const renew = this.options.renew;
+    if (renew === undefined || this.#renewed) {
+      this.#refuse('the server did not accept this session; sign in again');
+      return;
+    }
+    this.#renewed = true;
+    this.#renewing = true;
+    this.#announce({ state: 'connecting' });
+    void renew()
+      .catch(() => null)
+      .then((token) => {
+        this.#renewing = false;
+        if (this.#stopped) {
+          return;
+        }
+        if (token === null || token === '') {
+          this.#refuse('the server did not accept this session; sign in again');
+          return;
+        }
+        this.#token = token;
+        // The refused socket is closed at the far end; this one is not kept.
+        const old = this.#socket;
+        this.#socket = null;
+        old?.close();
+        this.#connect();
+      });
+  }
+
   #onClose(reason: string): void {
+    if (this.#renewing) {
+      // The server closing the socket it refused, while a fresh session is
+      // being fetched: not a dropped connection, and not one to retry with
+      // the token it just refused.
+      return;
+    }
     this.#socket = null;
     this.#handshaken = false;
     this.#stopHeartbeat();
