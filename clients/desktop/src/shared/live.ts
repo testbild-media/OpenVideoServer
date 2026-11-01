@@ -460,6 +460,39 @@ export function generatorReset(generatorInstanceId: string): LiveCommand {
 
 // --- the matrix --------------------------------------------------------------
 
+/** One row of the matrix: a layer, and where it sits in the whole stack. */
+export interface MatrixRow {
+  layer: LayerView;
+  /** Counting from 1 at the bottom of the composite, hidden layers included. */
+  number: number;
+}
+
+/**
+ * The rows the matrix draws, the top of the composite first.
+ *
+ * **A layer an administrator has hidden is not one of them** (owner,
+ * 2026-11-01): "Ein Admin sollte Layer verstecken können, dass diese nicht mehr
+ * in der Live GUI zu sehen sind" — his layer 7 is an effect layer the desk
+ * drives entirely, and a row with nothing on it to set is a row in the way of
+ * the ones that have. `revealing` brings them back, which is how an
+ * administrator finds one to show again.
+ *
+ * Every row keeps the number it has in the whole stack. Layer 8 above a hidden
+ * 7 is still 8, because that is the layer the desk patch and Settings call 8,
+ * and a gap in the numbers is what says that something is hidden there.
+ */
+export function matrixRows(layers: readonly LayerView[], revealing: boolean): MatrixRow[] {
+  return layers
+    .map((layer, position) => ({ layer, number: position + 1 }))
+    .filter((row) => revealing || !row.layer.hidden)
+    .reverse();
+}
+
+/** How many of the show's layers are hidden from the live screen. */
+export function hiddenCount(layers: readonly LayerView[]): number {
+  return layers.filter((layer) => layer.hidden).length;
+}
+
 /** One bank of slots, as the bank buttons offer them. */
 export interface SlotBank {
   /** The lowest slot in it, counting from 1. */

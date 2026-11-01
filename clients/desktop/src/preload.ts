@@ -205,6 +205,12 @@ export interface OvsBridge {
     layerId: string,
     banks: number,
   ): Promise<Answer<AssignSlotResponse>>;
+  /** Hides a layer from the Live matrix, or shows it again. Administrators only. */
+  setLayerHidden(
+    showId: string,
+    layerId: string,
+    hidden: boolean,
+  ): Promise<Answer<SetLockResponse>>;
   /**
    * Moves a slot to another pad, of its own layer or `toLayer`, with
    * everything it carries. A pad that is taken swaps with it.
@@ -449,6 +455,8 @@ const bridge: OvsBridge = {
     ipcRenderer.invoke('ovs:set-banks', showId, layerId, banks),
   moveSlot: (showId, layerId, from, to, toLayer) =>
     ipcRenderer.invoke('ovs:move-slot', showId, layerId, from, to, toLayer),
+  setLayerHidden: (showId, layerId, hidden) =>
+    ipcRenderer.invoke('ovs:set-layer-hidden', showId, layerId, hidden),
   showFolders: () => ipcRenderer.invoke('ovs:show-folders'),
   createShowFolder: (path) => ipcRenderer.invoke('ovs:show-folder-create', path),
   deleteShow: (showId) => ipcRenderer.invoke('ovs:show-delete', showId),

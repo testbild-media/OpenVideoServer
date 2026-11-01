@@ -181,6 +181,10 @@ pub fn generate_protocol() -> Vec<GeneratedSchema> {
             crate::http::MoveSlotRequest
         ),
         schema!(
+            "set-layer-hidden-request.schema.json",
+            crate::http::SetLayerHiddenRequest
+        ),
+        schema!(
             "move-slot-response.schema.json",
             crate::http::MoveSlotResponse
         ),

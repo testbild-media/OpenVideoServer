@@ -240,6 +240,9 @@ export type {
   SetConnectorRoleRequest,
 } from './set-connector-role.js';
 export type {
+  SetLayerHiddenRequest,
+} from './set-layer-hidden-request.js';
+export type {
   LockTarget,
   SetLockRequest,
 } from './set-lock-request.js';

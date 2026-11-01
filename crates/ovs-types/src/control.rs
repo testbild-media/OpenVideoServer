@@ -321,6 +321,19 @@ pub enum EditRefusal {
 /// save for a reason nobody can see, and obeying the second would undo a lock
 /// without anybody touching it.
 pub fn carry_locks(from: &Show, into: &mut Show) {
+    // A layer hidden from the Live screen is carried the same way, for the
+    // same reason: it is an administrator's, by a request of its own (owner,
+    // 2026-11-01), and a draft opened before it was hidden has not asked to
+    // show it again. A layer the draft added is shown.
+    let hidden: BTreeMap<LayerId, bool> = from
+        .layers
+        .iter()
+        .map(|layer| (layer.id, layer.hidden))
+        .collect();
+    for layer in &mut into.layers {
+        layer.hidden = hidden.get(&layer.id).copied().unwrap_or(false);
+    }
+
     let effects: BTreeMap<EffectInstanceId, bool> = effects_of(from)
         .into_iter()
         .map(|(id, (_, _, effect, _))| (id, effect.locked))
@@ -840,6 +853,32 @@ mod tests {
         adding.layers[0].effects.push(sneaked);
         carry_locks(&unlocked, &mut adding);
         assert!(!adding.layers[0].effects[1].locked);
+    }
+
+    #[test]
+    fn a_hidden_layer_stays_hidden_through_a_document_sent_whole() {
+        // The owner, 2026-11-01: an administrator hides a layer the desk
+        // drives. A draft opened before that, saved by anybody, has not asked
+        // to show it again — and one claiming to hide a layer hides nothing.
+        let (shown, _, _) = a_show();
+        let mut stored = shown.clone();
+        stored.layers[0].hidden = true;
+
+        let mut stale_draft = shown.clone();
+        carry_locks(&stored, &mut stale_draft);
+        assert!(stale_draft.layers[0].hidden, "still hidden");
+
+        let mut claiming = stored.clone();
+        carry_locks(&shown, &mut claiming);
+        assert!(!claiming.layers[0].hidden, "a document cannot hide a layer");
+
+        // A layer the draft added is shown, whatever it says.
+        let mut adding = shown.clone();
+        let mut new = Layer::new("Added", 9);
+        new.hidden = true;
+        adding.layers.push(new);
+        carry_locks(&shown, &mut adding);
+        assert!(!adding.layers.last().expect("added").hidden);
     }
 
     #[test]

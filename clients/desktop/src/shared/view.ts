@@ -280,6 +280,12 @@ export interface LayerView {
    * [`slotBanks`]: ../live.ts
    */
   banks: number;
+  /**
+   * Left out of the Live matrix by an administrator (owner, 2026-11-01): a
+   * layer a desk drives entirely, with nothing to set on the screen. It still
+   * renders and answers its desk; only this screen leaves it out.
+   */
+  hidden: boolean;
 }
 
 /** The master strip, as the server reports it. */
@@ -436,6 +442,7 @@ export function toView(state: ShowState, mayAdminister = false): ShowView {
       // `serde` default is. A show written before layers had a bank count
       // reads as one bank and still shows every slot it has.
       banks: layer.banks ?? 1,
+      hidden: layer.hidden ?? false,
       effects: layer.effects.map(effectOf),
       slots: layer.slots
         .slice()

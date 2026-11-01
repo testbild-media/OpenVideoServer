@@ -158,6 +158,11 @@ pub fn router(state: AppState) -> Router {
         .route("/shows/{show_id}/mapping", put(show_edits::set_mapping))
         // An administrator locking an effect or a generator where it is.
         .route("/shows/{show_id}/lock", put(show_edits::set_lock))
+        // An administrator hiding a layer from the Live screen.
+        .route(
+            "/shows/{show_id}/layers/{layer_id}/hidden",
+            put(show_edits::set_hidden),
+        )
         .route(
             "/shows/{show_id}/layers/{layer_id}/effects",
             post(show_edits::add_layer_effect),

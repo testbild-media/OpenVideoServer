@@ -96,6 +96,13 @@
         <div id="banks" role="group" aria-label="Slot bank"></div>
         <div id="banks-bar-end">
         <!--
+          That an administrator has hidden layers from this screen, and how
+          many (owner, 2026-11-01). For an administrator it brings them back,
+          dimmed, so one can be shown again; for anybody else it says why the
+          layer numbers have a gap. Absent while nothing is hidden.
+        -->
+        <button id="hidden-layers" type="button" hidden></button>
+        <!--
           The one switch that takes the show off the console and onto this
           window (owner, 2026-09-23). When something goes wrong out there, an
           operator has to be able to say “not any more” in one press and drive
@@ -207,6 +214,15 @@
 
         <button id="freeze" type="button" disabled>FREEZE</button>
       </section>
+
+      <!--
+        The handle that folds the preview and work area away, and brings it
+        back (owner, 2026-11-01): "gerade für Touchscreens sehr gut, dass man
+        alle Slots untereinander sehen kann ohne zu scrollen". The whole width
+        of the screen, so it is found by a thumb without looking, and on its own
+        line rather than beside FREEZE, which is not a button to hit by mistake.
+      -->
+      <button id="work-fold" type="button" aria-controls="work" aria-expanded="true"></button>
 
       <!--
         The preview/work area, as the drawing has its bottom band: the

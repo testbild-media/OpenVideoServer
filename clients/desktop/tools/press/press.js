@@ -56,6 +56,15 @@ let bad = 0;
  * why the owner found the generator's parameters broken rather than a run did.
  * It says what to put in and which event says it.
  */
+/**
+ * The way back from a slot to its layer in OPTIONS.
+ *
+ * By its title and not as the subject row's button: on the layer itself the
+ * row has an administrator's Hide in Live there instead (2026-11-01), and a
+ * step meant to go back to the layer pressed that.
+ */
+const THE_LAYER = '.options-subject button[title^="Set up "]';
+
 const CONTROLS = [
   // --- the global bar ---
   { what: 'FREEZE', id: 'freeze', sends: 'set_master' },
@@ -162,8 +171,8 @@ const CONTROLS = [
     // chain untouched by anybody.
     what: 'an effect stays as it was left',
     selector: '.options-column details.work-row',
-    open: '.options-subject button',
-    folds: ['.pad:not(.empty) .pad-label', '.options-subject button'],
+    open: THE_LAYER,
+    folds: ['.pad:not(.empty) .pad-label', THE_LAYER],
   },
   {
     what: "an effect's parameter",
@@ -171,7 +180,7 @@ const CONTROLS = [
     // the other column is a plain div. A closed fold still has its fields.
     selector: '.options-column details.work-row .live-facts input',
     sends: 'set_effect',
-    open: '.options-subject button',
+    open: THE_LAYER,
     // Brightness is declared from -1 to 1, and a fader listens for `input`.
     turn: { value: 0.5, event: 'input' },
   },
@@ -181,46 +190,56 @@ const CONTROLS = [
     // at all. A click is what a checkbox takes, so this one needs no `turn`.
     selector: '.options-column details.work-row .live-facts input[type="checkbox"]',
     sends: 'set_effect',
-    open: '.options-subject button',
+    open: THE_LAYER,
   },
   {
     what: 'move an effect down the chain',
     selector: '.options-column button[title="one place later in the chain"]',
     call: 'orderEffects',
-    open: '.options-subject button',
+    open: THE_LAYER,
   },
   {
     what: 'take an effect off the chain',
     // The only red thing on the row, which is how it says it edits the show.
     selector: '.options-column .work-row-head button.danger',
     call: 'removeEffect',
-    open: '.options-subject button',
+    open: THE_LAYER,
   },
   // A locked effect: its ✕ is not offered, and neither is the fader a desk
   // holds on it. The lock itself is, to an administrator.
   {
     what: 'remove a locked effect',
     selector: '.options-column details.work-row:has(.lock-mark) .work-row-head button.danger',
-    open: '.options-subject button',
+    open: THE_LAYER,
     expect: 'held',
   },
   {
     what: 'a fader the desk holds',
     selector: '.options-column details.work-row:has(.lock-mark) .live-fact.desk input',
-    open: '.options-subject button',
+    open: THE_LAYER,
     expect: 'held',
   },
   {
     what: 'unlock an effect',
     selector: '.options-column details.work-row:has(.lock-mark) button[title^="Let "]',
     call: 'setLock',
-    open: '.options-subject button',
+    open: THE_LAYER,
   },
   {
     what: 'lock an effect',
     selector: '.options-column details.work-row:not(:has(.lock-mark)) button[title^="Lock "]',
     call: 'setLock',
-    open: '.options-subject button',
+    open: THE_LAYER,
+  },
+  // Taking a layer off the live screen, an administrator's (owner,
+  // 2026-11-01). The stub answers and changes nothing, so the row stays.
+  {
+    what: 'hide a layer from Live',
+    selector: '.options-subject button[title^="Take "]',
+    call: 'setLayerHidden',
+    open: THE_LAYER,
+    // (showId, layerId, hidden)
+    args: (args) => args[2] === true,
   },
   // --- IO mapping, rebuilt on 2026-09-25 and so the part least proved ---
   //
@@ -434,6 +453,34 @@ const CONTROLS = [
     id: 'live-clear-slot',
     call: 'clearSlot',
     open: '.pad:not(.empty) .pad-label',
+  },
+  // The stub's seventh layer is hidden from Live. After every probe that finds
+  // a row by its place on the matrix, because revealing it puts a row on top.
+  {
+    what: 'show the hidden layers',
+    id: 'hidden-layers',
+    reveals: { selector: '#matrix .layer.concealed .layer-name-number', text: '7' },
+  },
+  {
+    // Chosen on the matrix, where the press above put it, and shown again
+    // from OPTIONS, which choosing a layer opens.
+    what: 'show a hidden layer again',
+    selector: '.options-subject button[title^="Put "]',
+    call: 'setLayerHidden',
+    open: '#matrix .layer.concealed .layer-name',
+    args: (args) => args[1] === 'L7' && args[2] === false,
+  },
+  // Folding the preview and work area away, so the layers have the screen
+  // (owner, 2026-11-01). It sends nothing: proved by the matrix growing.
+  {
+    what: 'fold the work area away',
+    id: 'work-fold',
+    changes: '#matrix',
+  },
+  {
+    what: 'bring the work area back',
+    id: 'work-fold',
+    changes: '#matrix',
   },
   // Handing the wall to another show. Before 'delete a show' because that one
   // takes a row away, and this one needs a show that is not already on air.

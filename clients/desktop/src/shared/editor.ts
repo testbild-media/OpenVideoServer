@@ -243,12 +243,21 @@ export function mergedForSave(draft: Draft, server: Show): Show {
 
   // And whatever the layer list came out as, what is *in* each layer is the
   // server's. A layer the editor made has none of the three yet, so it keeps
-  // its own empty ones.
+  // its own empty ones. Whether a layer is hidden from Live is the server's
+  // too: an administrator's, by a request of its own, which no draft can
+  // change (and the server carries anyway).
   merged.layers = merged.layers.map((layer) => {
     const live = server.layers.find((each) => each.id === layer.id);
-    return live === undefined
-      ? layer
-      : { ...layer, slots: live.slots, effects: live.effects, banks: live.banks };
+    if (live === undefined) {
+      return layer;
+    }
+    const kept = { ...layer, slots: live.slots, effects: live.effects, banks: live.banks };
+    if (live.hidden === true) {
+      kept.hidden = true;
+    } else {
+      delete kept.hidden;
+    }
+    return kept;
   });
 
   return merged;

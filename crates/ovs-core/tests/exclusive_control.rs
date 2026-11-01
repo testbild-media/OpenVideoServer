@@ -17,8 +17,9 @@ use ovs_core::{router, AppState};
 use ovs_db::Database;
 use ovs_proto::http::{
     AssignSlotRequest, CreateAccountRequest, LockTarget, LoginRequest, LoginResponse,
-    MoveSlotRequest, OrderEffectsRequest, SaveShowRequest, SelectSlotRequest, SetLockRequest,
-    UpdateEffectRequest, UpdateLayerRequest, UpdateMasterRequest,
+    MoveSlotRequest, OrderEffectsRequest, SaveShowRequest, SelectSlotRequest,
+    SetLayerHiddenRequest, SetLockRequest, UpdateEffectRequest, UpdateLayerRequest,
+    UpdateMasterRequest,
 };
 use ovs_types::config::layer::SlotControl;
 use ovs_types::config::patch::FixtureTarget;
@@ -768,4 +769,61 @@ async fn a_locked_generator_stays_in_its_slot() {
         1,
         "still at slot 1"
     );
+}
+
+#[tokio::test]
+async fn only_an_administrator_hides_a_layer_and_a_saved_draft_does_not_show_it() {
+    // The owner, 2026-11-01: "Ein Admin sollte Layer verstecken können, dass
+    // diese nicht mehr in der Live GUI zu sehen sind."
+    let harness = Harness::start().await;
+    let (show, layer_id) = a_show();
+    let show_id = show.id;
+    harness.open(show);
+    let path = format!("/api/v1/shows/{show_id}/layers/{layer_id}/hidden");
+
+    // An operator may not.
+    let (status, body) = harness
+        .put(&path, &SetLayerHiddenRequest { hidden: true })
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert!(!harness.show().layers[0].hidden);
+
+    // An administrator may.
+    let (status, body) = send(
+        &harness.app,
+        json(
+            "PUT",
+            &path,
+            Some(&harness.admin),
+            &SetLayerHiddenRequest { hidden: true },
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(harness.show().layers[0].hidden);
+
+    // A draft from before, saved by an operator, has not asked to show it.
+    let mut stale = harness.show();
+    stale.layers[0].hidden = false;
+    stale.layers[0].name = "Renamed".to_owned();
+    let save = format!("/api/v1/shows/{show_id}");
+    let (status, body) = harness.put(&save, &SaveShowRequest { show: stale }).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let layer = harness.show().layers[0].clone();
+    assert_eq!(layer.name, "Renamed", "the rest of the save went through");
+    assert!(layer.hidden, "and the layer is still hidden");
+
+    // Shown again the same way.
+    let (status, body) = send(
+        &harness.app,
+        json(
+            "PUT",
+            &path,
+            Some(&harness.admin),
+            &SetLayerHiddenRequest { hidden: false },
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(!harness.show().layers[0].hidden);
 }

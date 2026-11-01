@@ -20,6 +20,15 @@ export interface FoldStore {
 export const OPEN_EFFECTS_KEY = 'ovs.live.open-effects';
 
 /**
+ * Where the parts of Live an operator has folded *away* are kept.
+ *
+ * The other way round from the effects, because these are open until somebody
+ * folds them: what is stored is what was put away, and an id here is a part of
+ * the screen that is not on it.
+ */
+export const PUT_AWAY_KEY = 'ovs.live.put-away';
+
+/**
  * How many open folds are remembered at most.
  *
  * Past this the one opened longest ago is forgotten first, which folds it —

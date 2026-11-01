@@ -23,10 +23,12 @@ import {
   effectReset,
   generatorCommand,
   generatorReset,
+  hiddenCount,
   isLiveCommand,
   demandedFps,
   layerCommand,
   masterCommand,
+  matrixRows,
   nearestSpeedScale,
   padsInBank,
   percentLine,
@@ -332,6 +334,39 @@ describe('the matrix', () => {
     const far = withLayer({ slots: [{ ...upperOf(loaded()).slots[0]!, index: 30 }] });
     const old = far.layers.map((layer) => ({ ...layer, banks: 1 }));
     expect(slotBanks(old).map((bank) => bank.label)).toEqual(['1–12', '13–24', '25–36']);
+  });
+
+  it('leaves out a layer an administrator hid, and keeps every other layer’s number', () => {
+    // Owner, 2026-11-01: his layer 7 is driven entirely by the desk, and "ein
+    // Admin sollte Layer verstecken können, dass diese nicht mehr in der Live
+    // GUI zu sehen sind". From the document as the server sends it, so the
+    // flag is followed all the way from the wire.
+    const state = emptyState();
+    const document = show();
+    document.layers = [
+      ...document.layers,
+      { ...document.layers[0]!, id: 'effects', name: 'Effects', order: 3, hidden: true, slots: [] },
+    ];
+    apply(state, {
+      type: 'snapshot',
+      sequence: 1,
+      show: document,
+      master: { bpm: 128, crossfader: 0, dimmer: 1, freeze: false, speed_scale: 1 },
+      layers: [live('upper'), live('effects'), live('lower')],
+      renderer: { state: 'running' },
+    } satisfies ServerMessage);
+    const layers = toView(state).layers;
+
+    const shown = (revealing: boolean) =>
+      matrixRows(layers, revealing).map((row) => `${row.number} ${row.layer.id}`);
+    // The top of the composite first, and Upper is still 3 with 2 gone.
+    expect(shown(false)).toEqual(['3 upper', '1 lower']);
+    expect(shown(true)).toEqual(['3 upper', '2 effects', '1 lower']);
+    expect(hiddenCount(layers)).toBe(1);
+
+    // A layer the document says nothing about is on the screen.
+    expect(hiddenCount(loaded().layers)).toBe(0);
+    expect(shown(false)).toHaveLength(2);
   });
 
   it('steps to the next slot that holds something, and back to black before the first', () => {

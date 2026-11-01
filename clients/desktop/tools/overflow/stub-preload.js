@@ -91,6 +91,10 @@ const layer = (id, order) => ({
   // nobody's but the client's, so every probe that presses a layer still can.
   mayChooseSlot: order !== 6,
   held: { opacity: order === 6, slot: order === 6, transform: order === 6 },
+  // **The seventh is hidden from Live** (owner, 2026-11-01), like his effect
+  // layer the desk drives entirely: on top of the stack, so the matrix the
+  // audits measure is still the six under it, and there to be revealed.
+  hidden: order === 7,
   defaults: { enabled: true, route: 'A', opacity: 1 },
   // **Two, and the second one switched off.** Two because a chain of one
   // cannot be reordered -- both arrows are disabled, rightly, and pressing one
@@ -171,6 +175,7 @@ const view = {
     layer('L4', 4),
     layer('L5', 5),
     layer('L6', 6),
+    layer('L7', 7),
   ],
   mapping: {
     outputs: [
@@ -486,6 +491,7 @@ const CALLS = [
   'setBanks',
   'moveSlot',
   'printSheet',
+  'setLayerHidden',
   'setDmxProtocols',
   'setLock',
   'setMapping',

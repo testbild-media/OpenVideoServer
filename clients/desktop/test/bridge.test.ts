@@ -248,6 +248,7 @@ describe('the bridge the window is given', () => {
       'saveShow',
       'setBanks',
       'setDmxProtocols',
+      'setLayerHidden',
       'setLock',
       'setMapping',
       'setSlot',

@@ -645,6 +645,15 @@ export class Session {
     return this.#answer((api) => api.setBanks(showId, layerId, banks));
   }
 
+  /** Hides a layer from the Live matrix, or shows it again. Administrators only. */
+  setLayerHidden(
+    showId: string,
+    layerId: string,
+    hidden: boolean,
+  ): Promise<Answer<SetLockResponse>> {
+    return this.#answer((api) => api.setLayerHidden(showId, layerId, hidden));
+  }
+
   /** Moves a slot to another pad, of its own layer or `toLayer`. */
   moveSlot(
     showId: string,

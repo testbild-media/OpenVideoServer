@@ -413,6 +413,12 @@ export interface Layer {
    */
   enabled: boolean;
   /**
+   * Left out of the Live screen's matrix (owner, 2026-11-01: "Ein Admin sollte Layer verstecken können, dass diese nicht mehr in der Live GUI zu sehen sind" — a layer a desk drives entirely, with nothing to set on the screen).
+   *
+   * Only what the screen shows: the layer renders, composites and answers its desk exactly as before. Like a lock, it is set by an administrator's own request and carried across every save and import unchanged ([`crate::control::carry_locks`]).
+   */
+  hidden?: boolean;
+  /**
    * Stable identifier.
    */
   id: LayerId;

@@ -219,6 +219,17 @@ pub struct Layer {
     pub slot_control: SlotControl,
     /// Effects applied to the whole layer, in chain order.
     pub effects: Vec<EffectInstance>,
+    /// Left out of the Live screen's matrix (owner, 2026-11-01: "Ein Admin
+    /// sollte Layer verstecken können, dass diese nicht mehr in der Live GUI zu
+    /// sehen sind" — a layer a desk drives entirely, with nothing to set on
+    /// the screen).
+    ///
+    /// Only what the screen shows: the layer renders, composites and answers
+    /// its desk exactly as before. Like a lock, it is set by an administrator's
+    /// own request and carried across every save and import unchanged
+    /// ([`crate::control::carry_locks`]).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hidden: bool,
 }
 
 impl Layer {
@@ -292,6 +303,7 @@ impl Layer {
             banks: 1,
             slot_control: SlotControl::Dmx,
             effects: Vec::new(),
+            hidden: false,
         }
     }
 

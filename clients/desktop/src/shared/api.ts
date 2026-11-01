@@ -52,6 +52,7 @@ import type {
   SetBanksRequest,
   MoveSlotRequest,
   MoveSlotResponse,
+  SetLayerHiddenRequest,
   SourceRef,
   StateSnapshot,
   StatusResponse,
@@ -463,6 +464,19 @@ export class ServerApi {
     return this.#request(
       'PUT',
       `/shows/${encodeURIComponent(showId)}/layers/${encodeURIComponent(layerId)}/banks`,
+      body,
+    );
+  }
+
+  /**
+   * Hides a layer from the Live matrix, or shows it again. Administrators only
+   * (owner, 2026-11-01); the layer renders and answers its desk either way.
+   */
+  setLayerHidden(showId: string, layerId: string, hidden: boolean): Promise<SetLockResponse> {
+    const body: SetLayerHiddenRequest = { hidden };
+    return this.#request(
+      'PUT',
+      `/shows/${encodeURIComponent(showId)}/layers/${encodeURIComponent(layerId)}/hidden`,
       body,
     );
   }

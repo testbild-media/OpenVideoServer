@@ -78,10 +78,12 @@ import {
   effectReset,
   generatorCommand,
   generatorReset,
+  hiddenCount,
   nearestSpeedScale,
   isLiveCommand,
   layerCommand,
   masterCommand,
+  matrixRows,
   padsInBank,
   percentLine,
   playbackLabel,
@@ -177,7 +179,7 @@ import {
 } from '../shared/work.js';
 import type { LayerView, ShowView, SlotView } from '../shared/view.js';
 import { emptyView } from '../shared/view.js';
-import { OPEN_EFFECTS_KEY, OpenFolds } from '../shared/open-folds.js';
+import { OPEN_EFFECTS_KEY, OpenFolds, PUT_AWAY_KEY } from '../shared/open-folds.js';
 import { button, element, make } from './dom.js';
 import { paintStrip } from './strip.js';
 
@@ -463,6 +465,9 @@ interface RowNodes {
 const MIN_TILE_HEIGHT = 40;
 const MAX_TILE_HEIGHT = 132;
 
+/** The preview and work area, as `#putAway` remembers it. */
+const WORK_AREA = 'work';
+
 /** One pad. */
 interface PadNodes {
   root: HTMLButtonElement;
@@ -663,6 +668,10 @@ export class LivePanel {
   #bank = 0;
   /** Which effects in OPTIONS the operator has unfolded, by instance. */
   readonly #openEffects = new OpenFolds(OPEN_EFFECTS_KEY);
+  /** Whether an administrator has asked to see the hidden layers too. See `#revealing`. */
+  #revealHidden = false;
+  /** What the operator has folded away, kept across restarts. Only the work area, so far. */
+  readonly #putAway = new OpenFolds(PUT_AWAY_KEY);
   /** Every bank the bar offers, opened or not, worked out once per redraw. */
   #banks: SlotBank[] = [];
   /** How many of those the open show has opened, counting from the first. */
@@ -842,6 +851,9 @@ export class LivePanel {
     bpmUp: element<HTMLButtonElement>('bpm-up'),
     dmxEnabled: element<HTMLButtonElement>('dmx-enabled'),
     saveLive: element<HTMLButtonElement>('save-live'),
+    hiddenLayers: element<HTMLButtonElement>('hidden-layers'),
+    workFold: element<HTMLButtonElement>('work-fold'),
+    work: element('work'),
     beatStrip: element('beat-strip'),
     phaseReset: element<HTMLButtonElement>('phase-reset'),
     banks: element('banks'),
@@ -899,6 +911,16 @@ export class LivePanel {
     }
 
     this.#ui.saveLive.addEventListener('click', () => void this.#saveLive());
+    this.#ui.hiddenLayers.addEventListener('click', () => {
+      this.#revealHidden = !this.#revealHidden;
+      this.#render();
+    });
+    this.#ui.workFold.addEventListener('click', () => {
+      this.#putAway.remember(WORK_AREA, !this.#workFolded());
+      this.#drawWorkFold();
+      this.#syncStream();
+    });
+    this.#drawWorkFold();
 
     // Escape takes back a question a pad is asking. A drop onto an occupied
     // slot arms it and waits; the operator must be able to walk away from that
@@ -1701,37 +1723,83 @@ export class LivePanel {
 
   #drawMatrix(): void {
     // Top of the list is the top of the composite, which is how an operator
-    // reads a stack of layers.
-    const ordered = [...this.#view.layers].reverse();
+    // reads a stack of layers. Without the ones an administrator has hidden,
+    // unless one is looking for them.
+    const rows = matrixRows(this.#view.layers, this.#revealing());
     // The bank is deliberately not part of this: paging is not a reason to
     // rebuild seven rows of controls, and each row's pad strip rebuilds itself
-    // when the slots in it change, which paging does.
-    const shape = `${ordered.map((layer) => layer.id).join(',')}|${this.#connected}`;
+    // when the slots in it change, which paging does. The numbers are, because
+    // a layer added under the others moves every one of them up.
+    const shape = `${rows.map((row) => `${row.layer.id}:${row.number}`).join(',')}|${this.#connected}`;
 
     if (shape !== this.#matrixShape) {
       this.#matrixShape = shape;
       this.#rows.clear();
-      this.#ui.matrix.replaceChildren(
-        ...ordered.map((layer, position) => this.#buildRow(layer, ordered.length - position)),
-      );
-      if (ordered.length === 0) {
+      this.#ui.matrix.replaceChildren(...rows.map((row) => this.#buildRow(row.layer, row.number)));
+      if (rows.length === 0) {
         this.#ui.matrix.replaceChildren(
           make(
             'p',
             'empty-note',
-            this.#connected
-              ? 'The open show has no layers. Add one in Settings.'
-              : 'Sign in to a server to see its layers.',
+            !this.#connected
+              ? 'Sign in to a server to see its layers.'
+              : this.#view.layers.length === 0
+                ? 'The open show has no layers. Add one in Settings.'
+                : 'Every layer of this show is hidden from the live screen. An administrator can show them again.',
           ),
         );
       }
     }
 
-    for (const layer of ordered) {
-      this.#updateRow(layer);
+    for (const row of rows) {
+      this.#updateRow(row.layer);
     }
+    this.#drawHiddenSwitch();
 
     this.#sizeTiles();
+  }
+
+  /**
+   * Whether the matrix is showing the layers an administrator hid as well.
+   *
+   * Only ever for an administrator: the one reason to see them on this screen
+   * is to show one again, and that is theirs to do.
+   */
+  #revealing(): boolean {
+    return this.#revealHidden && this.#view.mayAdminister;
+  }
+
+  /**
+   * The note at the end of the bank bar that layers are hidden, and how many.
+   *
+   * Absent while none are. For an administrator it is the switch that brings
+   * them back onto the matrix, dimmed, so one can be chosen and shown again in
+   * OPTIONS; for anybody else it is only the note, so a gap in the layer
+   * numbers is not a mystery.
+   */
+  #drawHiddenSwitch(): void {
+    const count = hiddenCount(this.#view.layers);
+    const node = this.#ui.hiddenLayers;
+    node.hidden = count === 0;
+    if (count === 0) {
+      return;
+    }
+    const admin = this.#view.mayAdminister;
+    const revealing = this.#revealing();
+    node.textContent = `HIDDEN ${count}`;
+    node.disabled = !this.#connected || !admin;
+    node.classList.toggle('on', revealing);
+    node.setAttribute('aria-pressed', String(revealing));
+    const names = this.#view.layers
+      .map((layer, position) => ({ layer, number: position + 1 }))
+      .filter((row) => row.layer.hidden)
+      .map((row) => `${row.number} ${row.layer.name}`)
+      .join(', ');
+    node.title = !admin
+      ? `Hidden from this screen by an administrator: ${names}. They still play, and still follow the desk.`
+      : revealing
+        ? `Showing the hidden layers too, dimmed: ${names}. Press to put them away again.`
+        : `Hidden from this screen: ${names}. They still play, and still follow the desk. Press to show them here, to choose one and show it again in OPTIONS.`;
   }
 
   /**
@@ -2097,6 +2165,8 @@ export class LivePanel {
     }
 
     row.root.classList.toggle('disabled', !layer.enabled);
+    // Only ever drawn while an administrator is looking for hidden layers.
+    row.root.classList.toggle('concealed', layer.hidden);
     // **One subject anywhere in the matrix** (owner, 2026-09-23): a slot name
     // or a layer, never both. A row that stayed lit under a chosen slot was
     // the screen naming two things and OPTIONS talking about one of them.
@@ -3634,9 +3704,13 @@ export class LivePanel {
     // So a panel with nothing chosen chooses: the top layer, which is the one
     // an operator reaches for first. An empty panel telling somebody to click
     // something is a panel asking them to do what it could have done.
-    if (this.#selected === null || this.#layer(this.#selected) === null) {
-      const top = [...this.#view.layers].reverse()[0] ?? null;
-      this.#selected = top?.id ?? null;
+    //
+    // And one that is on the matrix: a layer hidden from it — by this
+    // administrator a moment ago, or by another one — is not a subject the
+    // screen can point at.
+    const rows = matrixRows(this.#view.layers, this.#revealing());
+    if (this.#selected === null || !rows.some((row) => row.layer.id === this.#selected)) {
+      this.#selected = rows[0]?.layer.id ?? null;
       this.#selectedSlot = null;
     }
     const layer = this.#selected === null ? null : this.#layer(this.#selected);
@@ -3645,15 +3719,17 @@ export class LivePanel {
       this.#slotOptions = null;
       this.#effects = null;
       this.#optionsShape = '';
-      // The one case left: a show with no layers at all, where there is
-      // nothing to be the subject.
+      // The one case left: a show with no layers on the matrix, where there
+      // is nothing to be the subject.
       this.#ui.workTool.replaceChildren(
         make(
           'p',
           'empty-note',
-          this.#connected
-            ? 'The open show has no layers. Add one in Settings.'
-            : 'Sign in to a server to see its layers.',
+          !this.#connected
+            ? 'Sign in to a server to see its layers.'
+            : this.#view.layers.length === 0
+              ? 'The open show has no layers. Add one in Settings.'
+              : 'Every layer of this show is hidden from the live screen.',
         ),
       );
       return;
@@ -3687,6 +3763,9 @@ export class LivePanel {
 
     const shape = [
       layer.id,
+      // The subject row's switch says which way it goes, and is only there for
+      // an administrator.
+      `${layer.hidden}:${this.#view.mayAdminister}`,
       slot === null ? 'layer' : `slot:${slot.index}:${slot.source.kind}`,
       effectsShape(layer.id, chains, this.#catalogue.loaded),
       generatorsShape(generators, this.#catalogue.loaded),
@@ -3767,8 +3846,37 @@ export class LivePanel {
           { className: 'small', title: `Set up ${layer.name} itself instead` },
         ),
       );
+    } else if (this.#view.mayAdminister) {
+      // Taking a layer off this screen, for an administrator (owner,
+      // 2026-11-01). It goes on playing and following the desk; it is only no
+      // longer a row an operator has to look past. The server decides again.
+      row.append(
+        button(
+          layer.hidden ? 'Show in Live' : 'Hide in Live',
+          () => void this.#setHidden(layer.id, !layer.hidden),
+          {
+            className: 'small',
+            title: layer.hidden
+              ? `Put ${layer.name} back on the live screen for everybody.`
+              : `Take ${layer.name} off the live screen for everybody. It still plays and still follows the desk, and HIDDEN at the end of the bank bar brings it back.`,
+          },
+        ),
+      );
     }
     return row;
+  }
+
+  /** Hides a layer from the live screen, or shows it again. The answer comes back over the socket. */
+  async #setHidden(layerId: string, hidden: boolean): Promise<void> {
+    const showId = this.#view.showId;
+    if (showId === null) {
+      this.#note('No show is open, so there is no layer to hide.');
+      return;
+    }
+    const answer = await this.#ovs.setLayerHidden(showId, layerId, hidden);
+    if (!answer.ok) {
+      this.#note(answer.message);
+    }
   }
 
   /**
@@ -4978,12 +5086,52 @@ export class LivePanel {
   }
 
   #syncStream(): void {
-    if (this.#connected && this.#visible) {
+    if (this.#previewSeen()) {
       this.#startStream();
     } else {
       this.#stopStream();
     }
     this.#syncPreview();
+  }
+
+  /**
+   * Whether anybody can see the preview, which is whether it is worth a stream.
+   *
+   * Not while the work area is folded away: the server encodes that picture
+   * for this window, on the machine that is running the show, and a picture in
+   * a panel nobody has open is that work done for nothing.
+   */
+  #previewSeen(): boolean {
+    return this.#connected && this.#visible && !this.#workFolded();
+  }
+
+  /** Whether the operator has folded the preview and work area away. */
+  #workFolded(): boolean {
+    return this.#putAway.has(WORK_AREA);
+  }
+
+  /**
+   * The work area folded away or open, and the handle saying which.
+   *
+   * Folded, the matrix takes the room, so a touchscreen shows every layer
+   * without scrolling (owner, 2026-11-01). The matrix is watched for its size,
+   * so the pads settle on their own.
+   */
+  #drawWorkFold(): void {
+    const folded = this.#workFolded();
+    this.#ui.work.hidden = folded;
+    const handle = this.#ui.workFold;
+    handle.setAttribute('aria-expanded', String(!folded));
+    // What it folds, with the way it would go: down and away, or back up.
+    const mark = folded ? '▴' : '▾';
+    handle.replaceChildren(
+      make('span', 'work-fold-mark', mark),
+      make('span', undefined, 'PREVIEW · OPTIONS · BROWSER'),
+      make('span', 'work-fold-mark', mark),
+    );
+    handle.title = folded
+      ? 'Bring back the preview, OPTIONS and the browsers.'
+      : 'Fold the preview, OPTIONS and the browsers away, so the layers have the screen.';
   }
 
   #startStream(): void {
@@ -5053,7 +5201,7 @@ export class LivePanel {
     this.#ui.previewCanvas.hidden = !playing;
     this.#ui.preview.hidden = playing;
 
-    if (this.#connected && this.#visible && !playing) {
+    if (this.#previewSeen() && !playing) {
       this.#startPreview();
     } else {
       this.#stopPreview();

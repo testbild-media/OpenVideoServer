@@ -364,6 +364,11 @@ function registerHandlers(): void {
       session.setBanks(showId, layerId, banks),
   );
   ipcMain.handle(
+    'ovs:set-layer-hidden',
+    (_event, showId: string, layerId: string, hidden: boolean) =>
+      session.setLayerHidden(showId, layerId, hidden === true),
+  );
+  ipcMain.handle(
     'ovs:move-slot',
     (_event, showId: string, layerId: string, from: number, to: number, toLayer: string) =>
       session.moveSlot(showId, layerId, from, to, toLayer),

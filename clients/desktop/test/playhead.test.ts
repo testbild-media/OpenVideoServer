@@ -61,6 +61,7 @@ function layer(overrides: Partial<LayerView> = {}): LayerView {
     id: 'LAYER1',
     name: 'Layer 1',
     banks: 1,
+    hidden: false,
     enabled: true,
     // The default everywhere: nothing is patched and the client may choose.
     mayChooseSlot: true,

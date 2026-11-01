@@ -547,6 +547,18 @@ pub struct SetLockRequest {
     pub locked: bool,
 }
 
+/// Hides a layer from the Live screen's matrix, or shows it again.
+///
+/// **Administrators only, and the only way it changes** (owner, 2026-11-01: "Ein
+/// Admin sollte Layer verstecken können"). Only what the screen shows: the
+/// layer renders and answers its desk as before. A show sent whole carries the
+/// setting it already has, as it carries a lock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct SetLayerHiddenRequest {
+    /// Hidden, or not.
+    pub hidden: bool,
+}
+
 /// Result of locking or unlocking.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SetLockResponse {

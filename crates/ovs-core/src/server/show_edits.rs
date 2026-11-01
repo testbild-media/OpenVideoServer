@@ -12,6 +12,7 @@
 //! PUT    /shows/{id}/layers/{l}/slots/{n}/settings     everything but its source
 //! PUT    /shows/{id}/mapping                          the outputs and their pieces
 //! PUT    /shows/{id}/lock                             lock or unlock, administrators only
+//! PUT    /shows/{id}/layers/{l}/hidden                 hide from Live, administrators only
 //! ```
 //!
 //! # Why these are not saves
@@ -49,7 +50,7 @@ use axum::Json;
 use ovs_proto::http::{
     AddEffectRequest, AddEffectResponse, AssignSlotRequest, AssignSlotResponse, LockTarget,
     MoveSlotRequest, MoveSlotResponse, OrderEffectsRequest, OrderEffectsResponse, SetBanksRequest,
-    SetLockRequest, SetLockResponse, SetMappingRequest, SetSlotRequest,
+    SetLayerHiddenRequest, SetLockRequest, SetLockResponse, SetMappingRequest, SetSlotRequest,
 };
 use ovs_types::config::{EffectInstance, Layer, Show, Slot, SlotMove, SlotMoveError, SourceRef};
 use ovs_types::id::{EffectInstanceId, LayerId, ShowId};
@@ -784,6 +785,42 @@ pub async fn set_lock(
         ));
     };
     *lock = request.locked;
+
+    let updated_at = store(&state, show, |_| {})?;
+    Ok(Json(SetLockResponse { updated_at }))
+}
+
+/// Hides a layer from the Live screen's matrix, or shows it again.
+///
+/// **An administrator's, like a lock** (owner, 2026-11-01: "Ein Admin sollte
+/// Layer verstecken können … Layer 7 ein Effektlayer der komplett DMX
+/// gesteuert wird"). Only the screen changes: the layer renders, composites
+/// and answers its desk as it did, and nothing restarts. Everything else that
+/// writes a show carries the setting it finds ([`ovs_types::control::carry_locks`]).
+///
+/// # Errors
+///
+/// Forbidden for an account that may not administer, and not found when the
+/// open show has no such layer.
+pub async fn set_hidden(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((show_id, layer_id)): Path<(String, String)>,
+    Json(request): Json<SetLayerHiddenRequest>,
+) -> ApiResult<Json<SetLockResponse>> {
+    administer(&state, &headers)?;
+    let show_id: ShowId = parse_id(&show_id)?;
+    let layer_id: LayerId = parse_id(&layer_id)?;
+
+    let mut show = document(&state, show_id)?;
+    let layer = layer_of(&mut show, layer_id)?;
+    if layer.hidden == request.hidden {
+        // Already so: nothing stored, nothing published.
+        return Ok(Json(SetLockResponse {
+            updated_at: show.updated_at,
+        }));
+    }
+    layer.hidden = request.hidden;
 
     let updated_at = store(&state, show, |_| {})?;
     Ok(Json(SetLockResponse { updated_at }))
