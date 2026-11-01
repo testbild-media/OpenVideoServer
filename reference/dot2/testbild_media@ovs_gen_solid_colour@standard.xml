@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MA xmlns:xml="http://www.w3.org/XML/1998/namespace" major_vers="3" minor_vers="2" stream_vers="2">
+  <FixtureType index="0" name="OVS Gen Solid Colour" mode="Standard">
+    <InfoItems>
+      <Info>OpenVideoServer ovs.solid_colour, 4 channels. Patch in OVS to one generator instance in a slot, at the same address. Generated from the OVS fixture catalogue; reference/FIXTURES.md lists every value.</Info>
+    </InfoItems>
+    <short_name>GenSolid</short_name>
+    <manufacturer>testbild.media</manufacturer>
+    <short_manufacturer>testbild</short_manufacturer>
+    <Modules index="0">
+      <Module index="0" name="Main Module" class="None" beamtype="None" beam_angle="0" beam_intensity="0">
+        <ChannelType index="0" attribute="COLORRGB1" feature="COLORRGB" preset="COLOR" coarse="1" default="255" color="ff0000">
+          <ChannelFunction index="0" name="Colour Red" from="0" to="100" min_dmx_24="0" max_dmx_24="16777215" physfrom="0" physto="1" subattribute="COLORRGB1" subattribute_user_name="R" attribute="COLORRGB1" attribute_user_name="R" feature="COLORRGB" feature_user_name="MixColor" preset="COLOR" preset_user_name="Color"/>
+        </ChannelType>
+        <ChannelType index="1" attribute="COLORRGB2" feature="COLORRGB" preset="COLOR" coarse="2" default="255" color="00ff00">
+          <ChannelFunction index="0" name="Colour Green" from="0" to="100" min_dmx_24="0" max_dmx_24="16777215" physfrom="0" physto="1" subattribute="COLORRGB2" subattribute_user_name="G" attribute="COLORRGB2" attribute_user_name="G" feature="COLORRGB" feature_user_name="MixColor" preset="COLOR" preset_user_name="Color"/>
+        </ChannelType>
+        <ChannelType index="2" attribute="COLORRGB3" feature="COLORRGB" preset="COLOR" coarse="3" default="255" color="0000ff">
+          <ChannelFunction index="0" name="Colour Blue" from="0" to="100" min_dmx_24="0" max_dmx_24="16777215" physfrom="0" physto="1" subattribute="COLORRGB3" subattribute_user_name="B" attribute="COLORRGB3" attribute_user_name="B" feature="COLORRGB" feature_user_name="MixColor" preset="COLOR" preset_user_name="Color"/>
+        </ChannelType>
+        <ChannelType index="3" attribute="OVS_ALPHA" feature="OVS_ALPHA" preset="COLOR" coarse="4" default="255">
+          <ChannelFunction index="0" name="Colour Alpha" from="0" to="100" min_dmx_24="0" max_dmx_24="16777215" physfrom="0" physto="1" subattribute="OVS_ALPHA" subattribute_user_name="Alpha" attribute="OVS_ALPHA" attribute_user_name="Alpha" feature="OVS_ALPHA" feature_user_name="OVS Alpha" preset="COLOR" preset_user_name="Color"/>
+        </ChannelType>
+      </Module>
+    </Modules>
+    <Instances index="1">
+      <Instance index="0" module_index="0" patch="1"/>
+    </Instances>
+    <Wheels index="2"/>
+    <FixtureMacroCollect index="5"/>
+  </FixtureType>
+</MA>

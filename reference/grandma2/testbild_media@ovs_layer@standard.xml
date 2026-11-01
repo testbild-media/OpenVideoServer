@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MA xmlns:xml="http://www.w3.org/XML/1998/namespace" major_vers="3" minor_vers="2" stream_vers="2">
+  <FixtureType index="0" name="OVS Layer" mode="Standard">
+    <InfoItems>
+      <Info>OpenVideoServer ovs.layer, 12 channels. Patch in OVS to one layer, at the same address. Parameter 1 Slot. Generated from the OVS fixture catalogue; reference/FIXTURES.md lists every value.</Info>
+    </InfoItems>
+    <short_name>OVSLayer</short_name>
+    <manufacturer>testbild.media</manufacturer>
+    <short_manufacturer>testbild</short_manufacturer>
+    <Modules index="0">
+      <Module index="0" name="Main Module" class="None" beamtype="None" beam_angle="0" beam_intensity="0">
+        <ChannelType index="0" attribute="DIM" feature="DIMMER" preset="DIMMER" coarse="1" default="255" highlight_value="100">
+          <ChannelFunction index="0" name="Dimmer" from="0" to="100" min_dmx_24="0" max_dmx_24="16777215" physfrom="0" physto="1" subattribute="DIM" subattribute_user_name="Dim" attribute="DIM" attribute_user_name="Dim" feature="DIMMER" feature_user_name="Dimmer" preset="DIMMER" preset_user_name="Dimmer"/>
+        </ChannelType>
+        <ChannelType index="1" attribute="PARA_1" feature="OVS_PARAMETER" preset="VIDEO" coarse="2" default="1">
+          <ChannelFunction index="0" name="Slot" from="0" to="100" min_dmx_24="0" max_dmx_24="16777215" physfrom="0" physto="1" subattribute="PARA_1" subattribute_user_name="Parameter 1" attribute="PARA_1" attribute_user_name="Parameter 1" feature="OVS_PARAMETER" feature_user_name="OVS Parameter" preset="VIDEO" preset_user_name="Video">
+            <ChannelSet index="0" name="Black" from_dmx="0" to_dmx="3"/>
+            <ChannelSet index="1" name="Slot 1" from_dmx="4" to_dmx="6"/>
+            <ChannelSet index="2" name="Slot 2" from_dmx="7" to_dmx="9"/>
+            <ChannelSet index="3" name="Slot 3" from_dmx="10" to_dmx="12"/>
+            <ChannelSet index="4" name="Slot 4" from_dmx="13" to_dmx="15"/>
+            <ChannelSet index="5" name="Slot 5" from_dmx="16" to_dmx="18"/>
+            <ChannelSet index="6" name="Slot 6" from_dmx="19" to_dmx="21"/>
+            <ChannelSet index="7" name="Slot 7" from_dmx="22" to_dmx="24"/>
+            <ChannelSet index="8" name="Slot 8" from_dmx="25" to_dmx="27"/>
+            <ChannelSet index="9" name="Slot 9" from_dmx="28" to_dmx="30"/>
+            <ChannelSet index="10" name="Slot 10" from_dmx="31" to_dmx="33"/>
+            <ChannelSet index="11" name="Slot 11" from_dmx="34" to_dmx="36"/>
+            <ChannelSet index="12" name="Slot 12" from_dmx="37" to_dmx="39"/>
+            <ChannelSet index="13" name="Slot 13" from_dmx="40" to_dmx="42"/>
+            <ChannelSet index="14" name="Slot 14" from_dmx="43" to_dmx="45"/>
+            <ChannelSet index="15" name="Slot 15" from_dmx="46" to_dmx="48"/>
+            <ChannelSet index="16" name="Slot 16" from_dmx="49" to_dmx="51"/>
+            <ChannelSet index="17" name="Slot 17" from_dmx="52" to_dmx="54"/>
+            <ChannelSet index="18" name="Slot 18" from_dmx="55" to_dmx="57"/>
+            <ChannelSet index="19" name="Slot 19" from_dmx="58" to_dmx="60"/>
+            <ChannelSet index="20" name="Slot 20" from_dmx="61" to_dmx="63"/>
+            <ChannelSet index="21" name="Slot 21" from_dmx="64" to_dmx="66"/>
+            <ChannelSet index="22" name="Slot 22" from_dmx="67" to_dmx="69"/>
+            <ChannelSet index="23" name="Slot 23" from_dmx="70" to_dmx="72"/>
+            <ChannelSet index="24" name="Slot 24" from_dmx="73" to_dmx="75"/>
+            <ChannelSet index="25" name="Slot 25" from_dmx="76" to_dmx="78"/>
+            <ChannelSet index="26" name="Slot 26" from_dmx="79" to_dmx="81"/>
+            <ChannelSet index="27" name="Slot 27" from_dmx="82" to_dmx="84"/>
+            <ChannelSet index="28" name="Slot 28" from_dmx="85" to_dmx="87"/>
+            <ChannelSet index="29" name="Slot 29" from_dmx="88" to_dmx="90"/>
+            <ChannelSet index="30" name="Slot 30" from_dmx="91" to_dmx="93"/>
+            <ChannelSet index="31" name="Slot 31" from_dmx="94" to_dmx="96"/>
+            <ChannelSet index="32" name="Slot 32" from_dmx="97" to_dmx="99"/>
+            <ChannelSet index="33" name="Slot 33" from_dmx="100" to_dmx="102"/>
+            <ChannelSet index="34" name="Slot 34" from_dmx="103" to_dmx="105"/>
+            <ChannelSet index="35" name="Slot 35" from_dmx="106" to_dmx="108"/>
+            <ChannelSet index="36" name="Slot 36" from_dmx="109" to_dmx="111"/>
+            <ChannelSet index="37" name="Slot 37" from_dmx="112" to_dmx="114"/>
+            <ChannelSet index="38" name="Slot 38" from_dmx="115" to_dmx="117"/>
+            <ChannelSet index="39" name="Slot 39" from_dmx="118" to_dmx="120"/>
+            <ChannelSet index="40" name="Slot 40" from_dmx="121" to_dmx="123"/>
+            <ChannelSet index="41" name="Slot 41" from_dmx="124" to_dmx="126"/>
+            <ChannelSet index="42" name="Slot 42" from_dmx="127" to_dmx="129"/>
+            <ChannelSet index="43" name="Slot 43" from_dmx="130" to_dmx="132"/>
+            <ChannelSet index="44" name="Slot 44" from_dmx="133" to_dmx="135"/>
+            <ChannelSet index="45" name="Slot 45" from_dmx="136" to_dmx="138"/>
+            <ChannelSet index="46" name="Slot 46" from_dmx="139" to_dmx="141"/>
+            <ChannelSet index="47" name="Slot 47" from_dmx="142" to_dmx="144"/>
+            <ChannelSet index="48" name="Slot 48" from_dmx="145" to_dmx="147"/>
+            <ChannelSet index="49" name="Slot 49" from_dmx="148" to_dmx="150"/>
+            <ChannelSet index="50" name="Slot 50" from_dmx="151" to_dmx="153"/>
+            <ChannelSet index="51" name="Slot 51" from_dmx="154" to_dmx="156"/>
+            <ChannelSet index="52" name="Slot 52" from_dmx="157" to_dmx="159"/>
+            <ChannelSet index="53" name="Slot 53" from_dmx="160" to_dmx="162"/>
+            <ChannelSet index="54" name="Slot 54" from_dmx="163" to_dmx="165"/>
+            <ChannelSet index="55" name="Slot 55" from_dmx="166" to_dmx="168"/>
+            <ChannelSet index="56" name="Slot 56" from_dmx="169" to_dmx="171"/>
+            <ChannelSet index="57" name="Slot 57" from_dmx="172" to_dmx="174"/>
+            <ChannelSet index="58" name="Slot 58" from_dmx="175" to_dmx="177"/>
+            <ChannelSet index="59" name="Slot 59" from_dmx="178" to_dmx="180"/>
+            <ChannelSet index="60" name="Slot 60" from_dmx="181" to_dmx="183"/>
+            <ChannelSet index="61" name="Slot 61" from_dmx="184" to_dmx="186"/>
+            <ChannelSet index="62" name="Slot 62" from_dmx="187" to_dmx="189"/>
+            <ChannelSet index="63" name="Slot 63" from_dmx="190" to_dmx="192"/>
+            <ChannelSet index="64" name="Slot 64" from_dmx="193" to_dmx="195"/>
+            <ChannelSet index="65" name="Slot 65" from_dmx="196" to_dmx="198"/>
+            <ChannelSet index="66" name="Slot 66" from_dmx="199" to_dmx="201"/>
+            <ChannelSet index="67" name="Slot 67" from_dmx="202" to_dmx="204"/>
+            <ChannelSet index="68" name="Slot 68" from_dmx="205" to_dmx="207"/>
+            <ChannelSet index="69" name="Slot 69" from_dmx="208" to_dmx="210"/>
+            <ChannelSet index="70" name="Slot 70" from_dmx="211" to_dmx="213"/>
+            <ChannelSet index="71" name="Slot 71" from_dmx="214" to_dmx="216"/>
+            <ChannelSet index="72" name="Slot 72" from_dmx="217" to_dmx="219"/>
+            <ChannelSet index="73" name="Slot 73" from_dmx="220" to_dmx="222"/>
+            <ChannelSet index="74" name="Slot 74" from_dmx="223" to_dmx="225"/>
+            <ChannelSet index="75" name="Slot 75" from_dmx="226" to_dmx="228"/>
+            <ChannelSet index="76" name="Slot 76" from_dmx="229" to_dmx="231"/>
+            <ChannelSet index="77" name="Slot 77" from_dmx="232" to_dmx="234"/>
+            <ChannelSet index="78" name="Slot 78" from_dmx="235" to_dmx="237"/>
+            <ChannelSet index="79" name="Slot 79" from_dmx="238" to_dmx="240"/>
+            <ChannelSet index="80" name="Slot 80" from_dmx="241" to_dmx="243"/>
+            <ChannelSet index="81" name="Slot 81" from_dmx="244" to_dmx="246"/>
+            <ChannelSet index="82" name="Slot 82" from_dmx="247" to_dmx="249"/>
+            <ChannelSet index="83" name="Slot 83" from_dmx="250" to_dmx="252"/>
+            <ChannelSet index="84" name="Slot 84" from_dmx="253" to_dmx="255"/>
+          </ChannelFunction>
+        </ChannelType>
+        <ChannelType index="2" attribute="PAN" feature="POSITION" preset="POSITION" coarse="3" fine="4" default="32768">
+          <ChannelFunction index="0" name="Position X" from="0" to="100" min_dmx_24="0" max_dmx_24="16777215" physfrom="-2" physto="2" subattribute="PAN" subattribute_user_name="Pan" attribute="PAN" attribute_user_name="Pan" feature="POSITION" feature_user_name="Position" preset="POSITION" preset_user_name="Position">
+            <ChannelSet index="0" name="Min -2" from_dmx="0" to_dmx="255"/>
+            <ChannelSet index="1" name="Center 0" from_dmx="32768" to_dmx="33023"/>
+            <ChannelSet index="2" name="Max 2" from_dmx="65280" to_dmx="65535"/>
+          </ChannelFunction>
+        </ChannelType>
+        <ChannelType index="3" attribute="TILT" feature="POSITION" preset="POSITION" coarse="5" fine="6" default="32768">
+          <ChannelFunction index="0" name="Position Y" from="0" to="100" min_dmx_24="0" max_dmx_24="16777215" physfrom="-2" physto="2" subattribute="TILT" subattribute_user_name="Tilt" attribute="TILT" attribute_user_name="Tilt" feature="POSITION" feature_user_name="Position" preset="POSITION" preset_user_name="Position">
+            <ChannelSet index="0" name="Min -2" from_dmx="0" to_dmx="255"/>
+            <ChannelSet index="1" name="Center 0" from_dmx="32768" to_dmx="33023"/>
+            <ChannelSet index="2" name="Max 2" from_dmx="65280" to_dmx="65535"/>
+          </ChannelFunction>
+        </ChannelType>
+        <ChannelType index="4" attribute="OVS_ROTATION" feature="POSITION" preset="POSITION" coarse="7" fine="8" default="32768">
+          <ChannelFunction index="0" name="Rotation" from="0" to="100" min_dmx_24="0" max_dmx_24="16777215" physfrom="-180" physto="180" subattribute="OVS_ROTATION" subattribute_user_name="Rotation" attribute="OVS_ROTATION" attribute_user_name="Rotation" feature="POSITION" feature_user_name="Position" preset="POSITION" preset_user_name="Position">
+            <ChannelSet index="0" name="Min -180" from_dmx="0" to_dmx="255"/>
+            <ChannelSet index="1" name="Center 0" from_dmx="32768" to_dmx="33023"/>
+            <ChannelSet index="2" name="Max 180" from_dmx="65280" to_dmx="65535"/>
+          </ChannelFunction>
+        </ChannelType>
+        <ChannelType index="5" attribute="OVS_SCALE_X" feature="OVS_SCALE" preset="POSITION" coarse="9" fine="10" default="6554">
+          <ChannelFunction index="0" name="Scale X" from="0" to="100" min_dmx_24="0" max_dmx_24="16777215" physfrom="0" physto="10" subattribute="OVS_SCALE_X" subattribute_user_name="Scale X" attribute="OVS_SCALE_X" attribute_user_name="Scale X" feature="OVS_SCALE" feature_user_name="Scale" preset="POSITION" preset_user_name="Position">
+            <ChannelSet index="0" name="Min 0" from_dmx="0" to_dmx="255"/>
+            <ChannelSet index="1" name="Home 1" from_dmx="6400" to_dmx="6655"/>
+            <ChannelSet index="2" name="Center 5" from_dmx="32768" to_dmx="33023"/>
+            <ChannelSet index="3" name="Max 10" from_dmx="65280" to_dmx="65535"/>
+          </ChannelFunction>
+        </ChannelType>
+        <ChannelType index="6" attribute="OVS_SCALE_Y" feature="OVS_SCALE" preset="POSITION" coarse="11" fine="12" default="6554">
+          <ChannelFunction index="0" name="Scale Y" from="0" to="100" min_dmx_24="0" max_dmx_24="16777215" physfrom="0" physto="10" subattribute="OVS_SCALE_Y" subattribute_user_name="Scale Y" attribute="OVS_SCALE_Y" attribute_user_name="Scale Y" feature="OVS_SCALE" feature_user_name="Scale" preset="POSITION" preset_user_name="Position">
+            <ChannelSet index="0" name="Min 0" from_dmx="0" to_dmx="255"/>
+            <ChannelSet index="1" name="Home 1" from_dmx="6400" to_dmx="6655"/>
+            <ChannelSet index="2" name="Center 5" from_dmx="32768" to_dmx="33023"/>
+            <ChannelSet index="3" name="Max 10" from_dmx="65280" to_dmx="65535"/>
+          </ChannelFunction>
+        </ChannelType>
+      </Module>
+    </Modules>
+    <Instances index="1">
+      <Instance index="0" module_index="0" patch="1"/>
+    </Instances>
+    <Wheels index="2"/>
+    <FixtureMacroCollect index="5"/>
+  </FixtureType>
+</MA>

@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MA xmlns:xml="http://www.w3.org/XML/1998/namespace" major_vers="3" minor_vers="2" stream_vers="2">
+  <FixtureType index="0" name="OVS FX TV Glitch" mode="Standard">
+    <InfoItems>
+      <Info>OpenVideoServer ovs.tv_glitch, 10 channels. Patch in OVS to one effect instance in a chain, at the same address. Parameter 1 Line jumps, Parameter 2 Snow, Parameter 3 Rolling error, Parameter 4 Out of sync. Generated from the OVS fixture catalogue; reference/FIXTURES.md lists every value.</Info>
+    </InfoItems>
+    <short_name>FXTVGlit</short_name>
+    <manufacturer>testbild.media</manufacturer>
+    <short_manufacturer>testbild</short_manufacturer>
+    <Modules index="0">
+      <Module index="0" name="Main Module" class="None" beamtype="None" beam_angle="0" beam_intensity="0">
+        <ChannelType index="0" attribute="DIM" feature="DIMMER" preset="DIMMER" coarse="1" fine="2" highlight_value="100">
+          <ChannelFunction index="0" name="Amount" from="0" to="100" min_dmx_24="0" max_dmx_24="16777215" physfrom="0" physto="1" subattribute="DIM" subattribute_user_name="Dim" attribute="DIM" attribute_user_name="Dim" feature="DIMMER" feature_user_name="Dimmer" preset="DIMMER" preset_user_name="Dimmer"/>
+        </ChannelType>
+        <ChannelType index="1" attribute="PARA_1" feature="OVS_PARAMETER" preset="VIDEO" coarse="3" fine="4" default="32768">
+          <ChannelFunction index="0" name="Line jumps" from="0" to="100" min_dmx_24="0" max_dmx_24="16777215" physfrom="0" physto="1" subattribute="PARA_1" subattribute_user_name="Parameter 1" attribute="PARA_1" attribute_user_name="Parameter 1" feature="OVS_PARAMETER" feature_user_name="OVS Parameter" preset="VIDEO" preset_user_name="Video">
+            <ChannelSet index="0" name="Line jumps 0" from_dmx="0" to_dmx="255"/>
+            <ChannelSet index="1" name="Line jumps 0.5" from_dmx="32768" to_dmx="33023"/>
+            <ChannelSet index="2" name="Line jumps 1" from_dmx="65280" to_dmx="65535"/>
+          </ChannelFunction>
+        </ChannelType>
+        <ChannelType index="2" attribute="PARA_2" feature="OVS_PARAMETER" preset="VIDEO" coarse="5" fine="6" default="32768">
+          <ChannelFunction index="0" name="Snow" from="0" to="100" min_dmx_24="0" max_dmx_24="16777215" physfrom="0" physto="1" subattribute="PARA_2" subattribute_user_name="Parameter 2" attribute="PARA_2" attribute_user_name="Parameter 2" feature="OVS_PARAMETER" feature_user_name="OVS Parameter" preset="VIDEO" preset_user_name="Video">
+            <ChannelSet index="0" name="Snow 0" from_dmx="0" to_dmx="255"/>
+            <ChannelSet index="1" name="Snow 0.5" from_dmx="32768" to_dmx="33023"/>
+            <ChannelSet index="2" name="Snow 1" from_dmx="65280" to_dmx="65535"/>
+          </ChannelFunction>
+        </ChannelType>
+        <ChannelType index="3" attribute="PARA_3" feature="OVS_PARAMETER" preset="VIDEO" coarse="7" fine="8" default="32768">
+          <ChannelFunction index="0" name="Rolling error" from="0" to="100" min_dmx_24="0" max_dmx_24="16777215" physfrom="0" physto="1" subattribute="PARA_3" subattribute_user_name="Parameter 3" attribute="PARA_3" attribute_user_name="Parameter 3" feature="OVS_PARAMETER" feature_user_name="OVS Parameter" preset="VIDEO" preset_user_name="Video">
+            <ChannelSet index="0" name="Rolling error 0" from_dmx="0" to_dmx="255"/>
+            <ChannelSet index="1" name="Rolling error 0.5" from_dmx="32768" to_dmx="33023"/>
+            <ChannelSet index="2" name="Rolling error 1" from_dmx="65280" to_dmx="65535"/>
+          </ChannelFunction>
+        </ChannelType>
+        <ChannelType index="4" attribute="PARA_4" feature="OVS_PARAMETER" preset="VIDEO" coarse="9" fine="10" default="32768">
+          <ChannelFunction index="0" name="Out of sync" from="0" to="100" min_dmx_24="0" max_dmx_24="16777215" physfrom="0" physto="1" subattribute="PARA_4" subattribute_user_name="Parameter 4" attribute="PARA_4" attribute_user_name="Parameter 4" feature="OVS_PARAMETER" feature_user_name="OVS Parameter" preset="VIDEO" preset_user_name="Video">
+            <ChannelSet index="0" name="Out of sync 0" from_dmx="0" to_dmx="255"/>
+            <ChannelSet index="1" name="Out of sync 0.5" from_dmx="32768" to_dmx="33023"/>
+            <ChannelSet index="2" name="Out of sync 1" from_dmx="65280" to_dmx="65535"/>
+          </ChannelFunction>
+        </ChannelType>
+      </Module>
+    </Modules>
+    <Instances index="1">
+      <Instance index="0" module_index="0" patch="1"/>
+    </Instances>
+    <Wheels index="2"/>
+    <FixtureMacroCollect index="5"/>
+  </FixtureType>
+</MA>

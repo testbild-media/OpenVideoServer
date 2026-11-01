@@ -13,6 +13,8 @@ reference/grandma1/*.TXT -text
 reference/grandma1/desk/** -text
 
 # Binary assets must never be touched.
+# A GDTF fixture type is a ZIP: one byte rewritten and a desk refuses it.
+*.gdtf binary
 *.png binary
 *.jpg binary
 *.ico binary

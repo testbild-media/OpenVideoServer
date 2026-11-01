@@ -14,17 +14,15 @@
 //!
 //! # Stored, not compressed
 //!
-//! Written here rather than by a library: a ZIP that only stores is, for each
-//! file, a header, the bytes and an entry in a directory at the end. The files
-//! are a few kilobytes of text, so compressing them would save nothing anybody
-//! waits for, and storing them keeps every byte exactly as the desk wrote it.
-//! Checked once, 2026-10-19, against three readers that are not this one:
-//! Python's `zipfile` (every CRC good, every file byte for byte the committed
-//! one), .NET's `ZipFile` and Windows' own `Expand-Archive`.
+//! [`ovs_proto::zip::stored`]: the files are a few kilobytes, so compressing
+//! them would save nothing anybody waits for, and storing them keeps every byte
+//! exactly as the desk wrote it — a grandMA3's GDTF file inside included, which
+//! is itself a stored ZIP.
 
 use std::sync::OnceLock;
 
 use ovs_proto::desks::DESKS;
+use ovs_proto::zip::stored as stored_zip;
 use serde::Serialize;
 
 /// What the status page says about the download.
@@ -97,124 +95,10 @@ fn entries() -> Vec<(String, Vec<u8>)> {
         .collect()
 }
 
-/// 1 January 1980, midnight: the first moment a ZIP can say, and the same in
-/// every build, so two downloads of one version are the same bytes.
-const DOS_DATE: u16 = 1 << 5 | 1;
-const DOS_TIME: u16 = 0;
-
-/// The version of the format a stored file needs, 2.0, as every tool writes it.
-const VERSION: u16 = 20;
-
-/// A ZIP holding `entries` as they are, or nothing if one is too big for the
-/// format's 32-bit sizes — which a fixture type never is.
-fn stored_zip(entries: &[(String, Vec<u8>)]) -> Option<Vec<u8>> {
-    let mut out = Vec::new();
-    let mut directory = Vec::new();
-
-    for (name, contents) in entries {
-        let offset = u32::try_from(out.len()).ok()?;
-        let size = u32::try_from(contents.len()).ok()?;
-        let name_length = u16::try_from(name.len()).ok()?;
-        let crc = crc32fast::hash(contents);
-
-        // The local header, then the file.
-        out.extend_from_slice(&0x0403_4b50_u32.to_le_bytes());
-        out.extend_from_slice(&VERSION.to_le_bytes());
-        out.extend_from_slice(&0_u16.to_le_bytes()); // flags
-        out.extend_from_slice(&0_u16.to_le_bytes()); // stored
-        out.extend_from_slice(&DOS_TIME.to_le_bytes());
-        out.extend_from_slice(&DOS_DATE.to_le_bytes());
-        out.extend_from_slice(&crc.to_le_bytes());
-        out.extend_from_slice(&size.to_le_bytes()); // compressed
-        out.extend_from_slice(&size.to_le_bytes()); // uncompressed
-        out.extend_from_slice(&name_length.to_le_bytes());
-        out.extend_from_slice(&0_u16.to_le_bytes()); // no extra field
-        out.extend_from_slice(name.as_bytes());
-        out.extend_from_slice(contents);
-
-        // Its entry in the directory at the end.
-        directory.extend_from_slice(&0x0201_4b50_u32.to_le_bytes());
-        directory.extend_from_slice(&VERSION.to_le_bytes()); // made by
-        directory.extend_from_slice(&VERSION.to_le_bytes()); // needed
-        directory.extend_from_slice(&0_u16.to_le_bytes()); // flags
-        directory.extend_from_slice(&0_u16.to_le_bytes()); // stored
-        directory.extend_from_slice(&DOS_TIME.to_le_bytes());
-        directory.extend_from_slice(&DOS_DATE.to_le_bytes());
-        directory.extend_from_slice(&crc.to_le_bytes());
-        directory.extend_from_slice(&size.to_le_bytes());
-        directory.extend_from_slice(&size.to_le_bytes());
-        directory.extend_from_slice(&name_length.to_le_bytes());
-        directory.extend_from_slice(&0_u16.to_le_bytes()); // no extra field
-        directory.extend_from_slice(&0_u16.to_le_bytes()); // no comment
-        directory.extend_from_slice(&0_u16.to_le_bytes()); // first disc
-        directory.extend_from_slice(&0_u16.to_le_bytes()); // internal attributes
-        directory.extend_from_slice(&0_u32.to_le_bytes()); // external attributes
-        directory.extend_from_slice(&offset.to_le_bytes());
-        directory.extend_from_slice(name.as_bytes());
-    }
-
-    let directory_offset = u32::try_from(out.len()).ok()?;
-    let directory_size = u32::try_from(directory.len()).ok()?;
-    let count = u16::try_from(entries.len()).ok()?;
-    out.extend_from_slice(&directory);
-
-    // The end of the directory, which is where a reader starts.
-    out.extend_from_slice(&0x0605_4b50_u32.to_le_bytes());
-    out.extend_from_slice(&0_u16.to_le_bytes()); // this disc
-    out.extend_from_slice(&0_u16.to_le_bytes()); // the directory's disc
-    out.extend_from_slice(&count.to_le_bytes()); // entries on this disc
-    out.extend_from_slice(&count.to_le_bytes()); // entries in all
-    out.extend_from_slice(&directory_size.to_le_bytes());
-    out.extend_from_slice(&directory_offset.to_le_bytes());
-    out.extend_from_slice(&0_u16.to_le_bytes()); // no comment
-    Some(out)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn u16_at(bytes: &[u8], at: usize) -> u16 {
-        u16::from_le_bytes([bytes[at], bytes[at + 1]])
-    }
-
-    fn u32_at(bytes: &[u8], at: usize) -> u32 {
-        u32::from_le_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]])
-    }
-
-    /// Reads a stored ZIP the way an unzipper does: from the end, through the
-    /// directory, to each file — and checks each file's CRC on the way.
-    fn read(zip: &[u8]) -> Vec<(String, Vec<u8>)> {
-        let end = zip.len() - 22;
-        assert_eq!(u32_at(zip, end), 0x0605_4b50, "no end of directory");
-        let count = usize::from(u16_at(zip, end + 10));
-        let mut at = u32_at(zip, end + 16) as usize;
-        assert_eq!(
-            at + u32_at(zip, end + 12) as usize,
-            end,
-            "the directory does not end where the end record starts"
-        );
-
-        let mut files = Vec::new();
-        for _ in 0..count {
-            assert_eq!(u32_at(zip, at), 0x0201_4b50, "not a directory entry");
-            let crc = u32_at(zip, at + 16);
-            let size = u32_at(zip, at + 24) as usize;
-            let name_length = usize::from(u16_at(zip, at + 28));
-            let local = u32_at(zip, at + 42) as usize;
-            let name =
-                String::from_utf8(zip[at + 46..at + 46 + name_length].to_vec()).expect("a name");
-            at += 46 + name_length;
-
-            assert_eq!(u32_at(zip, local), 0x0403_4b50, "{name}: no local header");
-            assert_eq!(u16_at(zip, local + 8), 0, "{name}: not stored");
-            let start = local + 30 + usize::from(u16_at(zip, local + 26));
-            let contents = zip[start..start + size].to_vec();
-            assert_eq!(crc32fast::hash(&contents), crc, "{name}: CRC");
-            files.push((name, contents));
-        }
-        files
-    }
+    use ovs_proto::zip::read_stored as read;
 
     #[test]
     fn every_desks_files_are_in_their_folder_byte_for_byte() {
@@ -230,26 +114,6 @@ mod tests {
         assert!(files
             .iter()
             .any(|(name, _)| name == "grandMA1/TESTBILD MEDIA@OVS MASTER.TXT"));
-    }
-
-    #[test]
-    fn a_reader_finds_what_was_put_in_and_nothing_else() {
-        // A reader that cannot be fooled by the writer: two files of known
-        // contents, one empty, and their CRCs worked out independently.
-        let zip = stored_zip(&[
-            ("a/one.txt".to_owned(), b"123456789".to_vec()),
-            ("a/empty.txt".to_owned(), Vec::new()),
-        ])
-        .expect("written");
-        // The check value every CRC-32 implementation publishes for "123456789".
-        assert_eq!(u32_at(&zip, 14), 0xCBF4_3926);
-        assert_eq!(
-            read(&zip),
-            vec![
-                ("a/one.txt".to_owned(), b"123456789".to_vec()),
-                ("a/empty.txt".to_owned(), Vec::new()),
-            ]
-        );
     }
 
     #[test]

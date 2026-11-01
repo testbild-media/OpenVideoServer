@@ -63,4 +63,25 @@ async fn the_status_page_offers_the_fixture_zip_and_the_server_hands_it_out() {
         zip.windows(master.len()).any(|window| window == master),
         "the master is not in its desk's folder"
     );
+
+    // And every desk after it, each in a folder of its own (owner,
+    // 2026-10-21: grandMA2, grandMA3 and dot2).
+    let names: Vec<&str> = fixtures["desks"]
+        .as_array()
+        .expect("desks")
+        .iter()
+        .filter_map(|desk| desk["name"].as_str())
+        .collect();
+    assert_eq!(names, ["grandMA1", "grandMA2", "dot2", "grandMA3"]);
+    let inside: Vec<String> = ovs_proto::zip::read_stored(&zip)
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect();
+    for expected in [
+        "grandMA2/testbild_media@ovs_layer@standard.xml",
+        "dot2/testbild_media@ovs_layer@standard.xml",
+        "grandMA3/testbild media@OVS Layer.gdtf",
+    ] {
+        assert!(inside.iter().any(|name| name == expected), "{expected}");
+    }
 }

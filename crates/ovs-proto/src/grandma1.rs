@@ -399,7 +399,7 @@ pub fn fixture_type(personality: &Personality) -> String {
 }
 
 /// What the fixture says about itself in the desk's comment field.
-fn comment(personality: &Personality) -> String {
+pub(crate) fn comment(personality: &Personality) -> String {
     let target = match personality.target {
         PersonalityTarget::Master => "the show master, one per show",
         PersonalityTarget::Layer => "one layer",
@@ -1208,6 +1208,157 @@ fn step_name(
             ascii(named.unwrap_or(&band.value))
         }
     }
+}
+
+// --- the same layout, for other desks ------------------------------------------
+
+/// What a channel is for, whichever desk it is written for.
+///
+/// The owner's layout (2026-10-18), named for what it means rather than for
+/// what his grandMA1 calls it, so a grandMA2, a dot2 and a grandMA3 file put
+/// every channel where his grandMA1 file puts it: a module's amount on the
+/// dimmer, a layer's X and Y on pan and tilt, everything else a numbered
+/// parameter, and two colours.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Role {
+    Dimmer,
+    PositionX,
+    PositionY,
+    Rotation,
+    ScaleX,
+    ScaleY,
+    /// The `n`th parameter, counting from one.
+    Parameter(usize),
+    /// The first colour: the one a colour picker drives.
+    Foreground(ColourPart),
+    /// The second colour, or a gradient's far one.
+    Background(ColourPart),
+}
+
+/// One channel of a fixture as a desk lays it out.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct DeskChannel {
+    pub(crate) role: Role,
+    /// What the control is on this fixture: "Radius", "Slot", "Hue".
+    pub(crate) function: String,
+    /// The channel's own name in the catalogue.
+    pub(crate) name: String,
+    /// One-based offset of its first DMX channel within the fixture.
+    pub(crate) offset: u16,
+    /// One for eight bits, two for sixteen.
+    pub(crate) width: u16,
+    /// Where it rests, as a sixteen-bit value; nought where it rests at nought.
+    pub(crate) default: u16,
+    /// Its named values: a name and the sixteen-bit range it covers, in the
+    /// order they sit on the channel. Always ranges (owner, 2026-10-18).
+    pub(crate) sets: Vec<(String, u16, u16)>,
+    /// What the bottom and top of the channel are in the control's own units.
+    pub(crate) physical: (f64, f64),
+    /// A step or a switch: snaps rather than fading through what is between.
+    pub(crate) snaps: bool,
+    /// A momentary control, which fires on a rise.
+    pub(crate) momentary: bool,
+    /// How the server reads its bytes, for a desk that lays a channel's values
+    /// out its own way.
+    pub(crate) encoding: ChannelEncodingInfo,
+    /// Its named values are the control's own — a hue's colours — rather than
+    /// the bottom, middle and top every continuous channel is given.
+    pub(crate) own_values: bool,
+}
+
+/// Every channel of a personality as a desk lays it out, in address order.
+///
+/// The grandMA1 file's own decisions — which channel is the dimmer, how the
+/// parameters are numbered, what each named value is called and where each
+/// channel rests — so that the other desks' files cannot drift from it.
+pub(crate) fn desk_channels(personality: &Personality) -> Vec<DeskChannel> {
+    let layout = Layout::of(personality);
+    personality
+        .channels
+        .iter()
+        .zip(&layout.attributes)
+        .map(|(channel, attribute)| {
+            let role = role_of(&attribute.attribute);
+            let physical = match channel.encoding {
+                ChannelEncodingInfo::Ranged8 { min, max }
+                | ChannelEncodingInfo::Ranged16 { min, max } => (min, max),
+                ChannelEncodingInfo::Index8 => (0.0, 255.0),
+                _ => (0.0, 1.0),
+            };
+            DeskChannel {
+                role,
+                function: attribute
+                    .function
+                    .map(str::to_owned)
+                    .or_else(|| attribute.named_for.clone())
+                    .unwrap_or_else(|| ascii(&channel.name)),
+                name: ascii(&channel.name),
+                offset: channel.offset,
+                width: channel.width.max(1),
+                default: default_of(personality, channel, attribute).unwrap_or(0),
+                sets: channel_sets(personality, channel, attribute),
+                physical,
+                snaps: matches!(
+                    channel.encoding,
+                    ChannelEncodingInfo::Switch { .. } | ChannelEncodingInfo::Stepped { .. }
+                ),
+                momentary: channel.momentary,
+                encoding: channel.encoding.clone(),
+                own_values: attribute.values.is_some(),
+            }
+        })
+        .collect()
+}
+
+/// The role an attribute of the owner's desk stands for.
+fn role_of(attribute: &str) -> Role {
+    match attribute {
+        "DIM" => Role::Dimmer,
+        "PAN" => Role::PositionX,
+        "TILT" => Role::PositionY,
+        "OVS_ROTATION" => Role::Rotation,
+        "OVS_SCALE_X" => Role::ScaleX,
+        "OVS_SCALE_Y" => Role::ScaleY,
+        "_RED" => Role::Foreground(ColourPart::Red),
+        "_GREEN" => Role::Foreground(ColourPart::Green),
+        "_BLUE" => Role::Foreground(ColourPart::Blue),
+        "_ALPHA" => Role::Foreground(ColourPart::Alpha),
+        "OVS_BG_RED" => Role::Background(ColourPart::Red),
+        "OVS_BG_GREEN" => Role::Background(ColourPart::Green),
+        "OVS_BG_BLUE" => Role::Background(ColourPart::Blue),
+        "OVS_BG_ALPHA" => Role::Background(ColourPart::Alpha),
+        other => Role::Parameter(
+            other
+                .strip_prefix("PARA_")
+                .and_then(|number| number.parse().ok())
+                .unwrap_or(0),
+        ),
+    }
+}
+
+/// The personalities a desk gets a fixture type for: every one but a retired
+/// module's.
+pub(crate) fn current_personalities() -> Vec<Personality> {
+    catalogue()
+        .fixtures
+        .into_iter()
+        .filter(|personality| !retired(personality))
+        .collect()
+}
+
+/// A personality's name with `OVS FX` or `OVS Gen` in front, uncut, for desks
+/// that keep a longer name than a grandMA1.
+pub(crate) fn full_name(personality: &Personality) -> String {
+    ascii(&match personality.target {
+        PersonalityTarget::Master | PersonalityTarget::Layer => personality.name.clone(),
+        PersonalityTarget::Effect => format!("OVS FX {}", personality.name),
+        PersonalityTarget::Generator => format!("OVS Gen {}", personality.name),
+    })
+}
+
+/// The same, short.
+pub(crate) fn short_full_name(personality: &Personality) -> String {
+    ascii(&short_name(personality))
 }
 
 /// A number as a set's name shows it: two decimals at most, trimmed, and none

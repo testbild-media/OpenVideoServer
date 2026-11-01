@@ -1689,6 +1689,7 @@ dependencies = [
 name = "ovs-proto"
 version = "0.3.7"
 dependencies = [
+ "crc32fast",
  "ovs-types",
  "schemars",
  "serde",

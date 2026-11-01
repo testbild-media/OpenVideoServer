@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MA xmlns:xml="http://www.w3.org/XML/1998/namespace" major_vers="3" minor_vers="2" stream_vers="2">
+  <FixtureType index="0" name="OVS FX Shake" mode="Standard">
+    <InfoItems>
+      <Info>OpenVideoServer ovs.shake, 2 channels. Patch in OVS to one effect instance in a chain, at the same address. Parameter 1 Speed. Generated from the OVS fixture catalogue; reference/FIXTURES.md lists every value.</Info>
+    </InfoItems>
+    <short_name>FXShake</short_name>
+    <manufacturer>testbild.media</manufacturer>
+    <short_manufacturer>testbild</short_manufacturer>
+    <Modules index="0">
+      <Module index="0" name="Main Module" class="None" beamtype="None" beam_angle="0" beam_intensity="0">
+        <ChannelType index="0" attribute="DIM" feature="DIMMER" preset="DIMMER" coarse="1" highlight_value="100">
+          <ChannelFunction index="0" name="Amount" from="0" to="100" min_dmx_24="0" max_dmx_24="16777215" physfrom="0" physto="1" subattribute="DIM" subattribute_user_name="Dim" attribute="DIM" attribute_user_name="Dim" feature="DIMMER" feature_user_name="Dimmer" preset="DIMMER" preset_user_name="Dimmer"/>
+        </ChannelType>
+        <ChannelType index="1" attribute="PARA_1" feature="OVS_PARAMETER" preset="VIDEO" coarse="2" default="98">
+          <ChannelFunction index="0" name="Speed" from="0" to="100" min_dmx_24="0" max_dmx_24="16777215" physfrom="0.5" physto="20" subattribute="PARA_1" subattribute_user_name="Parameter 1" attribute="PARA_1" attribute_user_name="Parameter 1" feature="OVS_PARAMETER" feature_user_name="OVS Parameter" preset="VIDEO" preset_user_name="Video">
+            <ChannelSet index="0" name="Speed 0.5" from_dmx="0" to_dmx="0"/>
+            <ChannelSet index="1" name="Speed 7.99" from_dmx="98" to_dmx="98"/>
+            <ChannelSet index="2" name="Speed 10.29" from_dmx="128" to_dmx="128"/>
+            <ChannelSet index="3" name="Speed 20" from_dmx="255" to_dmx="255"/>
+          </ChannelFunction>
+        </ChannelType>
+      </Module>
+    </Modules>
+    <Instances index="1">
+      <Instance index="0" module_index="0" patch="1"/>
+    </Instances>
+    <Wheels index="2"/>
+    <FixtureMacroCollect index="5"/>
+  </FixtureType>
+</MA>

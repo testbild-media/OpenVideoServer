@@ -10,6 +10,9 @@
 //!   patch editor can read.
 //! - [`generators`] — the generators a slot can hold, with their parameters.
 //! - [`grandma1`] — the same personalities as fixture types a grandMA1 imports.
+//! - [`grandma2`] — the same as the XML a grandMA2 and a dot2 import.
+//! - [`grandma3`] — the same again as GDTF, which a grandMA3 imports.
+//! - [`zip`] — the stored ZIP a GDTF file and the fixture download are.
 //!
 //! This crate defines shapes, not behaviour. It has no HTTP server, no socket
 //! and no async runtime, so the client and the server can both depend on it
@@ -23,11 +26,14 @@ pub mod effects;
 pub mod fixtures;
 pub mod generators;
 pub mod grandma1;
+pub mod grandma2;
+pub mod grandma3;
 pub mod http;
 pub mod modules;
 pub mod parameters;
 pub mod realtime;
 pub mod schema;
+pub mod zip;
 
 pub use effects::EffectCatalogueResponse;
 pub use fixtures::{catalogue, FixtureCatalogueResponse};
