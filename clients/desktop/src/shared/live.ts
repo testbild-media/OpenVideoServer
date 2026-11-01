@@ -474,17 +474,17 @@ export interface MatrixRow {
  * 2026-11-01): "Ein Admin sollte Layer verstecken können, dass diese nicht mehr
  * in der Live GUI zu sehen sind" — his layer 7 is an effect layer the desk
  * drives entirely, and a row with nothing on it to set is a row in the way of
- * the ones that have. `revealing` brings them back, which is how an
- * administrator finds one to show again.
+ * the ones that have. It is hidden and shown again in Settings › Layers, not
+ * from this screen (owner, the same day).
  *
  * Every row keeps the number it has in the whole stack. Layer 8 above a hidden
  * 7 is still 8, because that is the layer the desk patch and Settings call 8,
  * and a gap in the numbers is what says that something is hidden there.
  */
-export function matrixRows(layers: readonly LayerView[], revealing: boolean): MatrixRow[] {
+export function matrixRows(layers: readonly LayerView[]): MatrixRow[] {
   return layers
     .map((layer, position) => ({ layer, number: position + 1 }))
-    .filter((row) => revealing || !row.layer.hidden)
+    .filter((row) => !row.layer.hidden)
     .reverse();
 }
 

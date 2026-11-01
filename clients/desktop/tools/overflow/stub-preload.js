@@ -93,7 +93,8 @@ const layer = (id, order) => ({
   held: { opacity: order === 6, slot: order === 6, transform: order === 6 },
   // **The seventh is hidden from Live** (owner, 2026-11-01), like his effect
   // layer the desk drives entirely: on top of the stack, so the matrix the
-  // audits measure is still the six under it, and there to be revealed.
+  // audits measure is still the six under it, and the note at the end of the
+  // bank bar has something to say.
   hidden: order === 7,
   defaults: { enabled: true, route: 'A', opacity: 1 },
   // **Two, and the second one switched off.** Two because a chain of one
@@ -298,6 +299,26 @@ const generator = {
   ],
 };
 
+/** One of the stored show's layers, the same seven the live view has.
+ *
+ *  The document had none until 2026-11-01, so Settings › Layers drew "No
+ *  layers yet" to every audit and the switch that hides a layer from Live,
+ *  which is there, had never been pressed by anything. The seventh is hidden.
+ */
+const storedLayer = (n) => ({
+  id: 'L' + n,
+  name: `${LONG} ${n}`,
+  enabled: true,
+  order: n,
+  route: 'A',
+  blend_mode: 'normal',
+  default_opacity: 1,
+  default_transform: TRANSFORM,
+  effects: [],
+  slots: [],
+  ...(n === 7 ? { hidden: true } : {}),
+});
+
 /** A stored show, as `GET /shows/{id}` answers with one.
  *
  *  Enough of one to draw the Show tab's look inside: an output with a shape
@@ -333,7 +354,7 @@ const document_ = {
     default_dimmer: 1,
     default_crossfader: 0.5,
   },
-  layers: [],
+  layers: [1, 2, 3, 4, 5, 6, 7].map(storedLayer),
   pieces: [piece(1, 0, 0), piece(2, 960, 0), piece(3, 0, 540), piece(4, 960, 540)],
   outputs: [
     {
@@ -414,6 +435,8 @@ const answers = {
   // this stub rots: the call exists, so nothing says it is lying about what it
   // gives back.
   setMapping: async () => ok({ ...document_, updated_at: 3 }),
+  // The same for hiding a layer from Live, which answers with when.
+  setLayerHidden: async () => ok({ updated_at: 3 }),
   // One socket with two modes, matching the output the stub show puts on it.
   // Empty is honest for a machine with no renderer and useless here: a mode is
   // chosen from this list now, so with nothing in it there is nothing to press

@@ -668,8 +668,6 @@ export class LivePanel {
   #bank = 0;
   /** Which effects in OPTIONS the operator has unfolded, by instance. */
   readonly #openEffects = new OpenFolds(OPEN_EFFECTS_KEY);
-  /** Whether an administrator has asked to see the hidden layers too. See `#revealing`. */
-  #revealHidden = false;
   /** What the operator has folded away, kept across restarts. Only the work area, so far. */
   readonly #putAway = new OpenFolds(PUT_AWAY_KEY);
   /** Every bank the bar offers, opened or not, worked out once per redraw. */
@@ -851,7 +849,7 @@ export class LivePanel {
     bpmUp: element<HTMLButtonElement>('bpm-up'),
     dmxEnabled: element<HTMLButtonElement>('dmx-enabled'),
     saveLive: element<HTMLButtonElement>('save-live'),
-    hiddenLayers: element<HTMLButtonElement>('hidden-layers'),
+    hiddenLayers: element('hidden-layers'),
     workFold: element<HTMLButtonElement>('work-fold'),
     work: element('work'),
     beatStrip: element('beat-strip'),
@@ -911,10 +909,6 @@ export class LivePanel {
     }
 
     this.#ui.saveLive.addEventListener('click', () => void this.#saveLive());
-    this.#ui.hiddenLayers.addEventListener('click', () => {
-      this.#revealHidden = !this.#revealHidden;
-      this.#render();
-    });
     this.#ui.workFold.addEventListener('click', () => {
       this.#putAway.remember(WORK_AREA, !this.#workFolded());
       this.#drawWorkFold();
@@ -1723,9 +1717,8 @@ export class LivePanel {
 
   #drawMatrix(): void {
     // Top of the list is the top of the composite, which is how an operator
-    // reads a stack of layers. Without the ones an administrator has hidden,
-    // unless one is looking for them.
-    const rows = matrixRows(this.#view.layers, this.#revealing());
+    // reads a stack of layers. Without the ones an administrator has hidden.
+    const rows = matrixRows(this.#view.layers);
     // The bank is deliberately not part of this: paging is not a reason to
     // rebuild seven rows of controls, and each row's pad strip rebuilds itself
     // when the slots in it change, which paging does. The numbers are, because
@@ -1745,7 +1738,7 @@ export class LivePanel {
               ? 'Sign in to a server to see its layers.'
               : this.#view.layers.length === 0
                 ? 'The open show has no layers. Add one in Settings.'
-                : 'Every layer of this show is hidden from the live screen. An administrator can show them again.',
+                : 'Every layer of this show is hidden from the live screen. An administrator can show them again in Settings › Layers.',
           ),
         );
       }
@@ -1754,52 +1747,32 @@ export class LivePanel {
     for (const row of rows) {
       this.#updateRow(row.layer);
     }
-    this.#drawHiddenSwitch();
+    this.#drawHiddenNote();
 
     this.#sizeTiles();
   }
 
   /**
-   * Whether the matrix is showing the layers an administrator hid as well.
-   *
-   * Only ever for an administrator: the one reason to see them on this screen
-   * is to show one again, and that is theirs to do.
-   */
-  #revealing(): boolean {
-    return this.#revealHidden && this.#view.mayAdminister;
-  }
-
-  /**
    * The note at the end of the bank bar that layers are hidden, and how many.
    *
-   * Absent while none are. For an administrator it is the switch that brings
-   * them back onto the matrix, dimmed, so one can be chosen and shown again in
-   * OPTIONS; for anybody else it is only the note, so a gap in the layer
-   * numbers is not a mystery.
+   * Absent while none are. Only a note, for everybody, so a gap in the layer
+   * numbers is not a mystery: hiding and showing one is done in Settings ›
+   * Layers (owner, 2026-11-01), not on the screen it is hidden from.
    */
-  #drawHiddenSwitch(): void {
+  #drawHiddenNote(): void {
     const count = hiddenCount(this.#view.layers);
     const node = this.#ui.hiddenLayers;
     node.hidden = count === 0;
     if (count === 0) {
       return;
     }
-    const admin = this.#view.mayAdminister;
-    const revealing = this.#revealing();
     node.textContent = `HIDDEN ${count}`;
-    node.disabled = !this.#connected || !admin;
-    node.classList.toggle('on', revealing);
-    node.setAttribute('aria-pressed', String(revealing));
     const names = this.#view.layers
       .map((layer, position) => ({ layer, number: position + 1 }))
       .filter((row) => row.layer.hidden)
       .map((row) => `${row.number} ${row.layer.name}`)
       .join(', ');
-    node.title = !admin
-      ? `Hidden from this screen by an administrator: ${names}. They still play, and still follow the desk.`
-      : revealing
-        ? `Showing the hidden layers too, dimmed: ${names}. Press to put them away again.`
-        : `Hidden from this screen: ${names}. They still play, and still follow the desk. Press to show them here, to choose one and show it again in OPTIONS.`;
+    node.title = `Hidden from this screen by an administrator: ${names}. They still play, and still follow the desk. Settings › Layers shows them again.`;
   }
 
   /**
@@ -2165,8 +2138,6 @@ export class LivePanel {
     }
 
     row.root.classList.toggle('disabled', !layer.enabled);
-    // Only ever drawn while an administrator is looking for hidden layers.
-    row.root.classList.toggle('concealed', layer.hidden);
     // **One subject anywhere in the matrix** (owner, 2026-09-23): a slot name
     // or a layer, never both. A row that stayed lit under a chosen slot was
     // the screen naming two things and OPTIONS talking about one of them.
@@ -3705,10 +3676,10 @@ export class LivePanel {
     // an operator reaches for first. An empty panel telling somebody to click
     // something is a panel asking them to do what it could have done.
     //
-    // And one that is on the matrix: a layer hidden from it — by this
-    // administrator a moment ago, or by another one — is not a subject the
-    // screen can point at.
-    const rows = matrixRows(this.#view.layers, this.#revealing());
+    // And one that is on the matrix: a layer an administrator has hidden from
+    // it, a moment ago or before the show, is not a subject the screen can
+    // point at.
+    const rows = matrixRows(this.#view.layers);
     if (this.#selected === null || !rows.some((row) => row.layer.id === this.#selected)) {
       this.#selected = rows[0]?.layer.id ?? null;
       this.#selectedSlot = null;
@@ -3763,9 +3734,6 @@ export class LivePanel {
 
     const shape = [
       layer.id,
-      // The subject row's switch says which way it goes, and is only there for
-      // an administrator.
-      `${layer.hidden}:${this.#view.mayAdminister}`,
       slot === null ? 'layer' : `slot:${slot.index}:${slot.source.kind}`,
       effectsShape(layer.id, chains, this.#catalogue.loaded),
       generatorsShape(generators, this.#catalogue.loaded),
@@ -3846,37 +3814,8 @@ export class LivePanel {
           { className: 'small', title: `Set up ${layer.name} itself instead` },
         ),
       );
-    } else if (this.#view.mayAdminister) {
-      // Taking a layer off this screen, for an administrator (owner,
-      // 2026-11-01). It goes on playing and following the desk; it is only no
-      // longer a row an operator has to look past. The server decides again.
-      row.append(
-        button(
-          layer.hidden ? 'Show in Live' : 'Hide in Live',
-          () => void this.#setHidden(layer.id, !layer.hidden),
-          {
-            className: 'small',
-            title: layer.hidden
-              ? `Put ${layer.name} back on the live screen for everybody.`
-              : `Take ${layer.name} off the live screen for everybody. It still plays and still follows the desk, and HIDDEN at the end of the bank bar brings it back.`,
-          },
-        ),
-      );
     }
     return row;
-  }
-
-  /** Hides a layer from the live screen, or shows it again. The answer comes back over the socket. */
-  async #setHidden(layerId: string, hidden: boolean): Promise<void> {
-    const showId = this.#view.showId;
-    if (showId === null) {
-      this.#note('No show is open, so there is no layer to hide.');
-      return;
-    }
-    const answer = await this.#ovs.setLayerHidden(showId, layerId, hidden);
-    if (!answer.ok) {
-      this.#note(answer.message);
-    }
   }
 
   /**

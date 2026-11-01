@@ -389,6 +389,7 @@ const editor = new EditorPanel({
   note,
   liveShowId: () => view?.showId ?? null,
   deskHolds: (instanceId) => deskHolds(view, instanceId),
+  mayAdminister: () => view?.mayAdminister ?? false,
 });
 
 /**

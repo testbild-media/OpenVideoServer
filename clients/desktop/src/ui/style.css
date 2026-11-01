@@ -388,29 +388,20 @@ body {
   gap: 8px;
 }
 
-/* That layers are hidden, and the administrator's way to see them. Small and
-   quiet, because it is a note about the screen and not a control of the show. */
+/* That layers are hidden. Small and quiet, and not a button, because it is a
+   note about the screen and not a control of anything. */
 
 #hidden-layers {
+  display: inline-flex;
+  align-items: center;
   height: 30px;
   padding: 0 10px;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
   color: var(--dim);
-  border-style: dashed;
-}
-
-/* Lit while the hidden ones are on the matrix, like a bank that is showing. */
-
-#hidden-layers.on {
-  background: var(--waiting);
-  border-color: var(--waiting);
-  color: #06080c;
-}
-
-#hidden-layers:disabled {
-  opacity: 1;
+  border: 1px dashed var(--edge);
+  border-radius: 4px;
   cursor: default;
 }
 
@@ -663,19 +654,6 @@ body {
 
 .layer.selected {
   border-color: var(--active);
-}
-
-/* Hidden from this screen by an administrator, and only drawn while one is
-   looking for it. Dashed, like a value somebody else is holding: it is real and
-   still playing, and the row is not where an operator works on it. */
-
-.layer.concealed {
-  border-style: dashed;
-  opacity: 0.55;
-}
-
-.layer.concealed.disabled {
-  opacity: 0.3;
 }
 
 .layer-status {
@@ -2937,6 +2915,19 @@ h2 {
   color: var(--dim);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+}
+
+/* Hidden from the live screen. Dashed, like the note on that screen which
+   says so: the layer is real and still playing. */
+
+.hidden-mark {
+  margin-right: 6px;
+  padding: 0 5px;
+  border: 1px dashed var(--dim);
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
 }
 
 .stack {

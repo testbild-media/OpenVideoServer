@@ -357,16 +357,17 @@ describe('the matrix', () => {
     } satisfies ServerMessage);
     const layers = toView(state).layers;
 
-    const shown = (revealing: boolean) =>
-      matrixRows(layers, revealing).map((row) => `${row.number} ${row.layer.id}`);
     // The top of the composite first, and Upper is still 3 with 2 gone.
-    expect(shown(false)).toEqual(['3 upper', '1 lower']);
-    expect(shown(true)).toEqual(['3 upper', '2 effects', '1 lower']);
+    expect(matrixRows(layers).map((row) => `${row.number} ${row.layer.id}`)).toEqual([
+      '3 upper',
+      '1 lower',
+    ]);
     expect(hiddenCount(layers)).toBe(1);
 
     // A layer the document says nothing about is on the screen.
-    expect(hiddenCount(loaded().layers)).toBe(0);
-    expect(shown(false)).toHaveLength(2);
+    const plain = loaded().layers;
+    expect(hiddenCount(plain)).toBe(0);
+    expect(matrixRows(plain)).toHaveLength(plain.length);
   });
 
   it('steps to the next slot that holds something, and back to black before the first', () => {

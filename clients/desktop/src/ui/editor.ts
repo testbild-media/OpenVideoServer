@@ -139,6 +139,8 @@ export interface EditorDeps {
    * to (owner, 2026-10-19).
    */
   deskHolds: (instanceId: string) => readonly string[];
+  /** Whether the account signed in is an administrator, as the live view says. */
+  mayAdminister: () => boolean;
 }
 
 export class EditorPanel {
@@ -146,6 +148,7 @@ export class EditorPanel {
   readonly #note: (message: string) => void;
   readonly #liveShowId: () => string | null;
   readonly #deskHolds: (instanceId: string) => readonly string[];
+  readonly #mayAdminister: () => boolean;
 
   #draft: Draft | null = null;
   /** The show LOAD has been offered for once and is waiting to be confirmed. */
@@ -261,6 +264,7 @@ export class EditorPanel {
     this.#note = deps.note;
     this.#liveShowId = deps.liveShowId;
     this.#deskHolds = deps.deskHolds;
+    this.#mayAdminister = deps.mayAdminister;
 
     this.#mapping = new MappingPanel({
       show: () => this.#draft?.show ?? null,
@@ -672,10 +676,19 @@ export class EditorPanel {
   }
 
   #adopt(show: Show): void {
+    // The same show again, caught up with the server, stays on the layer it
+    // was showing. Hiding one from Live stores the show, and the page jumped
+    // to the top layer under the switch that had just been pressed.
+    const stay =
+      this.#draft?.show.id === show.id &&
+      this.#selectedLayer !== null &&
+      findLayer(show, this.#selectedLayer) !== null;
     this.#draft = openDraft(show);
     this.#refused = [];
-    this.#selectedLayer = orderedLayers(show).at(-1)?.id ?? null;
-    this.#bank = 0;
+    if (!stay) {
+      this.#selectedLayer = orderedLayers(show).at(-1)?.id ?? null;
+      this.#bank = 0;
+    }
     this.#mapping.reset();
     this.#patch.reset();
     this.draw();
@@ -1677,7 +1690,14 @@ export class EditorPanel {
           }),
         );
 
-        row.append(enabled, name, make('span', 'order', `${layer.route} · ${layer.order}`), stack);
+        const order = make('span', 'order', `${layer.route} · ${layer.order}`);
+        if (layer.hidden === true) {
+          const mark = make('span', 'hidden-mark', 'HIDDEN');
+          mark.title = 'Hidden from the live screen. It still plays and still follows the desk.';
+          order.prepend(mark);
+        }
+
+        row.append(enabled, name, order, stack);
         return row;
       }),
     );
@@ -1745,6 +1765,30 @@ export class EditorPanel {
       'GUI: the slot is always chosen here and the console’s slot channel is ignored. ' +
       'Everything else a console does to the layer is unaffected either way.';
 
+    // **Hidden from Live** (owner, 2026-11-01): here, with the other rules
+    // about the layer, rather than on the screen it is hidden from. His FX
+    // layer is the desk's entirely, and on the live screen it was a row with
+    // nothing on it to set. An administrator's request of its own, like a
+    // lock, so it takes effect at once rather than at Save, and no operator's
+    // save brings the layer back.
+    const admin = this.#mayAdminister();
+    const stored = this.#draft?.saved.layers.some((each) => each.id === layer.id) ?? false;
+    const inLive = this.#select(
+      [
+        { value: 'shown', label: 'Shown' },
+        { value: 'hidden', label: 'Hidden' },
+      ],
+      layer.hidden === true ? 'hidden' : 'shown',
+      (value) => void this.#setHidden(layer.id, value === 'hidden'),
+    );
+    inLive.disabled = !admin || !stored;
+    inLive.title = !admin
+      ? 'Only an administrator can hide a layer from the live screen.'
+      : !stored
+        ? 'Save the show first: the server has to have this layer before it can hide it.'
+        : 'Hidden: left out of the live screen for everybody. It still plays and still follows the desk. ' +
+          'Takes effect at once, without Save.';
+
     this.#ui.layerFields.replaceChildren(
       this.#field('Name', name, `${base}.name`),
       this.#field(
@@ -1754,9 +1798,48 @@ export class EditorPanel {
         opacity.readout,
       ),
       this.#field('Slot chosen by', slotControl, `${base}.slot_control`),
+      this.#field('In Live', inLive, `${base}.hidden`),
     );
 
     this.#drawChain(this.#ui.layerEffects, { layerId: layer.id }, layer.effects);
+  }
+
+  /**
+   * Hides a layer from the live screen, or shows it again, at once.
+   *
+   * Not an edit of the draft: the server takes it from an administrator by a
+   * request of its own and carries it across every save. So what is in hand
+   * is stamped with it, as it is after the mapping is put on the wall, and
+   * does not read as a change waiting for Save.
+   */
+  async #setHidden(layerId: string, hidden: boolean): Promise<void> {
+    const show = this.#draft?.show;
+    if (show === undefined) {
+      return;
+    }
+    const answer = await this.#ovs.setLayerHidden(show.id, layerId, hidden);
+    if (!answer.ok) {
+      this.#note(answer.message);
+      // The chooser says what was asked for; put it back to what is.
+      this.draw();
+      return;
+    }
+    if (this.#draft !== null) {
+      const { updated_at } = answer.value;
+      this.#draft = {
+        saved: {
+          ...this.#draft.saved,
+          layers: withHidden(this.#draft.saved.layers, layerId, hidden),
+          updated_at,
+        },
+        show: {
+          ...this.#draft.show,
+          layers: withHidden(this.#draft.show.layers, layerId, hidden),
+          updated_at,
+        },
+      };
+    }
+    this.draw();
   }
 
   // --- effect chains --------------------------------------------------------
@@ -2191,4 +2274,20 @@ function holdsLocked(layer: Layer): boolean {
         (slot.source.kind === 'generator' && slot.source.locked === true),
     )
   );
+}
+
+/** The layers with one hidden from Live or shown again, written the way a save carries it. */
+function withHidden(layers: Layer[], layerId: string, hidden: boolean): Layer[] {
+  return layers.map((layer) => {
+    if (layer.id !== layerId) {
+      return layer;
+    }
+    const changed = { ...layer };
+    if (hidden) {
+      changed.hidden = true;
+    } else {
+      delete changed.hidden;
+    }
+    return changed;
+  });
 }
