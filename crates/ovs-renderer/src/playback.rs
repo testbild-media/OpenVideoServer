@@ -673,10 +673,21 @@ impl Playback {
                 // stands: same picture, new speed. Compared before anything is
                 // touched, so the ordinary case — nobody changed anything — is
                 // one equality test and no work.
+                //
+                // **Only the clip this slot is playing.** While a pad's clip
+                // is still opening, the layer goes on showing the one it had,
+                // and that one belongs to another slot: re-cut to this slot's
+                // beats, the owner's sixty-second clip on slot 10 ran eight
+                // times over for the moment slot 11's opened, and the renderer
+                // warned about slot 11 with slot 10's numbers (2026-11-08).
                 if !restart {
                     let current = self
                         .layers
                         .get(&layer.id)
+                        .filter(|playing| {
+                            playing.slot == live.active_slot
+                                && playing.media_item_id == media_item_id
+                        })
                         .map(|playing| (playing.length, playing.triggered));
                     if let Some((length, triggered)) = current {
                         if let Some(pass) = pass_for(length, slot.sync, slot.speed) {
@@ -4020,6 +4031,70 @@ mod tests {
             );
         }
         (state, layer_id, catalogue)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_clip_still_on_stage_keeps_its_own_speed_while_the_next_one_opens() {
+        // The owner, 2026-11-08: the renderer warned that slot 11 asked for
+        // 492 frames a second, and slot 11 runs at 0.91 times. The numbers
+        // were slot 10's clip — sixty seconds long — cut to slot 11's eight
+        // beats: while slot 11's clip opened, the one still showing was re-cut
+        // to the new slot's speed, and ran eight times over until it was
+        // replaced.
+        let (mut state, layer_id, catalogue) = show_with_two_clips();
+        if let Some(show) = state.show.as_mut() {
+            show.layers[0].slots[1].sync = ovs_types::config::SlotSync::BeatSync { beats: 1 };
+        }
+        let mut compositor = HeadlessCompositor::sized(SizePx::new(64, 64));
+        let start = Instant::now();
+        // `false`: the pool, so the second clip opens on another thread and
+        // there are passes in which the first is still the one on stage.
+        let mut playback = Playback::new(start, false);
+        let _ = pixel_at(
+            &mut playback,
+            &state,
+            &catalogue,
+            &mut compositor,
+            layer_id,
+            start,
+        );
+        let first = playback.layers[&layer_id].triggered.pass;
+
+        state.layers[0].active_slot = 2;
+        state.layers[0].trigger += 1;
+
+        // Passes back to back, as fast as they go: a clip this small opens in a
+        // millisecond or two, and the pass that asks for it is not one in
+        // which the old clip can be re-cut — the open has to be in flight.
+        let mut while_opening = 0;
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            playback.update(
+                &state,
+                &catalogue,
+                &mut compositor,
+                Instant::now(),
+                a_wall(),
+            );
+            let playing = &playback.layers[&layer_id];
+            if playing.slot == 2 {
+                break;
+            }
+            while_opening += 1;
+            assert_eq!(
+                playing.triggered.pass, first,
+                "slot 1's clip, still on stage, was re-cut to slot 2's beats"
+            );
+        }
+        assert!(
+            while_opening >= 2,
+            "the second clip arrived before a pass could find it opening, so this proves nothing"
+        );
+        assert_eq!(
+            playback.layers[&layer_id].slot, 2,
+            "the second clip never arrived"
+        );
     }
 
     #[cfg(unix)]
