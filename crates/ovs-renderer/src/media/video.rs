@@ -590,7 +590,27 @@ impl VideoSource {
         initialise();
 
         let input = ffmpeg::format::input(&path).map_err(|error| undecodable(&path, &error))?;
+        Self::with_input(path, input, threads, hardware)
+    }
 
+    /// Opens a clip whose container is already open, as [`open`](Self::open)
+    /// would.
+    ///
+    /// For [`super::open_clip`], which opens the file once to find out whether
+    /// it is HAP and should not make the decoder open it a second time.
+    pub(super) fn from_input(
+        path: PathBuf,
+        input: ffmpeg::format::context::Input,
+    ) -> Result<Self, MediaError> {
+        Self::with_input(path, input, DECODE_THREADS, Hardware::IfAllowed)
+    }
+
+    fn with_input(
+        path: PathBuf,
+        input: ffmpeg::format::context::Input,
+        threads: usize,
+        hardware: Hardware,
+    ) -> Result<Self, MediaError> {
         let stream = input
             .streams()
             .best(ffmpeg::media::Type::Video)
@@ -1254,7 +1274,7 @@ fn depth_of(format: ffmpeg::format::Pixel, target: Target) -> SampleDepth {
 }
 
 /// Starts FFmpeg once per process, and quietens it.
-fn initialise() {
+pub(super) fn initialise() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
         // The error is not worth propagating: every call after a failure fails

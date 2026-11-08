@@ -72,8 +72,64 @@ mod unix {
     use std::process::ExitCode;
     use std::time::{Duration, Instant};
 
-    use ovs_renderer::media::{FrameSource, Player, VideoSource};
+    use ovs_renderer::media::{
+        open_clip, FrameSource, MediaError, Player, VideoSource, HAP_BLOCKS,
+    };
     use ovs_types::id::MediaItemId;
+
+    /// Which way the playhead moves through the clip.
+    ///
+    /// Backwards because a clip played backwards is a playback direction an
+    /// operator chooses, and the owner's HAP Alpha logo on a bounce held every
+    /// frame of its backward half while its forward half held none (2026-11-08).
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Direction {
+        Forwards,
+        Backwards,
+        Bounce,
+    }
+
+    impl Direction {
+        /// Where the playhead is after `position` steps, and whether that leg
+        /// is the backward one.
+        ///
+        /// A bounce is counted as one long walk out and back, so a step of two
+        /// turns at the end rather than stopping one short of it.
+        fn at(self, position: u64, count: u32) -> (u32, bool) {
+            let count = u64::from(count.max(1));
+            let last = count - 1;
+            match self {
+                Self::Forwards => ((position % count) as u32, false),
+                Self::Backwards => ((last - position % count) as u32, true),
+                Self::Bounce if last == 0 => (0, false),
+                Self::Bounce => {
+                    let along = position % (2 * last);
+                    if along <= last {
+                        (along as u32, false)
+                    } else {
+                        ((2 * last - along) as u32, true)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Opens a clip the way the renderer does, or through the decoder by hand.
+    ///
+    /// The renderer's way unless a decoder was asked for: `--decoder` is what
+    /// every HAP clip got before 2026-11-08, and `--threads` only means
+    /// something to a decoder.
+    fn open_source(
+        path: &str,
+        threads: usize,
+        decoder: bool,
+    ) -> Result<Box<dyn FrameSource>, MediaError> {
+        if decoder || threads > 0 {
+            Ok(Box::new(VideoSource::open_with_threads(path, threads)?))
+        } else {
+            Ok(open_clip(std::path::Path::new(path))?.source)
+        }
+    }
 
     /// How long to wait after dropping the players before reading memory again.
     ///
@@ -88,7 +144,7 @@ mod unix {
     const AROUND_A_SEEK: u32 = 8;
 
     const USAGE: &str =
-        "usage: ovs-decode-cost <clip> [--players N] [--frames N] [--step N] [--rate N] [--threads N] [--seeks N]";
+        "usage: ovs-decode-cost <clip> [--players N] [--frames N] [--step N] [--rate N] [--threads N] [--seeks N] [--backwards | --bounce] [--decoder]";
 
     /// Prints what one clip is, before it is measured.
     ///
@@ -96,7 +152,15 @@ mod unix {
     /// happens before the measurement opens anything and cannot be mistaken for
     /// part of it. A clip that will not open at all is left to the code below to
     /// report properly.
-    fn describe(path: &str, threads: usize) {
+    fn describe(path: &str, threads: usize, decoder: bool) {
+        if !decoder && threads == 0 {
+            if let Ok(clip) = open_clip(std::path::Path::new(path)) {
+                if clip.reader == HAP_BLOCKS {
+                    println!("{HAP_BLOCKS}");
+                    return;
+                }
+            }
+        }
         let Ok(source) = VideoSource::open_with_threads(path, threads) else {
             return;
         };
@@ -120,10 +184,15 @@ mod unix {
         let mut threads = 0usize;
         let mut seeks = 0u32;
         let mut churn = 0u32;
+        let mut direction = Direction::Forwards;
+        let mut decoder = false;
 
         let mut args = std::env::args().skip(1);
         while let Some(argument) = args.next() {
             match argument.as_str() {
+                "--backwards" => direction = Direction::Backwards,
+                "--bounce" => direction = Direction::Bounce,
+                "--decoder" => decoder = true,
                 "--players" => players = parse(args.next().as_deref(), "--players"),
                 "--frames" => frames = parse(args.next().as_deref(), "--frames"),
                 "--step" => step = parse(args.next().as_deref(), "--step"),
@@ -153,17 +222,28 @@ mod unix {
         }
 
         println!("{path}");
-        println!("{players} player(s), {frames} passes at {rate} a second, stepping by {step}");
-        if threads == 0 {
-            println!("decoding with the threads the crate chooses");
+        println!(
+            "{players} player(s), {frames} passes at {rate} a second, stepping by {step}, {}",
+            match direction {
+                Direction::Forwards => "forwards",
+                Direction::Backwards => "backwards",
+                Direction::Bounce => "bouncing",
+            }
+        );
+        if decoder || threads > 0 {
+            if threads == 0 {
+                println!("through a decoder, with FFmpeg's own number of threads");
+            } else {
+                println!("through a decoder, with {threads} thread(s) a clip");
+            }
         } else {
-            println!("decoding with {threads} thread(s) a clip");
+            println!("opened as the renderer opens it");
         }
         // Said before anything is measured, because it changes what the numbers
         // below mean. A ten-bit clip moves twice the bytes a frame; a clip with
         // something converting it is paying for `swscale` on every pass and the
         // throughput measured is that, not the decoder's.
-        describe(&path, threads);
+        describe(&path, threads, decoder);
         println!();
         report("before anything is open", None);
         let cpu_before_open = processor_seconds();
@@ -174,14 +254,14 @@ mod unix {
 
         let mut open = Vec::with_capacity(players);
         for _ in 0..players {
-            let source = match VideoSource::open_with_threads(&path, threads) {
+            let source = match open_source(&path, threads, decoder) {
                 Ok(source) => source,
                 Err(error) => {
                     eprintln!("{error}");
                     return ExitCode::from(1);
                 }
             };
-            match Player::start(MediaItemId::new(), Box::new(source)) {
+            match Player::start(MediaItemId::new(), source) {
                 Ok(player) => open.push(player),
                 Err(error) => {
                     eprintln!("a player could not be started: {error}");
@@ -208,13 +288,22 @@ mod unix {
         let began = Instant::now();
         let cpu_began = processor_seconds();
         let mut due = began;
-        let mut index = 0u32;
         let mut late = 0u64;
-        for _ in 0..frames {
+        // Held frames on each leg, so a bounce says which half of it holds.
+        let mut held = [0u64; 2];
+        let mut passes = [0u32; 2];
+        let held_now =
+            |open: &[Player]| -> u64 { open.iter().map(|player| player.report().late).sum() };
+        for pass in 0..frames {
+            let (index, backwards) =
+                direction.at(u64::from(pass) * u64::from(step), length.frame_count);
+            let before = held_now(&open);
             for player in &mut open {
                 let _ = player.frame(index);
             }
-            index = (index + step) % length.frame_count.max(1);
+            let leg = usize::from(backwards);
+            held[leg] += held_now(&open) - before;
+            passes[leg] += 1;
             due += period;
             if let Some(wait) = due.checked_duration_since(Instant::now()) {
                 std::thread::sleep(wait);
@@ -225,6 +314,12 @@ mod unix {
         }
         let elapsed = began.elapsed();
         let cpu = processor_seconds() - cpu_began;
+        if direction == Direction::Bounce {
+            println!(
+                "forwards: {} frames held in {} passes; backwards: {} in {}",
+                held[0], passes[0], held[1], passes[1]
+            );
+        }
 
         println!();
         println!(

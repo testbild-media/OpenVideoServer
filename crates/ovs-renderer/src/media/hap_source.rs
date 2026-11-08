@@ -70,22 +70,38 @@ impl HapSource {
     /// `YCoCg_DXT5`, whose blocks are DXT5 but whose channels are not colour.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, MediaError> {
         let path = path.as_ref().to_path_buf();
+        super::video::initialise();
         let input = ffmpeg::format::input(&path).map_err(|error| undecodable(&path, &error))?;
+        Self::from_input(path.clone(), input)
+            .map_err(|reason| MediaError::Undecodable { path, reason })
+    }
 
+    /// Takes a clip whose container is already open, or says why not.
+    ///
+    /// The reason is for the log, and is never a failure to play: a clip this
+    /// cannot read goes to FFmpeg's decoder, which plays every HAP there is by
+    /// turning it into pixels on the processor. That is what every HAP clip
+    /// did until 2026-11-08 — this source was written in September and never
+    /// opened, and the owner's HAP Alpha logo on a bounce held every frame of
+    /// its backward half.
+    ///
+    /// **The first frame is read here** to know the clip can be sampled, and
+    /// that is the only way to know it: the container says HAP for all of
+    /// them, and which texture is inside is in each frame's own header. Hap Q
+    /// is DXT5 the card would sample as a green picture, and Hap Q Alpha is two
+    /// textures this does not read.
+    pub(super) fn from_input(
+        path: PathBuf,
+        input: ffmpeg::format::context::Input,
+    ) -> Result<Self, String> {
         let stream = input
             .streams()
             .best(ffmpeg::media::Type::Video)
-            .ok_or_else(|| MediaError::Undecodable {
-                path: path.clone(),
-                reason: "there is no video in this file".to_owned(),
-            })?;
+            .ok_or_else(|| "there is no video in this file".to_owned())?;
 
         let parameters = stream.parameters();
         if parameters.id() != ffmpeg::codec::Id::HAP {
-            return Err(MediaError::Undecodable {
-                path: path.clone(),
-                reason: "this is not a HAP clip".to_owned(),
-            });
+            return Err("this is not a HAP clip".to_owned());
         }
 
         let stream_index = stream.index();
@@ -101,17 +117,17 @@ impl HapSource {
         // decoder. A HAP stream carries its size in the container like any
         // other.
         let decoder_context = ffmpeg::codec::context::Context::from_parameters(parameters)
-            .map_err(|error| undecodable(&path, &error))?;
+            .map_err(|error| error.to_string())?;
         let video = decoder_context
             .decoder()
             .video()
-            .map_err(|error| undecodable(&path, &error))?;
+            .map_err(|error| error.to_string())?;
         let size = SizePx::new(video.width(), video.height());
         drop(video);
 
         let duration_ms = super::video::duration_ms(frames, rate);
 
-        Ok(Self {
+        let mut source = Self {
             path,
             input,
             stream_index,
@@ -126,7 +142,26 @@ impl HapSource {
             blocks: Vec::new(),
             last: None,
             next_index: None,
-        })
+        };
+
+        match source.next_frame() {
+            Ok(Some((_, format))) if format.is_colour() => {}
+            Ok(Some((_, format))) => {
+                return Err(format!("its blocks are {format:?}, which are not colour"));
+            }
+            Ok(None) => return Err("it has no frames".to_owned()),
+            Err(error) => return Err(error.to_string()),
+        }
+        // Where the reader is now is not where anybody asked for, so the
+        // first frame wanted seeks.
+        source.next_index = None;
+        Ok(source)
+    }
+
+    /// The clip's own picture size.
+    #[must_use]
+    pub const fn size(&self) -> SizePx {
+        self.size
     }
 
     /// Which frame a presentation stamp is.
@@ -254,5 +289,94 @@ fn undecodable(path: &Path, error: &impl std::fmt::Display) -> MediaError {
     MediaError::Undecodable {
         path: path.to_path_buf(),
         reason: error.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::media::{open_clip, HAP_BLOCKS};
+
+    /// A clip this machine's FFmpeg wrote, or nothing where there is none.
+    fn movie(directory: &Path, format: &str, frames: u32) -> Option<PathBuf> {
+        let path = directory.join(format!("{format}.mov"));
+        let made = std::process::Command::new("ffmpeg")
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=size=64x64:rate=25,format=rgba",
+                "-frames:v",
+                &frames.to_string(),
+                "-c:v",
+                "hap",
+                "-format",
+                format,
+            ])
+            .arg(&path)
+            .status();
+        if matches!(made, Ok(status) if status.success()) {
+            Some(path)
+        } else {
+            println!("skipped: no FFmpeg to write a {format} file with");
+            None
+        }
+    }
+
+    #[test]
+    fn a_hap_alpha_clip_is_read_as_blocks_and_not_decoded() {
+        // The owner's logo, 2026-11-08: HAP Alpha on a bounce, and every frame
+        // of its backward half held. This source had been written in September
+        // and nothing opened it, so every HAP clip went to FFmpeg's decoder,
+        // which turns the blocks into pixels on the processor and flushes
+        // itself at every step backwards.
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let Some(path) = movie(directory.path(), "hap_alpha", 12) else {
+            return;
+        };
+
+        let mut clip = open_clip(&path).expect("opens");
+        assert_eq!(clip.reader, HAP_BLOCKS);
+        let frame = clip.source.frame(0).expect("the first frame");
+        assert_eq!(
+            frame.image.block_format(),
+            Some(BlockFormat::Dxt5),
+            "the blocks go to the card as they are"
+        );
+    }
+
+    #[test]
+    fn a_hap_q_clip_goes_to_a_decoder_and_still_plays() {
+        // Its blocks are DXT5 too, and a card sampling them as colour shows a
+        // green picture. It plays as it always has, through the decoder.
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let Some(path) = movie(directory.path(), "hap_q", 12) else {
+            return;
+        };
+
+        let mut clip = open_clip(&path).expect("opens");
+        assert_ne!(clip.reader, HAP_BLOCKS);
+        let frame = clip.source.frame(0).expect("the first frame");
+        assert_eq!(frame.image.block_format(), None, "pixels, from a decoder");
+    }
+
+    #[test]
+    fn played_backwards_every_frame_is_the_one_asked_for() {
+        // A seek for every frame, and each one lands on the frame itself:
+        // every HAP frame is a keyframe.
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let Some(path) = movie(directory.path(), "hap_alpha", 24) else {
+            return;
+        };
+
+        let mut clip = open_clip(&path).expect("opens");
+        for index in (0..24).rev() {
+            let frame = clip.source.frame(index).expect("a frame");
+            assert_eq!(frame.index, index);
+        }
     }
 }

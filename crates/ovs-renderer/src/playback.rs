@@ -1461,19 +1461,20 @@ impl Playback {
 
         #[cfg(unix)]
         {
-            match crate::media::VideoSource::open(&location.path) {
-                Ok(source) => {
-                    let length = source.length();
+            match crate::media::open_clip(&location.path) {
+                Ok(clip) => {
+                    let length = clip.source.length();
                     tracing::info!(
                         %media_item_id,
                         path = %location.path.display(),
-                        width = source.size().width,
-                        height = source.size().height,
+                        width = clip.size.width,
+                        height = clip.size.height,
                         frames = length.frame_count,
                         duration_ms = length.duration_ms,
+                        reader = clip.reader,
                         "clip opened"
                     );
-                    Player::start(media_item_id, Box::new(source))
+                    Player::start(media_item_id, clip.source)
                         .inspect_err(|error| {
                             tracing::error!(%media_item_id, "cannot start a player: {error}");
                         })

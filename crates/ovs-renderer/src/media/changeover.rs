@@ -344,21 +344,24 @@ impl Drop for Changeover {
 /// Opens a real file.
 #[cfg(unix)]
 fn open_source(what: &OpeningFor, path: &Path) -> Result<Box<dyn FrameSource>, MediaError> {
-    let source = crate::media::VideoSource::open(path)?;
-    let length = source.length();
+    let clip = crate::media::open_clip(path)?;
+    let length = clip.source.length();
     // Said here rather than where the player is adopted, because the width and
     // the height are the concrete source's and a boxed one cannot be asked.
+    // What reads it is said too: a HAP clip that went to a decoder plays, and
+    // costs a processor what it was chosen not to.
     tracing::info!(
         layer = %what.layer_id,
         media_item_id = %what.media_item_id,
         path = %path.display(),
-        width = source.size().width,
-        height = source.size().height,
+        width = clip.size.width,
+        height = clip.size.height,
         frames = length.frame_count,
         duration_ms = length.duration_ms,
+        reader = clip.reader,
         "clip opened"
     );
-    Ok(Box::new(source))
+    Ok(clip.source)
 }
 
 /// No decoder is compiled into this build.

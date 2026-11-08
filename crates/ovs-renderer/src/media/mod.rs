@@ -60,3 +60,82 @@ pub use timeline::{
     demanded_fps, frame_for, pass_for, playhead_at, Pass, Playhead, ShowClock, SourceLength,
     Triggered, FPS_WORTH_WARNING_ABOUT,
 };
+
+/// A clip, opened by whichever source plays it best.
+#[cfg(unix)]
+pub struct OpenedClip {
+    /// What plays it.
+    pub source: Box<dyn FrameSource>,
+    /// Its own picture size.
+    pub size: ovs_types::geometry::SizePx,
+    /// What is reading it, for the log: HAP's blocks, or a decoder by name.
+    pub reader: &'static str,
+}
+
+/// What [`OpenedClip::reader`] says for a clip read as HAP blocks.
+#[cfg(unix)]
+pub const HAP_BLOCKS: &str = "HAP blocks, no decoder";
+
+/// Opens a clip with the source that plays it best.
+///
+/// HAP whose blocks are colour goes to [`HapSource`]: its frames are already
+/// textures, so there is no decoder, no conversion and no flush, and a frame
+/// costs a read whichever way the playhead is moving. Everything else goes to
+/// [`VideoSource`] — and so does any HAP that source cannot read, which FFmpeg
+/// plays the way it always has, by turning it into pixels on the processor.
+///
+/// The file is opened once. The container says which codec it holds, and the
+/// open container is handed to whichever source takes it; opening it twice
+/// would put a second read of every clip's header on every slot change.
+///
+/// # Errors
+///
+/// Returns [`MediaError`] when the file cannot be opened or no source can
+/// play it.
+#[cfg(unix)]
+pub fn open_clip(path: &std::path::Path) -> Result<OpenedClip, MediaError> {
+    use ffmpeg_next as ffmpeg;
+
+    video::initialise();
+    let open = || {
+        ffmpeg::format::input(path).map_err(|error| MediaError::Undecodable {
+            path: path.to_path_buf(),
+            reason: error.to_string(),
+        })
+    };
+    let input = open()?;
+    let hap = input
+        .streams()
+        .best(ffmpeg::media::Type::Video)
+        .is_some_and(|stream| stream.parameters().id() == ffmpeg::codec::Id::HAP);
+
+    let input = if hap {
+        match HapSource::from_input(path.to_path_buf(), input) {
+            Ok(source) => {
+                return Ok(OpenedClip {
+                    size: source.size(),
+                    source: Box::new(source),
+                    reader: HAP_BLOCKS,
+                });
+            }
+            Err(reason) => {
+                tracing::info!(
+                    path = %path.display(),
+                    "a HAP clip that cannot be read as blocks ({reason}); decoding it instead"
+                );
+                // The reader has moved and a decoder wants the container from
+                // its start, so it is opened again — for this kind of clip only.
+                open()?
+            }
+        }
+    } else {
+        input
+    };
+
+    let source = VideoSource::from_input(path.to_path_buf(), input)?;
+    Ok(OpenedClip {
+        size: source.size(),
+        reader: source.decoder_name(),
+        source: Box::new(source),
+    })
+}
