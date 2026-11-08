@@ -113,6 +113,14 @@ pub struct Player {
     ready: Vec<Frame>,
     /// The frame last handed to the render thread.
     held: Option<Frame>,
+    /// The frame handed over before `held`, kept only near either end.
+    ///
+    /// Where a bounce turns, and what it asks for first after turning: the
+    /// frame shown just before the end one. Nothing ahead has it — the worker
+    /// was reading the other way — so without this the turn held a frame
+    /// every time (owner, 2026-11-08). Only near the ends, because one more
+    /// decoded frame a layer is a cost the middle of a clip has no use for.
+    previous: Option<Frame>,
     /// The index a late frame was last counted for.
     ///
     /// The render loop runs faster than any output presents — it sleeps at most
@@ -189,7 +197,17 @@ impl Player {
                     // Watched rather than told, so reverse playback needs
                     // nothing said about it.
                     if wanted != previous_wanted {
-                        forwards = travelling_forwards(previous_wanted, wanted, frame_count);
+                        let now = travelling_forwards(previous_wanted, wanted, frame_count);
+                        if now != forwards {
+                            // **A turn.** Everything in flight was read the
+                            // other way, and at the end of a bounce it is the
+                            // start of the clip, which a loop wants and a
+                            // bounce never shows. Read on from the playhead
+                            // instead of walking back through all of it.
+                            cursor = wanted;
+                            pending = None;
+                        }
+                        forwards = now;
                         previous_wanted = wanted;
                     }
 
@@ -257,6 +275,7 @@ impl Player {
             worker: Some(worker),
             ready: Vec::new(),
             held: None,
+            previous: None,
             missed: None,
             ahead,
             served: 0,
@@ -304,7 +323,20 @@ impl Player {
             self.ready
                 .retain(|ready| distance(index, ready.index, frame_count) <= self.ahead);
             self.served += 1;
-            self.held = Some(frame.clone());
+            self.keep(frame.clone());
+            self.missed = None;
+            return Some(frame);
+        }
+
+        // The frame before the one on stage, asked for again: a bounce that
+        // has just turned.
+        if self
+            .previous
+            .as_ref()
+            .is_some_and(|previous| previous.index == index)
+        {
+            let frame = self.previous.clone()?;
+            self.keep(frame.clone());
             self.missed = None;
             return Some(frame);
         }
@@ -329,6 +361,15 @@ impl Player {
         }
 
         self.held.clone()
+    }
+
+    /// Puts a frame on stage, keeping the one before it if this is near an end.
+    fn keep(&mut self, frame: Frame) {
+        let frame_count = self.length.frame_count.max(1);
+        let ahead = self.ahead;
+        let near_an_end = |index: u32| index < ahead || index + ahead >= frame_count;
+        let before = self.held.replace(frame);
+        self.previous = before.filter(|before| near_an_end(before.index));
     }
 
     /// Returns what this player is doing.
@@ -828,6 +869,55 @@ mod tests {
             let frame = player.frame(index).expect("a frame");
             assert_eq!(frame.index, index, "frame {index} was not ready");
         }
+    }
+
+    #[test]
+    fn a_bounce_turns_round_without_holding_a_frame() {
+        // The owner, 2026-11-08, on 0.3.9 with his HAP logo: "Okay der Bounce
+        // macht jetzt nur noch 2 Frames beim umschalten von vorwärts auf
+        // rückwärts und anders herum". At the end of a clip the worker had
+        // already read past it into the start — what a loop needs and a bounce
+        // never shows — and the frame wanted straight after the turn was the
+        // one shown a moment before, already let go of.
+        //
+        // A millisecond a frame, about what a HAP read costs, and a pass every
+        // eight: plenty of time, so what is counted is the turn and not speed.
+        struct Read {
+            inner: SyntheticSource,
+        }
+        impl FrameSource for Read {
+            fn length(&self) -> SourceLength {
+                self.inner.length()
+            }
+            fn frame(&mut self, index: u32) -> Result<Frame, MediaError> {
+                std::thread::sleep(Duration::from_millis(1));
+                self.inner.frame(index)
+            }
+        }
+
+        const FRAMES: u32 = 40;
+        let mut player = Player::start(
+            MediaItemId::new(),
+            Box::new(Read {
+                inner: SyntheticSource::new(SizePx::new(8, 8), 1_600, FRAMES),
+            }),
+        )
+        .expect("a player");
+        wait_for(&mut player, 0);
+        std::thread::sleep(Duration::from_millis(50));
+
+        // Out to the end, back to the start, and out again: both turns.
+        let bounce = (0..FRAMES).chain((0..FRAMES - 1).rev()).chain(1..FRAMES);
+        let before = player.report().late;
+        for index in bounce {
+            let _ = player.frame(index);
+            std::thread::sleep(Duration::from_millis(8));
+        }
+        assert_eq!(
+            player.report().late - before,
+            0,
+            "a turn held the frame before it"
+        );
     }
 
     #[test]
