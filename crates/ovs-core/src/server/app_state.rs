@@ -1244,18 +1244,24 @@ impl AppState {
     ///
     /// The broadcast happens here rather than at each call site, so a change can
     /// be made without being published only by not going through this function.
+    ///
+    /// **Sent while the lock is still held.** The number is given under it, and
+    /// a send after it let two changes made at the same moment reach the
+    /// channel in the wrong order: the renderer takes an update only when it
+    /// follows the last one, so it refused the pair and everything after them,
+    /// and the wall stopped following the desk and every client until the
+    /// machine was restarted (owner, 2026-11-08). A send costs no more than
+    /// putting a message in a queue, and nothing here waits for a reader.
     pub fn mutate_state<T>(
         &self,
         operation: impl FnOnce(&mut AuthoritativeState) -> (T, Option<SequencedChange>),
     ) -> T {
-        let (result, change) = {
-            let mut state = self
-                .inner
-                .state
-                .write()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            operation(&mut state)
-        };
+        let mut state = self
+            .inner
+            .state
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (result, change) = operation(&mut state);
 
         if let Some(change) = change {
             // A send with no subscribers is not an error: the show runs whether
@@ -1265,6 +1271,7 @@ impl AppState {
                 change: change.change,
             });
         }
+        drop(state);
 
         result
     }
@@ -1275,18 +1282,18 @@ impl AppState {
     /// a grid boundary can land on six layers, and publishing them one
     /// mutation at a time would take the write lock six times for what is one
     /// moment in the show.
+    ///
+    /// Sent under the lock, like [`Self::mutate_state`] and for its reason.
     pub fn mutate_state_each<T>(
         &self,
         operation: impl FnOnce(&mut AuthoritativeState) -> (T, Vec<SequencedChange>),
     ) -> T {
-        let (result, changes) = {
-            let mut state = self
-                .inner
-                .state
-                .write()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            operation(&mut state)
-        };
+        let mut state = self
+            .inner
+            .state
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (result, changes) = operation(&mut state);
 
         for change in changes {
             let _ = self.inner.updates.send(ServerMessage::Update {
@@ -1294,6 +1301,7 @@ impl AppState {
                 change: change.change,
             });
         }
+        drop(state);
 
         result
     }
@@ -1521,6 +1529,60 @@ mod tests {
         for receiver in [&mut first, &mut second] {
             let message = receiver.try_recv().expect("delivered");
             assert!(matches!(message, ServerMessage::Update { .. }));
+        }
+    }
+
+    #[test]
+    fn changes_made_at_once_arrive_in_the_order_they_were_numbered() {
+        // The owner, 2026-11-08: "Ab 00:08:50 hat die Wand nicht mehr
+        // reagiert". The renderer applies an update only when it follows the
+        // last one, and two changes made at the same moment — the desk and a
+        // client, say — were numbered under the lock and sent after it, so the
+        // later number could reach the channel first. The renderer saw a gap,
+        // refused everything after it, and the wall stopped following anybody
+        // until the machine was restarted by hand.
+        //
+        // In rounds smaller than the channel, so a subscriber reading after
+        // each round can never fall behind and lose the evidence.
+        const WRITERS: usize = 8;
+        const EACH: usize = 30;
+        const ROUNDS: usize = 200;
+
+        let app = state();
+        let mut updates = app.subscribe();
+        let mut last: Option<u64> = None;
+
+        for round in 0..ROUNDS {
+            std::thread::scope(|scope| {
+                for writer in 0..WRITERS {
+                    let app = app.clone();
+                    scope.spawn(move || {
+                        for each in 0..EACH {
+                            app.mutate_state(|state| {
+                                let change = state.set_renderer(RendererStatus::Degraded {
+                                    reason: format!("{round} {writer} {each}"),
+                                });
+                                ((), change)
+                            });
+                        }
+                    });
+                }
+            });
+
+            while let Ok(message) = updates.try_recv() {
+                let ServerMessage::Update { sequence, .. } = message else {
+                    continue;
+                };
+                if let Some(before) = last {
+                    assert_eq!(
+                        sequence.0,
+                        before + 1,
+                        "update {} reached the channel after {before}, in round {round}",
+                        sequence.0
+                    );
+                }
+                last = Some(sequence.0);
+            }
         }
     }
 

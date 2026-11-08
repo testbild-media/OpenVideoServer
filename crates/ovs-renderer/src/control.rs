@@ -12,7 +12,7 @@ use std::io::{BufReader, BufWriter};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use ovs_ipc::{
     read_frame, write_frame, ControlMessage, IpcError, RendererMessage, IPC_PROTOCOL_VERSION,
@@ -34,6 +34,17 @@ const TELEMETRY_INTERVAL: Duration = Duration::from_secs(1);
 /// broken. Slow enough that the encoding stays a background cost — a thumbnail
 /// PNG is a few milliseconds, on a thread that is doing nothing else.
 const PREVIEW_INTERVAL: Duration = Duration::from_millis(200);
+
+/// How long a request for a snapshot is given before it is made again.
+///
+/// A snapshot is one message on a socket on this machine and arrives in
+/// milliseconds, so a second is not a wait anybody expects to sit out: it
+/// exists so that one request lost on the way — a core restarting, a link
+/// half-closed — cannot leave the wall refusing updates for the rest of the
+/// night, which is what one unanswered request did on 2026-11-08. Asking on
+/// every refused update instead would be forty-four requests a second with a
+/// desk patched, each answered with the whole show.
+const RESYNC_PATIENCE: Duration = Duration::from_secs(1);
 
 /// The write half of a control connection.
 ///
@@ -185,6 +196,9 @@ fn read_control(
     state: &Arc<SharedShowState>,
     writer: &SharedWriter,
 ) -> Result<Disconnected, IpcError> {
+    // When this renderer last asked for a snapshot it has not yet received.
+    let mut asked: Option<Instant> = None;
+
     loop {
         let message: ControlMessage = match read_frame(reader) {
             Ok(message) => message,
@@ -195,17 +209,34 @@ fn read_control(
         match message {
             ControlMessage::Snapshot(snapshot) => {
                 state.replace(ShowState::from_snapshot(*snapshot));
+                asked = None;
             }
             ControlMessage::Update { sequence, change } => {
+                let held = state.load().sequence;
+                // **Already in hand.** The core subscribes before it takes a
+                // snapshot, so the updates queued in between arrive after the
+                // snapshot that includes them. Read as a gap, one of them was
+                // enough to refuse every update after it.
+                if sequence <= held {
+                    continue;
+                }
+                // Refused quietly while a snapshot is on its way: every one of
+                // these is a gap too, and saying so once is enough.
+                if asked.is_some_and(|at| at.elapsed() < RESYNC_PATIENCE) {
+                    continue;
+                }
                 if !state.apply(sequence, &change) {
                     // The renderer missed something. Rendering on would put
-                    // state on stage that the core never asked for, so say so
-                    // and wait for a fresh snapshot.
+                    // state on stage that the core never asked for, so it asks
+                    // for the whole state again and refuses updates until that
+                    // arrives.
                     tracing::warn!(
+                        held = held.0,
                         received = sequence.0,
-                        "control update did not follow on; awaiting a snapshot"
+                        "control update did not follow on; asking for a snapshot"
                     );
-                    send(writer, &RendererMessage::Status(state.status()))?;
+                    send(writer, &RendererMessage::Resynchronise { held })?;
+                    asked = Some(Instant::now());
                 }
             }
             ControlMessage::Media { entries } => {
@@ -625,6 +656,85 @@ mod tests {
         until(|| state.load().master.bpm == 174.0);
 
         stop(core, &address, &running, handle);
+    }
+
+    #[test]
+    fn a_gap_asks_for_a_snapshot_once_and_what_the_snapshot_holds_is_no_gap() {
+        // The owner, 2026-11-08: "Ab 00:08:50 hat die Wand nicht mehr
+        // reagiert". One update arrived out of order, this thread refused it
+        // and everything after it, and told the core with a status the core
+        // recorded and never answered.
+        let (address, state, running, handle) = start();
+        let stream = TcpStream::connect(&address).expect("connects");
+        let mut writer = BufWriter::new(stream.try_clone().expect("clones"));
+        let mut reader = BufReader::new(stream.try_clone().expect("clones"));
+        let hello: RendererMessage = read_frame(&mut reader).expect("hello");
+        assert!(matches!(hello, RendererMessage::Hello { .. }));
+
+        // Everything the renderer says, read as it is said, keeping only the
+        // requests for a snapshot.
+        let (asked, asks) = std::sync::mpsc::channel();
+        let listening = thread::spawn(move || {
+            while let Ok(message) = read_frame::<RendererMessage>(&mut reader) {
+                if let RendererMessage::Resynchronise { held } = message {
+                    if asked.send(held).is_err() {
+                        break;
+                    }
+                }
+            }
+        });
+
+        let tempo = |bpm| StateChange::MasterChanged {
+            master: MasterLive {
+                bpm,
+                ..MasterLive::default()
+            },
+        };
+        let mut core = |message: &ControlMessage| write_frame(&mut writer, message).expect("sends");
+
+        // 11 never arrives.
+        core(&ControlMessage::Snapshot(Box::new(snapshot(10))));
+        core(&ControlMessage::Update {
+            sequence: Sequence(12),
+            change: tempo(120.0),
+        });
+        core(&ControlMessage::Update {
+            sequence: Sequence(13),
+            change: tempo(130.0),
+        });
+        let held = asks
+            .recv_timeout(Duration::from_secs(2))
+            .expect("a renderer that missed an update asks for the whole state");
+        assert_eq!(held, Sequence(10));
+
+        // The snapshot, and behind it two updates it already includes, which
+        // is how the core's queue looks whenever it sends one.
+        core(&ControlMessage::Snapshot(Box::new(snapshot(13))));
+        core(&ControlMessage::Update {
+            sequence: Sequence(12),
+            change: tempo(120.0),
+        });
+        core(&ControlMessage::Update {
+            sequence: Sequence(13),
+            change: tempo(130.0),
+        });
+        core(&ControlMessage::Update {
+            sequence: Sequence(14),
+            change: tempo(140.0),
+        });
+
+        until(|| state.load().master.bpm == 140.0);
+        assert!(
+            asks.recv_timeout(Duration::from_millis(200)).is_err(),
+            "asked once, and not again for what the snapshot already held"
+        );
+
+        running.store(false, Ordering::Relaxed);
+        drop(writer);
+        let _ = stream.shutdown(Shutdown::Both);
+        let _ = TcpStream::connect(&address);
+        handle.join().expect("the control thread ends");
+        listening.join().expect("the listener ends");
     }
 
     #[test]

@@ -63,7 +63,9 @@ pub const MAX_FRAME_BYTES: u32 = 64 * 1024 * 1024;
 /// field on an existing message, because it is sent when the network changes and
 /// not on the telemetry tick — so a version 5 core would meet a frame it cannot
 /// decode, break the link and be reconnected to immediately, forever.
-pub const IPC_PROTOCOL_VERSION: u32 = 6;
+///
+/// Version 7 added [`RendererMessage::Resynchronise`], for the same reason.
+pub const IPC_PROTOCOL_VERSION: u32 = 7;
 
 /// Something went wrong on the channel.
 #[derive(Debug, thiserror::Error)]
@@ -326,6 +328,19 @@ pub enum RendererMessage {
 
     /// The renderer's current status.
     Status(RendererStatus),
+
+    /// An update did not follow on from the state held, so send a snapshot.
+    ///
+    /// The renderer refuses every update after a gap, because applying them
+    /// would put state on stage the core never asked for. Until 2026-11-08 it
+    /// said so with a [`Self::Status`], which the core recorded and did not
+    /// answer, and a renderer that had missed one update refused the rest of
+    /// the evening: the owner's wall stopped following the desk and every
+    /// client at 00:08:50 and came back only when the machine was restarted.
+    Resynchronise {
+        /// The last update the renderer applied, for the log.
+        held: Sequence,
+    },
 
     /// Measured per-output state.
     ///
@@ -694,6 +709,9 @@ mod tests {
             RendererMessage::Status(RendererStatus::Degraded {
                 reason: "preview encoder restarted".to_owned(),
             }),
+            RendererMessage::Resynchronise {
+                held: Sequence(28_554),
+            },
             RendererMessage::Telemetry {
                 outputs: Vec::new(),
                 gpu: None,

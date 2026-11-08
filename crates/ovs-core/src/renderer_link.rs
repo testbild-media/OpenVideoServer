@@ -149,6 +149,10 @@ fn serve(state: &AppState, stream: TcpStream, running: &AtomicBool) -> Result<Li
     // succeeds, and on a quiet show there may be no second write for minutes.
     let peer_alive = Arc::new(AtomicBool::new(true));
     let reader_alive = Arc::clone(&peer_alive);
+    // Set when the renderer asks for the whole state again, and answered by the
+    // writer, which is the only side allowed to write to the socket.
+    let resync_wanted = Arc::new(AtomicBool::new(false));
+    let reader_resync = Arc::clone(&resync_wanted);
     let telemetry_state = state.clone();
     let reader_thread = std::thread::Builder::new()
         .name("ovs-renderer-link-rx".to_owned())
@@ -175,6 +179,13 @@ fn serve(state: &AppState, stream: TcpStream, running: &AtomicBool) -> Result<Li
                             let change = current.set_renderer(status);
                             ((), change)
                         });
+                    }
+                    Ok(RendererMessage::Resynchronise { held }) => {
+                        tracing::warn!(
+                            held = held.0,
+                            "the renderer missed an update; sending it the whole state"
+                        );
+                        reader_resync.store(true, Ordering::Relaxed);
                     }
                     Ok(RendererMessage::Connectors { connectors }) => {
                         telemetry_state.set_connectors(connectors);
@@ -253,7 +264,7 @@ fn serve(state: &AppState, stream: TcpStream, running: &AtomicBool) -> Result<Li
             reader_alive.store(false, Ordering::Relaxed);
         })?;
 
-    let result = pump(state, &mut writer, running, &peer_alive);
+    let result = pump(state, &mut writer, running, &peer_alive, &resync_wanted);
 
     // Unblock the reader thread so it does not outlive this connection.
     let _ = closer.shutdown(Shutdown::Both);
@@ -268,11 +279,14 @@ fn pump(
     writer: &mut BufWriter<TcpStream>,
     running: &AtomicBool,
     peer_alive: &AtomicBool,
+    resync_wanted: &AtomicBool,
 ) -> Result<LinkEnded, IpcError> {
     // Subscribe before snapshotting. The other order has a window in which a
     // change lands after the snapshot is taken but before the subscription
     // exists; that update would be lost, and because the sequence would still
     // look contiguous the renderer would never know to ask for a new snapshot.
+    // The other window — an update queued here that the snapshot already
+    // includes — is the renderer's to ignore, and it does.
     let mut updates = state.subscribe();
     send_snapshot(state, writer)?;
 
@@ -334,6 +348,13 @@ fn pump(
     while running.load(Ordering::Relaxed) {
         if !peer_alive.load(Ordering::Relaxed) {
             return Ok(LinkEnded::RendererWentAway);
+        }
+
+        // The renderer missed an update and is refusing every one after it.
+        // First, before anything else this pass might send: until it has the
+        // whole state again, the wall follows nobody (owner, 2026-11-08).
+        if resync_wanted.swap(false, Ordering::Relaxed) {
+            send_snapshot(state, writer)?;
         }
 
         // An operator at the Service Console. The renderer is told to stop and
@@ -967,6 +988,59 @@ mod tests {
         );
 
         running.store(false, Ordering::Relaxed);
+        drop(reader);
+        let _ = handle.join();
+    }
+
+    #[test]
+    fn a_renderer_that_missed_an_update_is_sent_the_whole_state() {
+        // The owner, 2026-11-08: the wall stopped following the desk and every
+        // client at 00:08:50 and came back only when the machine was restarted
+        // by hand. The renderer had seen a gap and said so, and nothing here
+        // answered.
+        let renderer = FakeRenderer::start();
+        let state = app_state();
+        let show = show();
+        let layer_id = show.layers[0].id;
+        state.mutate_state(|current| {
+            let change = current.load_show(show, None);
+            ((), Some(change))
+        });
+
+        let (running, handle) = spawn_link(&state, &renderer.address);
+        let mut reader = renderer.accept();
+
+        let ControlMessage::Snapshot(first) = next(&mut reader) else {
+            panic!("expected a snapshot");
+        };
+        state.mutate_state(|current| {
+            let change = current.select_slot(layer_id, 3).expect("valid");
+            ((), change)
+        });
+        let ControlMessage::Update { .. } = next(&mut reader) else {
+            panic!("expected an update");
+        };
+
+        let mut writer = BufWriter::new(reader.get_ref().try_clone().expect("clones"));
+        write_frame(
+            &mut writer,
+            &RendererMessage::Resynchronise {
+                held: first.sequence,
+            },
+        )
+        .expect("asks");
+
+        let ControlMessage::Snapshot(again) = next(&mut reader) else {
+            panic!("a renderer that asks for the whole state must be sent it");
+        };
+        assert_eq!(
+            again.sequence,
+            first.sequence.next(),
+            "the state as it stands, with the update it missed"
+        );
+
+        running.store(false, Ordering::Relaxed);
+        drop(writer);
         drop(reader);
         let _ = handle.join();
     }
