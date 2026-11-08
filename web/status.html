@@ -220,6 +220,36 @@
         font-variant-numeric: tabular-nums;
       }
 
+      /* Putting a count back to zero (owner, 2026-11-08): small, beside the
+         count it clears, and only while there is something to clear. */
+
+      .fact-clear {
+        margin-top: 4px;
+        padding: 2px 10px;
+        font: inherit;
+        font-size: 12px;
+        color: var(--dim);
+        background: none;
+        border: 1px solid var(--edge);
+        border-radius: 4px;
+        cursor: pointer;
+      }
+
+      .fact-clear:hover {
+        color: var(--text);
+        border-color: var(--dim);
+      }
+
+      .said {
+        margin: 10px 0 0;
+        color: var(--dim);
+        font-size: 13px;
+      }
+
+      .said.bad {
+        color: var(--bad);
+      }
+
       .output {
         padding: 12px;
         background: #101013;
@@ -291,11 +321,13 @@
       <section>
         <h2>Playback</h2>
         <div class="grid" id="playback"></div>
+        <p class="said" id="clear-said" hidden></p>
       </section>
 
       <section id="outputs-section">
         <h2>Outputs</h2>
         <div id="outputs"></div>
+        <p class="said" id="clear-said-outputs" hidden></p>
       </section>
 
       <section>
@@ -385,8 +417,14 @@
         return `${minutes}m`;
       };
 
-      /** One reading, with the classes that colour it when it is not healthy. */
-      const fact = (label, value, note, level) => {
+      /**
+       * One reading, with the classes that colour it when it is not healthy.
+       *
+       * `clear`, when there is one, is a count that can be put back to zero:
+       * the group to clear, where to say how it went, and what the button
+       * clears.
+       */
+      const fact = (label, value, note, level, clear) => {
         const holder = document.createElement('div');
         holder.className = 'fact';
         const name = document.createElement('div');
@@ -402,8 +440,72 @@
           under.textContent = note;
           holder.append(under);
         }
+        if (clear) {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'fact-clear';
+          button.textContent = 'Reset';
+          button.title = clear.title;
+          button.addEventListener('click', () => void clearCount(clear.group, clear.said));
+          holder.append(button);
+        }
         return holder;
       };
+
+      /**
+       * Puts one of the counts back to zero (owner, 2026-11-08: "es reicht
+       * zurücksetzen auf der status seite selber vom server").
+       *
+       * The only thing on this page that changes anything, so it asks for the
+       * sign-in the rest of the page does without: the session the
+       * administration page sets, which a browser sends here because it is
+       * the same server. Without one the page says where to sign in rather
+       * than offering a password box of its own. A count is only what an
+       * operator watches — the lifetime figures stay underneath — but it is
+       * what somebody looks at to decide whether a fault has come back, and a
+       * page anybody on the network can open should not be able to tell them
+       * it has not.
+       */
+      async function clearCount(group, saidId) {
+        const said = document.getElementById(saidId);
+        const say = (message, bad, link) => {
+          said.replaceChildren(message);
+          if (link) {
+            const anchor = document.createElement('a');
+            anchor.href = '/admin';
+            anchor.textContent = 'Sign in on the administration page';
+            said.append(' ', anchor, ', then come back.');
+          }
+          said.className = bad ? 'said bad' : 'said';
+          said.hidden = false;
+        };
+
+        let answer;
+        try {
+          answer = await fetch('/api/v1/server/counters/reset', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ group }),
+          });
+        } catch {
+          say('This server is not answering, so nothing was reset.', true, false);
+          return;
+        }
+
+        if (answer.status === 401 || answer.status === 403) {
+          say('Resetting a count needs a sign-in.', true, true);
+          return;
+        }
+        if (!answer.ok) {
+          say(`The server refused (${answer.status}), so nothing was reset.`, true, false);
+          return;
+        }
+
+        // Accepted, not done: the counts live in the renderer, which applies it
+        // and says so with its next reading, about a second from now.
+        say('Reset. The new count follows in a moment.', false, false);
+        setTimeout(() => void draw(), 1500);
+      }
 
       /**
        * Draws the machine, what it is decoding and where it is sending it.
@@ -496,12 +598,26 @@
             String(playback.late_frames ?? 0),
             'a decoder that could not keep up',
             (playback.late_frames ?? 0) > 0 ? 'warn' : '',
+            (playback.late_frames ?? 0) > 0
+              ? {
+                  group: 'LATE_FRAMES',
+                  said: 'clear-said',
+                  title: 'Count held frames from zero again. Decode errors and dropped frames are left as they are.',
+                }
+              : undefined,
           ),
           fact(
             'Decode errors',
             String(playback.decode_errors ?? 0),
             '',
             (playback.decode_errors ?? 0) > 0 ? 'bad' : '',
+            (playback.decode_errors ?? 0) > 0
+              ? {
+                  group: 'DECODE_ERRORS',
+                  said: 'clear-said',
+                  title: 'Count decode errors from zero again. Held and dropped frames are left as they are.',
+                }
+              : undefined,
           ),
           fact(
             'Last frame',
@@ -551,6 +667,13 @@
               String(dropped),
               output.dropped_frames ? `${output.dropped_frames.lifetime} since the server started` : '',
               dropped > 0 ? 'warn' : '',
+              dropped > 0
+                ? {
+                    group: 'DROPPED_FRAMES',
+                    said: 'clear-said-outputs',
+                    title: 'Count dropped frames from zero again, on every output. The figure since the server started stays.',
+                  }
+                : undefined,
             ),
             fact(
               'Draw time',
