@@ -360,7 +360,7 @@
         <ul id="fixture-list"></ul>
         <p class="notice">
           Fixture types for <span id="fixture-desks"></span>, one folder per
-          desk, made by this server for the version it is running. Copy a desk's
+          desk, for the version this server is running. Copy a desk's
           files to a USB stick. On a grandMA1: <em>Setup</em>, <em>Full
           Access</em>, <em>Fixture Types</em>, <em>Import</em>,
           <em>External</em>. On a grandMA2 they go in <code>gma2/library</code>
@@ -774,32 +774,29 @@
         }
         document.getElementById('downloads').hidden = files.length === 0;
 
-        // Every desk's fixture types, as one file the server makes itself.
-        const fixtures = status.fixtures;
-        const desks = fixtures && Array.isArray(fixtures.desks) ? fixtures.desks : [];
+        // Every desk's fixture types, as the file the package carries — offered
+        // as the client is, by its own name and size (owner, 2026-11-09).
+        const fixtures = Array.isArray(status.fixtures) ? status.fixtures : [];
         const fixtureList = document.getElementById('fixture-list');
         fixtureList.replaceChildren();
-        if (desks.length > 0) {
+        for (const file of fixtures) {
           const row = document.createElement('a');
           row.className = 'file';
-          row.href = '/fixtures.zip';
-          row.download = fixtures.file;
+          row.href = `/fixtures/${encodeURIComponent(file.name)}`;
           const name = document.createElement('span');
           name.className = 'file-name';
-          name.textContent = fixtures.file;
+          name.textContent = file.name;
           const bytes = document.createElement('span');
           bytes.className = 'file-size';
-          bytes.textContent = size(fixtures.bytes);
+          bytes.textContent = size(file.bytes);
           row.append(name, bytes);
           const item = document.createElement('li');
           item.append(row);
           fixtureList.append(item);
-          text(
-            'fixture-desks',
-            desks.map((desk) => `${desk.name} (${desk.fixture_types})`).join(', '),
-          );
         }
-        document.getElementById('fixtures').hidden = desks.length === 0;
+        const desks = Array.isArray(status.fixture_desks) ? status.fixture_desks : [];
+        text('fixture-desks', desks.join(', '));
+        document.getElementById('fixtures').hidden = fixtures.length === 0;
       }
 
       void draw();

@@ -156,11 +156,14 @@ if [ "$build" = yes ]; then
   export RUSTFLAGS="-C link-arg=-Wl,-rpath,$PRIVATE_LIB -C link-arg=-Wl,--disable-new-dtags${RUSTFLAGS:+ $RUSTFLAGS}"
   cargo build --release -p ovs-core --bin ovsd
   cargo build --release -p ovs-renderer --bin ovs-renderer
+  # Run here and not shipped: it writes the fixture ZIP into the package.
+  cargo build --release -p ovs-proto --bin ovs-fixtures-zip
   # The slow one: it links a gigabyte and a half of Chromium.
   cargo build --release -p ovs-console --bin ovs-console
 fi
 
-for binary in target/release/ovsd target/release/ovs-renderer target/release/ovs-console; do
+for binary in target/release/ovsd target/release/ovs-renderer target/release/ovs-console \
+  target/release/ovs-fixtures-zip; do
   [ -x "$binary" ] || { echo "$binary is not built. Run without --no-build." >&2; exit 1; }
 done
 
@@ -170,6 +173,7 @@ install -d "$staging/DEBIAN"
 install -d "$staging/usr/bin"
 install -d "$staging/lib/systemd/system"
 install -d "$staging/usr/share/openvideoserver/client"
+install -d "$staging/usr/share/openvideoserver/fixtures"
 install -d "$staging/usr/share/polkit-1/rules.d"
 install -d "$staging$PRIVATE_LIB"
 install -d "$staging/usr/share/doc/$package"
@@ -352,6 +356,17 @@ if compgen -G "dist/client/*" > /dev/null; then
 else
   echo "no client in dist/client; the package will carry none"
 fi
+
+# Every desk's fixture types, as one ZIP, written once here and handed out by
+# the server as the file it is — as the client is (owner, 2026-11-09). Unlike
+# the client this is never optional: it comes from this tree, so a package
+# without it is a broken build, and the status page would quietly offer no
+# fixture types to the person patching a desk.
+target/release/ovs-fixtures-zip "$staging/usr/share/openvideoserver/fixtures"
+compgen -G "$staging/usr/share/openvideoserver/fixtures/OpenVideoServer-${upstream}-fixtures.zip" > /dev/null || {
+  echo "no OpenVideoServer-${upstream}-fixtures.zip in the package" >&2
+  exit 1
+}
 
 # What the binaries actually need, asked of dpkg rather than guessed.
 echo "working out the dependencies"

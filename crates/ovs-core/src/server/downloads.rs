@@ -36,12 +36,31 @@ pub struct Download {
     pub bytes: u64,
 }
 
+/// Where the package puts every desk's fixture types, as one ZIP.
+///
+/// Written there when the package is built, by `ovs-fixtures-zip`, and handed
+/// out as the client is: by its own name and size, nothing generated (owner,
+/// 2026-11-09: "Die sollten einfach nur exisitieren und dann als Download
+/// angeboten werden, wie bei unserem Clienten").
+pub const FIXTURES_DIR: &str = "/usr/share/openvideoserver/fixtures";
+
+/// The environment variable that moves it, for a server run from a build.
+pub const FIXTURES_DIR_ENV: &str = "OVS_FIXTURES_DIR";
+
 /// Where the installers live on this machine.
 #[must_use]
 pub fn directory() -> PathBuf {
     std::env::var(DIR_ENV)
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from(DEFAULT_DIR))
+}
+
+/// Where the fixture types live on this machine.
+#[must_use]
+pub fn fixtures_directory() -> PathBuf {
+    std::env::var(FIXTURES_DIR_ENV)
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from(FIXTURES_DIR))
 }
 
 /// What this server can hand out.

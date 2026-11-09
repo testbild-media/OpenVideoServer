@@ -109,7 +109,16 @@ pub async fn public_status(State(state): State<AppState>) -> Response {
         "show": show,
         "needs_setup": needs_setup,
         "downloads": super::downloads::available(),
-        "fixtures": super::desk_fixtures::summary(state.server_version()),
+        // What the package put beside the client, as it is: a directory
+        // listing, so this — asked once a second by the System screen —
+        // writes nothing.
+        "fixtures": super::downloads::available_in(&super::downloads::fixtures_directory()),
+        // Which desks the file has a folder for: names, which cost nothing,
+        // rather than counts, which cost writing every desk's files.
+        "fixture_desks": ovs_proto::desks::DESKS
+            .iter()
+            .map(|desk| desk.name)
+            .collect::<Vec<_>>(),
         // Where the installer is, when an update has been asked for. Here as
         // well as behind the administration API because installing restarts
         // the server, sessions live in memory, and the page that asked has to
@@ -167,46 +176,46 @@ fn server_name() -> String {
 pub async fn download(
     axum::extract::Path(name): axum::extract::Path<String>,
 ) -> Result<Response, StatusCode> {
-    let path = super::downloads::resolve(&name).ok_or(StatusCode::NOT_FOUND)?;
+    hand_out(
+        super::downloads::resolve(&name),
+        &name,
+        "application/octet-stream",
+    )
+    .await
+}
+
+/// Hands out every desk's fixture types, as the ZIP the package carries.
+///
+/// Without a session, like the client: a fixture type says how this server
+/// reads a desk, which is what anybody patching one needs and nothing about the
+/// show (owner, 2026-10-19: "alle Fixtures als Zip mitliefern"). A file that is
+/// there, and nothing written here (owner, 2026-11-09).
+pub async fn fixtures(
+    axum::extract::Path(name): axum::extract::Path<String>,
+) -> Result<Response, StatusCode> {
+    let path = super::downloads::resolve_in(&super::downloads::fixtures_directory(), &name);
+    hand_out(path, &name, "application/zip").await
+}
+
+/// One file off the disc, as an attachment, or not found.
+async fn hand_out(
+    path: Option<std::path::PathBuf>,
+    name: &str,
+    content_type: &str,
+) -> Result<Response, StatusCode> {
+    let path = path.ok_or(StatusCode::NOT_FOUND)?;
     let bytes = tokio::fs::read(&path)
         .await
         .map_err(|_| StatusCode::NOT_FOUND)?;
 
     Ok((
         [
-            (
-                axum::http::header::CONTENT_TYPE,
-                "application/octet-stream".to_owned(),
-            ),
+            (axum::http::header::CONTENT_TYPE, content_type.to_owned()),
             (
                 axum::http::header::CONTENT_DISPOSITION,
                 // The name is already known to be a plain file name with no
-                // separator, quote or newline in it — `resolve` refuses
+                // separator, quote or newline in it — `resolve_in` refuses
                 // everything else — so it cannot break out of this header.
-                format!("attachment; filename=\"{name}\""),
-            ),
-        ],
-        bytes,
-    )
-        .into_response())
-}
-
-/// Hands out every desk's fixture types, as one ZIP.
-///
-/// Without a session, like the client: a fixture type says how this server
-/// reads a desk, which is what anybody patching one needs and nothing about the
-/// show (owner, 2026-10-19: "alle Fixtures als Zip mitliefern").
-pub async fn fixtures(State(state): State<AppState>) -> Result<Response, StatusCode> {
-    let bytes = super::desk_fixtures::archive().ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
-    let name = super::desk_fixtures::file_name(state.server_version());
-    Ok((
-        [
-            (
-                axum::http::header::CONTENT_TYPE,
-                "application/zip".to_owned(),
-            ),
-            (
-                axum::http::header::CONTENT_DISPOSITION,
                 format!("attachment; filename=\"{name}\""),
             ),
         ],

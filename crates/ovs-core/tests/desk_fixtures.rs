@@ -1,9 +1,14 @@
 //! Every desk's fixture types, from the status page, without signing in.
 //!
 //! The owner, 2026-10-19: "können wir auf dem Server der Admin GUI/Status Seite
-//! noch alle Fixtures als Zip mitliefern?" What is held here is the promise the
-//! page makes: the file it offers is there, is a ZIP, is called what the page
-//! says, and is as big as the page says.
+//! noch alle Fixtures als Zip mitliefern?" — and on 2026-11-09, after the
+//! server leaked a fixture catalogue every time the System screen asked for its
+//! status: "Die Fixtures müssen gar nicht jedes mal gebaut werden. Die sollten
+//! einfach nur exisitieren und dann als Download angeboten werden, wie bei
+//! unserem Clienten." So the package writes the file once, and what is held
+//! here is the promise the page makes about it: the file it lists is the one
+//! the server hands out, by that name and that size, and a server with no file
+//! offers none rather than making one.
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -30,58 +35,84 @@ async fn fetch(app: &axum::Router, path: &str) -> (StatusCode, axum::http::Heade
     (status, headers, bytes)
 }
 
+/// One test, because where the files are is the process's environment and two
+/// tests setting it at once would read each other's.
 #[tokio::test]
-async fn the_status_page_offers_the_fixture_zip_and_the_server_hands_it_out() {
+async fn the_status_page_offers_the_fixture_zip_the_package_carries_and_nothing_else() {
     let app = router(AppState::new(
         Database::open_in_memory().expect("opens"),
         "0.0.1-test",
     ));
 
+    // **A server with no file offers none**, and writes none: a server run from
+    // a build, or one whose package somehow lacks it.
+    let empty = tempfile::tempdir().expect("a directory");
+    std::env::set_var(ovs_core::FIXTURES_DIR_ENV, empty.path());
     let (status, _, body) = fetch(&app, "/status.json").await;
     assert_eq!(status, StatusCode::OK);
     let page: serde_json::Value = serde_json::from_slice(&body).expect("json");
-    let fixtures = &page["fixtures"];
-    assert_eq!(fixtures["file"], "OpenVideoServer-0.0.1-test-fixtures.zip");
-    assert_eq!(fixtures["desks"][0]["name"], "grandMA1");
+    assert_eq!(page["fixtures"], serde_json::json!([]));
     assert_eq!(
-        fixtures["desks"][0]["fixture_types"],
-        ovs_proto::grandma1::fixture_files().len()
+        std::fs::read_dir(empty.path()).expect("lists").count(),
+        0,
+        "the server wrote something"
+    );
+
+    // **The file the package carries**, written as `ovs-fixtures-zip` writes it.
+    let carried = tempfile::tempdir().expect("a directory");
+    let name = ovs_proto::desks::archive_name("0.0.1-test");
+    let zip = ovs_proto::desks::archive().expect("written");
+    std::fs::write(carried.path().join(&name), &zip).expect("writes");
+    std::env::set_var(ovs_core::FIXTURES_DIR_ENV, carried.path());
+
+    let (_, _, body) = fetch(&app, "/status.json").await;
+    let page: serde_json::Value = serde_json::from_slice(&body).expect("json");
+    assert_eq!(
+        page["fixtures"],
+        serde_json::json!([{ "name": name, "bytes": zip.len() }])
+    );
+    assert_eq!(
+        page["fixture_desks"],
+        serde_json::json!(["grandMA1", "grandMA2", "dot2", "grandMA3"])
     );
 
     // No session, as the client download has none.
-    let (status, headers, zip) = fetch(&app, "/fixtures.zip").await;
+    let (status, headers, served) = fetch(&app, &format!("/fixtures/{name}")).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(headers["content-type"], "application/zip");
     assert_eq!(
         headers["content-disposition"],
-        "attachment; filename=\"OpenVideoServer-0.0.1-test-fixtures.zip\""
+        format!("attachment; filename=\"{name}\"").as_str()
     );
-    assert_eq!(fixtures["bytes"], zip.len());
-    assert_eq!(&zip[..4], b"PK\x03\x04", "not a ZIP");
-    let master = b"grandMA1/TESTBILD MEDIA@OVS MASTER.TXT";
-    assert!(
-        zip.windows(master.len()).any(|window| window == master),
-        "the master is not in its desk's folder"
-    );
+    assert_eq!(served, zip, "not the file the package carries");
 
-    // And every desk after it, each in a folder of its own (owner,
-    // 2026-10-21: grandMA2, grandMA3 and dot2).
-    let names: Vec<&str> = fixtures["desks"]
-        .as_array()
-        .expect("desks")
-        .iter()
-        .filter_map(|desk| desk["name"].as_str())
-        .collect();
-    assert_eq!(names, ["grandMA1", "grandMA2", "dot2", "grandMA3"]);
-    let inside: Vec<String> = ovs_proto::zip::read_stored(&zip)
+    // And every desk, each in a folder of its own.
+    let inside: Vec<String> = ovs_proto::zip::read_stored(&served)
         .into_iter()
         .map(|(name, _)| name)
         .collect();
     for expected in [
+        "grandMA1/TESTBILD MEDIA@OVS MASTER.TXT",
         "grandMA2/testbild_media@ovs_layer@standard.xml",
         "dot2/testbild_media@ovs_layer@standard.xml",
         "grandMA3/testbild media@OVS Layer.gdtf",
     ] {
         assert!(inside.iter().any(|name| name == expected), "{expected}");
     }
+
+    // What is on the disc, and not what the server could have made: the
+    // archive is the same bytes either way, so only a file changed under it
+    // tells the two apart.
+    std::fs::write(carried.path().join(&name), b"PK\x03\x04 changed").expect("writes");
+    let (_, _, served) = fetch(&app, &format!("/fixtures/{name}")).await;
+    assert_eq!(served, b"PK\x03\x04 changed");
+
+    // Only from that directory, and only what is in it.
+    let (status, _, _) = fetch(&app, "/fixtures/..%2F..%2Fetc%2Fshadow").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _, _) = fetch(&app, "/fixtures/OpenVideoServer-9.9.9-fixtures.zip").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    // The address the page used to offer, which wrote the archive itself.
+    let (status, _, _) = fetch(&app, "/fixtures.zip").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }

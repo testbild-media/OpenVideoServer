@@ -6,7 +6,6 @@
 
 mod app_state;
 mod auth_routes;
-mod desk_fixtures;
 mod downloads;
 mod error;
 mod export_routes;
@@ -30,6 +29,7 @@ use axum::Router;
 use ovs_proto::http::API_PREFIX;
 
 pub use app_state::{AppState, Preview, StreamChunk, StreamEvent, Watching};
+pub use downloads::{FIXTURES_DIR, FIXTURES_DIR_ENV};
 pub use error::ApiResult;
 pub use local::{is_local, trusts_loopback, LOCAL_HEADER, TRUST_ENV};
 
@@ -288,7 +288,7 @@ pub fn router(state: AppState) -> Router {
         .route("/status.json", get(web_routes::public_status))
         .route("/admin", get(web_routes::admin_page))
         .route("/download/{name}", get(web_routes::download))
-        .route("/fixtures.zip", get(web_routes::fixtures))
+        .route("/fixtures/{name}", get(web_routes::fixtures))
         .with_state(state)
         // Last, so it wraps everything: the one place that decides whether a
         // request came from this machine, and the only place that can say so.

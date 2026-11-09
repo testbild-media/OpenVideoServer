@@ -112,9 +112,83 @@ fn grandma1_files() -> Vec<DeskFile> {
         .collect()
 }
 
+/// Every desk's fixture types as one ZIP, one folder per desk.
+///
+/// Written once, when a package is built, by `ovs-fixtures-zip`, and handed
+/// out by the server as the file it is — as the client is (owner, 2026-11-09:
+/// "Die Fixtures müssen gar nicht jedes mal gebaut werden. Die sollten einfach
+/// nur exisitieren und dann als Download angeboten werden, wie bei unserem
+/// Clienten"). The server used to write them on every request for its status,
+/// which the System screen makes once a second, and leaked a fixture catalogue
+/// each time.
+///
+/// Stored rather than compressed: the files are a few kilobytes, and storing
+/// keeps every byte as the desk reads it — a grandMA3's GDTF, itself a stored
+/// ZIP, included. `None` only if it would not fit a ZIP's 32-bit sizes.
+#[must_use]
+pub fn archive() -> Option<Vec<u8>> {
+    let entries: Vec<(String, Vec<u8>)> = DESKS
+        .iter()
+        .flat_map(|desk| {
+            (desk.files)()
+                .into_iter()
+                .map(move |file| (format!("{}/{}", desk.name, file.name), file.contents))
+        })
+        .collect();
+    crate::zip::stored(&entries)
+}
+
+/// What the archive is called: the version in the name, so a stick with three
+/// of these on it says which is which.
+///
+/// Anything that is not plainly part of a version is left out, because the
+/// name goes into a header and a path.
+#[must_use]
+pub fn archive_name(version: &str) -> String {
+    let version: String = version
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric() || "._-+~".contains(*character))
+        .collect();
+    format!("OpenVideoServer-{version}-fixtures.zip")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_desks_files_are_in_their_folder_byte_for_byte() {
+        let zip = archive().expect("written");
+        let files = crate::zip::read_stored(&zip);
+        let mut expected = Vec::new();
+        for desk in &DESKS {
+            for file in (desk.files)() {
+                expected.push((format!("{}/{}", desk.name, file.name), file.contents));
+            }
+        }
+        assert_eq!(files, expected);
+        assert!(files
+            .iter()
+            .any(|(name, _)| name == "grandMA1/TESTBILD MEDIA@OVS MASTER.TXT"));
+    }
+
+    #[test]
+    fn the_same_build_writes_the_same_bytes() {
+        // So a package built twice from one commit carries the same file.
+        assert_eq!(archive(), archive());
+    }
+
+    #[test]
+    fn the_name_carries_the_version_and_nothing_that_could_break_a_header() {
+        assert_eq!(
+            archive_name("0.2.44"),
+            "OpenVideoServer-0.2.44-fixtures.zip"
+        );
+        assert_eq!(
+            archive_name("0.2.44\"\r\nX: y/../z"),
+            "OpenVideoServer-0.2.44Xy..z-fixtures.zip"
+        );
+    }
 
     #[test]
     fn every_desk_has_files_and_a_name_that_is_a_folder() {

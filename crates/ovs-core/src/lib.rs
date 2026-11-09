@@ -41,7 +41,7 @@ pub use auth::{AuthError, SessionToken};
 pub use config_file::{ConnectorRef, ServerConfig};
 pub use host::{HostMonitor, HostSample};
 pub use media_store::MediaStore;
-pub use server::{router, AppState};
+pub use server::{router, AppState, FIXTURES_DIR, FIXTURES_DIR_ENV};
 pub use session::Sessions;
 pub use state::{AuthoritativeState, SequencedChange, StateError};
 pub use uploads::Uploads;

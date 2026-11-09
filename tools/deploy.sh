@@ -83,12 +83,12 @@ cef_src="${CEF_PATH:-$HOME/.local/share/cef}"
 if [ -f "$cef_src/libcef.so" ]; then
   CEF_PATH="$cef_src"
   export CEF_PATH
-  cargo build --release --bin ovsd --bin ovs-renderer --bin ovs-console
+  cargo build --release --bin ovsd --bin ovs-renderer --bin ovs-console --bin ovs-fixtures-zip
   console="yes"
 else
   echo "  no Chromium framework in $cef_src; building without the System screen"
   echo "  (export-cef-dir puts one there; see crates/ovs-console/Cargo.toml)"
-  cargo build --release --bin ovsd --bin ovs-renderer
+  cargo build --release --bin ovsd --bin ovs-renderer --bin ovs-fixtures-zip
   console=""
 fi
 
@@ -297,6 +297,11 @@ if compgen -G "dist/client/*" > /dev/null; then
 else
   echo "no client in dist/client; this server will offer none"
 fi
+
+# Every desk's fixture types, as the one ZIP the server hands out, written here
+# once as `tools/package.sh` writes it into a package (owner, 2026-11-09: the
+# server offers the file that is there and makes none).
+sudo target/release/ovs-fixtures-zip /usr/share/openvideoserver/fixtures
 
 echo "restarting"
 # **The order no longer matters, and that is the point.**
