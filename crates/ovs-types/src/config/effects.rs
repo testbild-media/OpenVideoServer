@@ -62,12 +62,7 @@ static PERSONALITIES: std::sync::OnceLock<Vec<&'static FixtureDefinition>> =
 #[must_use]
 pub fn personality(type_id: &str) -> Option<&'static FixtureDefinition> {
     PERSONALITIES
-        .get_or_init(|| {
-            PUBLISHED
-                .iter()
-                .filter_map(EffectManifest::personality)
-                .collect()
-        })
+        .get_or_init(|| PUBLISHED.iter().filter_map(EffectManifest::build).collect())
         .iter()
         .find(|definition| definition.type_id == type_id)
         .copied()
@@ -79,8 +74,20 @@ impl EffectManifest {
     /// `None` when it exposes nothing to DMX, which most of what a plugin
     /// declares should be: a parameter nobody would ride during a show is a
     /// channel a patch has to find room for and an operator has to programme.
+    ///
+    /// **The one built once**, from [`PERSONALITIES`]. This used to build it
+    /// again on every call, and every call leaked one: the fixture catalogue
+    /// asks for every effect's, the status page's desk download built the
+    /// catalogue on every request, and the System screen asks for the status
+    /// every second. ovsd held eleven gigabytes after forty-one hours (owner,
+    /// 2026-11-09).
     #[must_use]
     pub fn personality(&'static self) -> Option<&'static FixtureDefinition> {
+        personality(self.type_id)
+    }
+
+    /// Builds the personality, which leaks it: for [`PERSONALITIES`] only.
+    fn build(&'static self) -> Option<&'static FixtureDefinition> {
         crate::config::fixtures::generated_personality(
             self.type_id,
             self.version,
@@ -1281,6 +1288,27 @@ pub fn manifest(type_id: &str) -> Option<&'static EffectManifest> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn asking_for_a_personality_twice_builds_it_once() {
+        // The owner, 2026-11-09: the server's memory full. ovsd held eleven
+        // gigabytes after forty-one hours, nearly all of it these
+        // personalities' channel names. Building one leaks, by design, and
+        // every fixture catalogue built every one again: the status page's
+        // desk download counts its files on every request, and the System
+        // screen asks for the status every second.
+        for manifest in PUBLISHED.iter() {
+            let (Some(first), Some(again)) = (manifest.personality(), manifest.personality())
+            else {
+                continue;
+            };
+            assert!(
+                std::ptr::eq(first, again),
+                "{} was built a second time",
+                manifest.type_id
+            );
+        }
+    }
 
     #[test]
     fn an_effect_that_was_added_and_not_touched_changes_nothing() {

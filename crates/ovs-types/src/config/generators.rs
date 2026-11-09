@@ -60,7 +60,7 @@ pub fn personality(type_id: &str) -> Option<&'static FixtureDefinition> {
         .get_or_init(|| {
             PUBLISHED
                 .iter()
-                .filter_map(GeneratorManifest::personality)
+                .filter_map(GeneratorManifest::build)
                 .collect()
         })
         .iter()
@@ -73,8 +73,16 @@ impl GeneratorManifest {
     ///
     /// `None` when it exposes nothing to DMX. A generator is a plugin like an
     /// effect and the rule is the same: it brings channels or it brings none.
+    ///
+    /// The one built once, as an effect's is and for its reason: built again
+    /// on every call, it leaked on every call (owner, 2026-11-09).
     #[must_use]
     pub fn personality(&'static self) -> Option<&'static FixtureDefinition> {
+        personality(self.type_id)
+    }
+
+    /// Builds the personality, which leaks it: for [`PERSONALITIES`] only.
+    fn build(&'static self) -> Option<&'static FixtureDefinition> {
         crate::config::fixtures::generated_personality(
             self.type_id,
             self.version,
@@ -918,6 +926,23 @@ pub fn manifest(type_id: &str) -> Option<&'static GeneratorManifest> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn asking_for_a_personality_twice_builds_it_once() {
+        // As for effects (owner, 2026-11-09): building one leaks, and a
+        // catalogue built on every status request built every one again.
+        for manifest in PUBLISHED.iter() {
+            let (Some(first), Some(again)) = (manifest.personality(), manifest.personality())
+            else {
+                continue;
+            };
+            assert!(
+                std::ptr::eq(first, again),
+                "{} was built a second time",
+                manifest.type_id
+            );
+        }
+    }
 
     #[test]
     fn a_show_that_sets_nothing_gets_what_the_generator_was_published_with() {

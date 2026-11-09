@@ -67,19 +67,32 @@ pub fn file_name(version: &str) -> String {
     format!("OpenVideoServer-{version}-fixtures.zip")
 }
 
+/// How many fixture types each desk has, counted once, as the archive is built
+/// once: both are fixed for a build.
+///
+/// Counting a desk's files is writing them, and the status page asks on every
+/// request — the System screen once a second, to see whether a network change
+/// is on trial. That was every desk's files written every second for a number
+/// that never changes, and until 2026-11-09 a leak each time as well.
+static DESK_COUNTS: OnceLock<Vec<DeskSummary>> = OnceLock::new();
+
 /// What the status page says about the download.
 #[must_use]
 pub fn summary(version: &str) -> Summary {
     Summary {
         file: file_name(version),
         bytes: archive().map_or(0, |bytes| bytes.len() as u64),
-        desks: DESKS
-            .iter()
-            .map(|desk| DeskSummary {
-                name: desk.name,
-                fixture_types: (desk.files)().len(),
+        desks: DESK_COUNTS
+            .get_or_init(|| {
+                DESKS
+                    .iter()
+                    .map(|desk| DeskSummary {
+                        name: desk.name,
+                        fixture_types: (desk.files)().len(),
+                    })
+                    .collect()
             })
-            .collect(),
+            .clone(),
     }
 }
 
