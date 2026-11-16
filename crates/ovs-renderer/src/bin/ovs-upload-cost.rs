@@ -71,6 +71,24 @@
 //! moving the submit to the transfer queue (PLAN item 11) would move the part
 //! that is not in the figure. What is left to win is the copy itself: decoding
 //! into mapped memory, or spreading it across threads.
+//!
+//! # And the driver's memory
+//!
+//! On Linux with an NVIDIA card it also counts the 2 MiB mappings of
+//! `/dev/nvidiactl` the process holds, after the first thousand frames and at
+//! the end, because that is how NVIDIA's driver grows. The reference server's
+//! renderer gained one every ~200 s with nothing on stage; this tool, doing
+//! what the render thread does, showed the same thing far faster (reference
+//! server, driver 550.163.01, 2026-11-16):
+//!
+//! | run                                   | 0.3.12  | 0.3.13 |
+//! |---------------------------------------|---------|--------|
+//! | `--upload-once --frames 400000`       | 4 → 10  | 4 → 4  |
+//! | `--layers 3 --nv12 --frames 100000`   |         | 4 → 4  |
+//!
+//! The change between the two is `reset_pool` in `vulkan/offscreen.rs`. A
+//! last figure higher than the first means a renderer built from this tree is
+//! keeping memory every frame again.
 
 fn main() -> std::process::ExitCode {
     measure::run()
@@ -294,6 +312,10 @@ mod measure {
         let mut compose = Duration::ZERO;
         let mut worst_upload = Duration::ZERO;
         let mut worst_compose = Duration::ZERO;
+        // Counted once the first thousand frames are in, because the driver
+        // maps its first few blocks while the work is still starting up.
+        let settled = frames.min(1_000);
+        let mut blocks_settled = None;
 
         for frame in 0..frames {
             // Uploading only on the first frame is what a generator does: it
@@ -334,6 +356,9 @@ mod measure {
             compose += composed;
             worst_upload = worst_upload.max(uploaded);
             worst_compose = worst_compose.max(composed);
+            if frame + 1 == settled {
+                blocks_settled = driver_blocks();
+            }
         }
 
         let runs = u32::max(frames, 1);
@@ -348,6 +373,17 @@ mod measure {
             (mean_upload + mean_compose).as_micros(),
             (mean_upload + mean_compose).as_micros() * 100 / 16_667
         );
+        if let (Some(before), Some(after)) = (blocks_settled, driver_blocks()) {
+            println!(
+                "driver memory: {before} blocks of 2 MiB after {settled} frames, {after} after \
+                 {frames}{}",
+                if after > before {
+                    " — it grew, and a renderer doing this grows with it"
+                } else {
+                    ", so nothing is being kept frame by frame"
+                }
+            );
+        }
 
         ExitCode::SUCCESS
     }
@@ -463,6 +499,33 @@ mod measure {
                 "its bus is at {current}, x{width} — the card can do {max}, so a copy here is slower than the card is"
             ))
         }
+    }
+
+    /// How many 2 MiB mappings of `/dev/nvidiactl` this process holds, or
+    /// `None` where there are none to count: not Linux, or not NVIDIA.
+    ///
+    /// That is the unit NVIDIA's driver grows in, and the count that showed
+    /// the composition's command buffers leaking (`reset_pool` in
+    /// `vulkan/offscreen.rs`).
+    fn driver_blocks() -> Option<usize> {
+        let maps = std::fs::read_to_string("/proc/self/maps").ok()?;
+        let mut any = false;
+        let mut blocks = 0;
+        for line in maps.lines().filter(|line| line.ends_with("/dev/nvidiactl")) {
+            any = true;
+            let range = line.split_whitespace().next().unwrap_or_default();
+            let Some((start, end)) = range.split_once('-') else {
+                continue;
+            };
+            if let (Ok(start), Ok(end)) =
+                (u64::from_str_radix(start, 16), u64::from_str_radix(end, 16))
+            {
+                if end.saturating_sub(start) == 2 << 20 {
+                    blocks += 1;
+                }
+            }
+        }
+        any.then_some(blocks)
     }
 
     fn parse_size(value: &str) -> Option<SizePx> {

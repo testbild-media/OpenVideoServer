@@ -744,6 +744,42 @@ const EFFECT_SHADER_SPIRV: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/eff
 /// SPIR-V compiled from `shaders/generator.wgsl` by the build script.
 const GENERATOR_SHADER_SPIRV: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/generator.spv"));
 
+/// Resets a pool that holds one command buffer, ready to record it again.
+///
+/// **The pool, never the buffer alone.** Letting `vkBeginCommandBuffer` reset
+/// the buffer implicitly — what a pool made with `RESET_COMMAND_BUFFER` allows,
+/// and what this target did until 0.3.13 — made NVIDIA's 550.163.01 driver map
+/// another 2 MiB of `/dev/nvidiactl` every few thousand recordings and never
+/// give it back. Measured on the reference server (RTX 3060 Ti), 2026-11-16:
+///
+/// - The renderer gained one such block every ~200 s with nothing on stage,
+///   about 30 MB an hour, from the first frame on.
+/// - `strace -k` put every new block inside `vkBeginCommandBuffer`, called
+///   from [`begin_recording`](OffscreenTarget::begin_recording) and from
+///   [`submit_transfers`](OffscreenTarget::submit_transfers), never from the
+///   display's own buffers in `present.rs`.
+/// - `ovs-upload-cost --upload-once --frames 400000` went from 4 blocks to
+///   10. With `vkResetCommandPool` before each recording: 4 to 4. Waiting for
+///   the device to go idle before each recording did not help (+6), so it is
+///   not the driver failing to see that the last submission had finished.
+///
+/// No `RELEASE_RESOURCES`: the memory the pool kept from the last frame is
+/// exactly what this frame is about to need, so handing it back would only
+/// make the driver map it again. That variant measured +0 as well.
+///
+/// # Safety
+///
+/// No buffer from `pool` may be pending on the device.
+unsafe fn reset_pool(device: &ash::Device, pool: vk::CommandPool) -> Result<(), VulkanError> {
+    // SAFETY: the caller guarantees nothing from the pool is in flight.
+    unsafe { device.reset_command_pool(pool, vk::CommandPoolResetFlags::empty()) }.map_err(
+        |result| VulkanError::Call {
+            operation: "vkResetCommandPool",
+            result,
+        },
+    )
+}
+
 /// Points a descriptor set at a texture's planes and sampler.
 fn point_set_at(device: &ash::Device, set: vk::DescriptorSet, texture: &Texture) {
     let (cb, cr) = texture.chroma_views();
@@ -973,11 +1009,9 @@ impl OffscreenTarget {
             operation: "the selected device has no graphics queue",
             result: vk::Result::ERROR_FEATURE_NOT_PRESENT,
         })?;
-        let pool_info = vk::CommandPoolCreateInfo::default()
-            // Buffers are re-recorded every frame, so they are reset
-            // individually rather than the whole pool being torn down.
-            .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
-            .queue_family_index(graphics_family);
+        // No RESET_COMMAND_BUFFER: the pool is reset as a whole before every
+        // recording, never its buffer alone. See `reset_pool` for why.
+        let pool_info = vk::CommandPoolCreateInfo::default().queue_family_index(graphics_family);
         // SAFETY: `pool_info` is fully initialised.
         let command_pool =
             unsafe { device.create_command_pool(&pool_info, None) }.map_err(|result| {
@@ -1008,9 +1042,8 @@ impl OffscreenTarget {
         // belongs to one family; the same family as graphics on a device with
         // no transfer-only queue, which costs nothing and needs no second path.
         let transfer_family = context.transfer_family();
-        let transfer_pool_info = vk::CommandPoolCreateInfo::default()
-            .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
-            .queue_family_index(transfer_family);
+        let transfer_pool_info =
+            vk::CommandPoolCreateInfo::default().queue_family_index(transfer_family);
         // SAFETY: `transfer_pool_info` is fully initialised.
         let transfer_pool = unsafe { device.create_command_pool(&transfer_pool_info, None) }
             .map_err(|result| VulkanError::Call {
@@ -3625,6 +3658,9 @@ impl OffscreenTarget {
     /// issued inside one, and recording it here rather than as a separate
     /// submit means the upload cannot race the draw that samples it.
     fn begin_recording(&self, device: &ash::Device) -> Result<(), VulkanError> {
+        // SAFETY: the pool's one buffer is not in use; the fence wait
+        // guaranteed that.
+        unsafe { reset_pool(device, self.command_pool) }?;
         let begin = vk::CommandBufferBeginInfo::default()
             .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
         // SAFETY: the buffer is not in use; the fence wait guaranteed that.
@@ -3677,6 +3713,8 @@ impl OffscreenTarget {
     /// Returns [`VulkanError::Call`] naming what failed.
     fn submit_transfers(&self, context: &VulkanContext) -> Result<(), VulkanError> {
         let device = context.device();
+        // SAFETY: the pool's one buffer is not in use, for the reason below.
+        unsafe { reset_pool(device, self.transfer_pool) }?;
         let begin = vk::CommandBufferBeginInfo::default()
             .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
         // SAFETY: the buffer is not in use; the fence wait guaranteed that,
