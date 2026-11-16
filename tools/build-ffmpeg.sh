@@ -57,6 +57,10 @@
 #   absent     `hevc_nvenc` and `mjpeg_cuvid`; the server encodes no HEVC, and
 #              `media/video.rs` documents its decision not to use `mjpeg_cuvid`
 #
+# (The card's decoders have changed since: from 0.3.12 they are the NVDEC
+# accelerators of FFmpeg's own decoders rather than the `*_cuvid` decoders this
+# table was taken with. See `NVDEC_HWACCELS` below.)
+#
 # So nothing the server does was lost and its worst case got better.
 #
 # **`libopenh264` in place of `libx264`** is what made that possible, and
@@ -185,6 +189,30 @@ readonly EXE
 # rather than against a few of its names.
 readonly DECODERS="h264,hevc,av1,vp9,vp8,prores,hap,dnxhd,cfhd,mpeg2video,mpeg1video,mpeg4,vc1,mjpeg,jpeg2000,png,apng,bmp,gif,tiff,webp,rawvideo,ffv1,huffyuv,utvideo,qtrle,theora,wmv3"
 
+# The card's half of decoding, for the server: NVDEC accelerators, which are
+# not decoders of their own but a way for FFmpeg's own `hevc`, `h264` and the
+# rest to hand the picture to the card.
+#
+# **`--disable-everything` turns these off too**, and `--enable-nvdec` does not
+# turn them back on: it makes the NVDEC library available and enables nothing
+# that uses it. Every package up to 0.3.11 shipped with no accelerator at all,
+# which nobody noticed because the renderer did not use them -- it opened the
+# `*_cuvid` decoders, which are separate decoders with names of their own.
+#
+# Why the accelerators and not `*_cuvid` any more (2026-11-16): a `*_cuvid`
+# decoder makes a CUDA context of its own for every clip it opens, and throws
+# its decoder away and builds a new one at every seek -- which a loop point is.
+# On the reference server that left 2 MiB of driver memory behind for every
+# H.265 clip opened and about every twelfth loop, and a week of shows had grown
+# the renderer to 6.5 GB. An accelerator decodes into one CUDA context shared
+# by every clip, and keeps its decoder across a seek. `media/video.rs` has the
+# measurements.
+readonly NVDEC_HWACCELS="h264_nvdec,hevc_nvdec,av1_nvdec,vp9_nvdec,vp8_nvdec,mpeg1_nvdec,mpeg2_nvdec,mpeg4_nvdec,vc1_nvdec"
+# The decoders those accelerate, which `--check` asks about: an accelerator
+# shows up as `cuda` among a decoder's "Supported hardware devices", and only
+# there.
+readonly NVDEC_DECODERS="h264,hevc,av1,vp9,vp8,mpeg1video,mpeg2video,mpeg4,vc1"
+
 # What the client encodes, which is exactly what the server takes: HEVC 8-bit,
 # HEVC 10-bit and HAP (as the owner narrowed it, 2026-09-23).
 #
@@ -239,18 +267,15 @@ case "$profile" in
     # writing files, which it does not do.
     encoders="libopenh264,h264_nvenc"
     # Shared libraries, because the server links these rather than running
-    # them. The NVIDIA paths for both directions: `*_cuvid` decoders are what
-    # `ovs-renderer` opens for H.264, HEVC and AV1, and `h264_nvenc` is the
-    # preview encoder it prefers.
+    # them. The NVIDIA paths for both directions: the NVDEC accelerators of
+    # FFmpeg's own decoders are what `ovs-renderer` decodes H.265 and the rest
+    # with, and `h264_nvenc` is the preview encoder it prefers.
     configure_extra="--enable-libopenh264"
-    configure_extra="$configure_extra --enable-ffnvcodec --enable-nvenc --enable-nvdec --enable-cuvid"
+    configure_extra="$configure_extra --enable-ffnvcodec --enable-nvenc --enable-nvdec"
+    configure_extra="$configure_extra --enable-hwaccel=$NVDEC_HWACCELS"
     ;;
 esac
 readonly encoders configure_extra
-
-# The decoders on the card, which are named separately from the software ones
-# because they are a different list with the same names in it.
-readonly CUVID_DECODERS="h264_cuvid,hevc_cuvid,av1_cuvid,vp9_cuvid,vp8_cuvid,mpeg1_cuvid,mpeg2_cuvid,mpeg4_cuvid,vc1_cuvid"
 
 readonly DEMUXERS="mov,matroska,mpegts,mpegvideo,avi,image2,image2pipe,png_pipe,mjpeg,rawvideo,gif,webp_pipe"
 # **`mp4` as well as `mov`**, which is one muxer twice: the two are the same
@@ -469,13 +494,18 @@ verify() {
   # And the card's paths, which are the other half of why a server build
   # exists. A server that fell back to software decoding because a configure
   # flag went missing would run, and would run out of cores at four layers.
+  #
+  # Asked of each decoder rather than of `-hwaccels`, which lists *methods*:
+  # `cuda` is there as soon as the CUDA device type is built, with or without
+  # a single accelerator behind it. Only `-h decoder=hevc` says whether `hevc`
+  # itself can hand a picture to the card -- and that is exactly what every
+  # package up to 0.3.11 could not do.
   if [ "$profile" = server ] && [ -x "$where/ffmpeg$EXE" ]; then
-    local available
-    available=$("${run[@]}" -hide_banner -decoders 2>/dev/null | awk '{print $2}')
     local wanted
-    for wanted in $(printf '%s' "$CUVID_DECODERS" | tr ',' ' '); do
-      if ! printf '%s\n' "$available" | grep -qx "$wanted"; then
-        echo "  no $wanted decoder" >&2
+    for wanted in $(printf '%s' "$NVDEC_DECODERS" | tr ',' ' '); do
+      if ! "${run[@]}" -hide_banner -h "decoder=$wanted" 2>/dev/null |
+        grep -i 'supported hardware devices' | grep -qw cuda; then
+        echo "  $wanted cannot decode on the card: no NVDEC accelerator for it" >&2
         failures=$((failures + 1))
       fi
     done
@@ -532,7 +562,7 @@ fi
 # that link them.
 if [ "$profile" = server ]; then
   sharing="--enable-shared --disable-static"
-  decoders="$DECODERS,$CUVID_DECODERS"
+  decoders="$DECODERS"
 else
   sharing="--disable-shared --enable-static"
   sharing="$sharing --extra-ldflags=-static"

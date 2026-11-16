@@ -46,12 +46,17 @@
 //! of the renderer without them and without this module; the tests that matter
 //! run where the screens are.
 
-// One `unsafe impl` lives here, on the colour converter, and is explained where
-// it is written.
+// Three things here are unsafe, each explained where it is written: the colour
+// converter's `Send`, the card's shared CUDA context, and copying a picture the
+// card decoded into host memory. The last two are FFmpeg's hardware API, which
+// `ffmpeg-next` does not wrap.
 #![allow(unsafe_code)]
 
 use std::path::{Path, PathBuf};
+use std::ptr::{self, NonNull};
+use std::sync::{Mutex, PoisonError};
 
+use ffmpeg::ffi;
 use ffmpeg_next as ffmpeg;
 use ovs_types::geometry::SizePx;
 
@@ -290,6 +295,34 @@ impl Target {
 /// memory and a decoder that delivers the frame it was asked for are both real,
 /// and because the rate it might cost is a rate that was being held by showing
 /// stale pictures.
+///
+/// # On the card
+///
+/// The same four, measured rather than inherited when the card's decoders
+/// moved to FFmpeg's NVDEC accelerator (2026-11-16, the WSL on the development
+/// machine, its 1080p H.265 clip through `ovs-decode-cost --threads N`):
+///
+/// | threads | seven players on two cores | the frame after a jump |
+/// |---|---|---|
+/// | one | 0 held, 0.66 cores | 83.5 ms average, 201.4 worst |
+/// | two | 0 held, 0.66 cores | 74.7 ms average, 173.8 worst |
+/// | **four** | **0 held, 0.67 cores** | **55.8 ms average, 125.8 worst** |
+///
+/// The engine is the card's either way; the threads read the bitstream and set
+/// each picture up for it, and that is what a jump waits on.
+///
+/// **More is not free on the card, and too many is refused.** FFmpeg asks
+/// NVDEC for a surface for every reference picture the stream may keep, five
+/// more, and one for every frame thread (7.1.1, `ff_nvdec_frame_params` and
+/// `ff_decode_get_hw_frames_ctx`), and NVDEC refuses a decoder much past 32.
+/// The committed H.264 fixture is the hard case: it does not say how far it
+/// reorders, so FFmpeg assumes the most its level allows and counts about
+/// eighteen reference pictures. It was decoded on the card at eight threads and
+/// refused at twelve; the 1080p H.265 clip was refused at twenty-four. FFmpeg
+/// then decodes on the processor — correctly, and
+/// [`VideoSource::decoder_name`] says so — but a show sized for the card does
+/// not fit there. Four keeps every H.265 stream on the card, whose reference
+/// buffer is at most seventeen pictures.
 const DECODE_THREADS: usize = 4;
 
 /// How many frames a player keeps ahead of a clip decoding on the card.
@@ -306,16 +339,38 @@ const DECODE_THREADS: usize = 4;
 /// The cost is memory, and it is smaller than it looks: about 24 MB a layer
 /// above what the decoder holds anyway, against the 141 MB a software decoder's
 /// own buffers take. Only a clip actually decoding on a card pays it.
+///
+/// # Measured on the `*_cuvid` decoders, and kept
+///
+/// Every figure above is the `*_cuvid` decoders', which rebuilt their decoder
+/// at every seek. The NVDEC accelerator that replaced them keeps it, and
+/// measured side by side in the WSL (2026-11-16, 1080p H.265, four threads,
+/// `ovs-decode-cost --seeks 30`) a jump costs half and a loop a ninth:
+///
+/// | | the frame after a jump | the first frame of a loop |
+/// |---|---|---|
+/// | `hevc_cuvid` | 110.3 ms average, 213.8 worst | 22.9 ms average, 25.0 worst |
+/// | `hevc_nvdec` | 54.8 ms average, 116.7 worst | 2.6 ms average, 2.9 worst |
+///
+/// So this could be shallower now. It is not changed, because the number it
+/// was sized against is the reference server's worst jump and that has not
+/// been measured on the new path there; a lead that is too deep costs memory,
+/// and one that is too shallow costs the stale frames at every loop that
+/// sixteen did.
 const HARDWARE_FRAMES_AHEAD: u32 = 24;
 
 /// What [`VideoSource::decoder_name`] says when the processor did the work.
 const PROCESSOR: &str = "the processor";
 
-/// Which decoder on the card can read a codec, if any.
+/// Which decoder can hand a codec to the card, if any.
 ///
-/// FFmpeg's `*_cuvid` decoders are NVDEC: the picture is decoded by a
-/// fixed-function block that draws nothing, and comes back in host memory as
-/// NV12. Measured on the test machine, 360 frames of 1080p60:
+/// FFmpeg's own decoder for the codec, with its NVDEC accelerator: the picture
+/// is decoded by a fixed-function block that draws nothing, lands in the card's
+/// memory, and is copied back as NV12 — or P010 at ten bits — for the one frame
+/// that is kept ([`download`]). The name is the accelerator's, so a log line
+/// says which path a clip took. Measured on the test machine with the `*_cuvid`
+/// decoders this replaced, 360 frames of 1080p60 (the block that decodes is the
+/// same one):
 ///
 /// | clip | software | on the card |
 /// |---|---|---|
@@ -336,22 +391,175 @@ const PROCESSOR: &str = "the processor";
 /// in about the time it takes to ask: there is nothing to win, and the cuvid
 /// path has its own chroma quirks on 4:2:2 material. Software is the safer
 /// answer where it is also the cheap one.
+///
+/// # Why not the `*_cuvid` decoders any more
+///
+/// They were what this opened until 0.3.11, and they leaked. A `*_cuvid`
+/// decoder is a separate decoder with its own CUDA context, made for every clip
+/// it opens, and it throws its NVDEC decoder away and builds a new one at every
+/// seek — which a loop point is. Measured on the reference server's own driver
+/// (550.163) on 2026-11-15, by counting the 2 MiB mappings of `/dev/nvidiactl`
+/// in the renderer while the owner played: **one left behind for every H.265
+/// clip opened** (34 opens, 34 mappings), **and about one for every twelve
+/// loops** (36 loops, 3). A week of shows had taken the renderer to 6.5 GB
+/// resident with nothing playing. The WSL's driver does not do it, which is why
+/// nothing here saw it.
+///
+/// The accelerator decodes into one context for the whole process
+/// ([`cuda_device`]) and keeps its decoder across a seek, so neither of those
+/// happens on this path at all.
+///
+/// AV1 is asked for by name because FFmpeg's own AV1 decoder is the one that
+/// carries the accelerator, and `libdav1d`, where a build has it, is found
+/// first when FFmpeg is asked for "a decoder for AV1".
 fn hardware_decoder(id: ffmpeg::codec::Id) -> Option<(ffmpeg::Codec, &'static str)> {
     use ffmpeg::codec::Id;
 
-    let name: &'static str = match id {
-        Id::H264 => "h264_cuvid",
-        Id::HEVC => "hevc_cuvid",
-        Id::AV1 => "av1_cuvid",
-        Id::VP9 => "vp9_cuvid",
-        Id::VP8 => "vp8_cuvid",
-        Id::MPEG1VIDEO => "mpeg1_cuvid",
-        Id::MPEG2VIDEO => "mpeg2_cuvid",
-        Id::MPEG4 => "mpeg4_cuvid",
-        Id::VC1 => "vc1_cuvid",
+    let (decoder, name): (&str, &'static str) = match id {
+        Id::H264 => ("h264", "h264_nvdec"),
+        Id::HEVC => ("hevc", "hevc_nvdec"),
+        Id::AV1 => ("av1", "av1_nvdec"),
+        Id::VP9 => ("vp9", "vp9_nvdec"),
+        Id::VP8 => ("vp8", "vp8_nvdec"),
+        Id::MPEG1VIDEO => ("mpeg1video", "mpeg1_nvdec"),
+        Id::MPEG2VIDEO => ("mpeg2video", "mpeg2_nvdec"),
+        Id::MPEG4 => ("mpeg4", "mpeg4_nvdec"),
+        Id::VC1 => ("vc1", "vc1_nvdec"),
         _ => return None,
     };
-    ffmpeg::decoder::find_by_name(name).map(|codec| (codec, name))
+    let codec = ffmpeg::decoder::find_by_name(decoder)?;
+    decodes_on_cuda(codec).then_some((codec, name))
+}
+
+/// Whether a decoder in this build can decode into a CUDA device.
+///
+/// Asked of the build rather than assumed, because an FFmpeg configured with
+/// `--disable-everything` has no accelerator at all unless it is named — every
+/// package up to 0.3.11 shipped that way. A decoder without one plays on the
+/// processor, which is a slower machine rather than a broken one.
+fn decodes_on_cuda(codec: ffmpeg::Codec) -> bool {
+    let method = ffi::AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX as i32;
+    (0..)
+        .map_while(|index| {
+            // SAFETY: `codec` is one of FFmpeg's static decoder descriptions,
+            // which live for the whole process. `avcodec_get_hw_config` reads
+            // its table and returns null past the end, which ends the walk;
+            // what it returns otherwise is static too.
+            unsafe { ffi::avcodec_get_hw_config(codec.as_ptr(), index).as_ref() }
+        })
+        .any(|config| {
+            config.device_type == ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_CUDA
+                && config.methods & method != 0
+        })
+}
+
+/// The card's CUDA context, made once and shared by every clip decoding on it.
+///
+/// A reference to an `AVHWDeviceContext`, which FFmpeg counts. Every decoder
+/// opened on the card takes a reference of its own and gives it back when it
+/// is freed; this one is never given back, so the context lives as long as the
+/// renderer does. That is the point of it: a context made and destroyed with
+/// every clip is exactly what the `*_cuvid` decoders did, and on the reference
+/// server's driver it was not all given back (see [`hardware_decoder`]).
+struct CudaDevice(NonNull<ffi::AVBufferRef>);
+
+// SAFETY: the reference is made once, in `cuda_device`, and never written
+// through or freed afterwards. All anything does with it is `av_buffer_ref`,
+// whose count is atomic, and FFmpeg's CUDA device is built to be used by
+// several decoders on several threads — each pushes the context onto its own
+// thread for the length of a call.
+unsafe impl Send for CudaDevice {}
+// SAFETY: as for `Send`: nothing reads it but `av_buffer_ref`.
+unsafe impl Sync for CudaDevice {}
+
+/// The shared CUDA context, made the first time a clip asks for it.
+///
+/// A failure is not remembered. A machine with no NVIDIA driver answers fast
+/// every time it is asked, and one whose CUDA failed to start — which the hall
+/// machine's did until the afternoon of 2026-10-14 — should get the card back
+/// with the next clip once it works, rather than at the next restart.
+fn cuda_device() -> Result<&'static CudaDevice, ffmpeg::Error> {
+    static DEVICE: Mutex<Option<&'static CudaDevice>> = Mutex::new(None);
+
+    let mut held = DEVICE.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some(device) = *held {
+        return Ok(device);
+    }
+    let mut made: *mut ffi::AVBufferRef = ptr::null_mut();
+    // SAFETY: `made` is a valid place for FFmpeg to write the new reference
+    // into; a null device name means the first card, and no options and no
+    // flags are what FFmpeg's own `-hwaccel cuda` passes.
+    let code = unsafe {
+        ffi::av_hwdevice_ctx_create(
+            &raw mut made,
+            ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_CUDA,
+            ptr::null(),
+            ptr::null_mut(),
+            0,
+        )
+    };
+    if code < 0 {
+        return Err(ffmpeg::Error::from(code));
+    }
+    let made = NonNull::new(made).ok_or(ffmpeg::Error::Bug)?;
+    let device: &'static CudaDevice = Box::leak(Box::new(CudaDevice(made)));
+    *held = Some(device);
+    drop(held);
+    Ok(device)
+}
+
+/// Copies a picture the card decoded into host memory, into `into`.
+///
+/// The one copy off the card this path makes, and only for a frame that is
+/// kept: a seek decodes forward from a keyframe and every frame it passes stays
+/// on the card. The `*_cuvid` decoders copied every frame they decoded, wanted
+/// or not.
+///
+/// `into` is kept between frames and reused while the size and format hold,
+/// for the reason [`VideoSource::rgba`] is: a fresh picture for every frame is
+/// an allocation on the hot path.
+fn download(
+    path: &Path,
+    from: &ffmpeg::frame::Video,
+    into: &mut ffmpeg::frame::Video,
+) -> Result<(), MediaError> {
+    // SAFETY: `from` is a frame the decoder handed back in the CUDA format, so
+    // FFmpeg guarantees it carries a live reference to the `AVHWFramesContext`
+    // its picture came from, which is what is read. `into` is owned by this
+    // source and referenced by nothing else, so freeing and reallocating its
+    // buffers cannot pull memory out from under anybody, and when it is reused
+    // it has exactly the format and size the copy will write.
+    let code = unsafe {
+        let source = from.as_ptr();
+        let frames = (*source).hw_frames_ctx;
+        if frames.is_null() {
+            return Err(MediaError::Undecodable {
+                path: path.to_path_buf(),
+                reason: "the card returned a picture that does not say where it is".to_owned(),
+            });
+        }
+        let software = (*(*frames).data.cast::<ffi::AVHWFramesContext>()).sw_format as i32;
+        let destination = into.as_mut_ptr();
+        let fits = !(*destination).buf[0].is_null()
+            && (*destination).format == software
+            && (*destination).width == (*source).width
+            && (*destination).height == (*source).height;
+        if !fits {
+            ffi::av_frame_unref(destination);
+            (*destination).format = software;
+            (*destination).width = (*source).width;
+            (*destination).height = (*source).height;
+            let code = ffi::av_frame_get_buffer(destination, 0);
+            if code < 0 {
+                return Err(undecodable(path, &ffmpeg::Error::from(code)));
+            }
+        }
+        ffi::av_hwframe_transfer_data(destination, source, 0)
+    };
+    if code < 0 {
+        return Err(undecodable(path, &ffmpeg::Error::from(code)));
+    }
+    Ok(())
 }
 
 /// Whether one clip may be decoded on the card.
@@ -420,6 +628,16 @@ pub struct VideoSource {
     /// conversion that used to run here for every frame of every layer does
     /// not exist.
     scaler: Option<Scaler>,
+    /// The layout of the pictures as they reach [`convert`](Self::convert):
+    /// what the processor decoded, or what a picture on the card was copied
+    /// back as.
+    ///
+    /// Read off a decoded picture, never off the decoder, because before the
+    /// first picture the decoder only knows what the file says. A clip on the
+    /// card says `yuv420p` and arrives as NV12; the two are not the same bytes,
+    /// and the converter and the shader have to be told which they have.
+    /// `target`, `depth` and `scaler` all follow from it.
+    format: ffmpeg::format::Pixel,
     /// What a frame is turned into before it goes up.
     target: Target,
     /// How many bits a sample carries, and where in its element they sit.
@@ -472,6 +690,9 @@ pub struct VideoSource {
     /// allocation on the hot path, and this one is written sixty times a second
     /// per layer whether the frame is kept or not.
     decoded: ffmpeg::frame::Video,
+    /// Where a picture the card decoded is copied back to, kept between
+    /// frames for the same reason.
+    downloaded: ffmpeg::frame::Video,
 }
 
 impl std::fmt::Debug for VideoSource {
@@ -487,10 +708,15 @@ impl std::fmt::Debug for VideoSource {
 }
 
 impl VideoSource {
-    /// Opens a clip and reads what it is.
+    /// Opens a clip and decodes its first picture.
     ///
-    /// Nothing is decoded here beyond what the container says: opening is on the
-    /// media worker's thread and the first frame is asked for a moment later.
+    /// The first picture is what says how the clip decodes: whether the card
+    /// took it, and what layout its pictures come in. Neither can be known
+    /// before — the card's decoder is set up when the first picture's header
+    /// is read, not when the decoder is opened — and the player asks for both
+    /// the moment it is made. So it is decoded here, on the media worker's
+    /// thread where opening happens anyway, and kept: asking for frame 0
+    /// afterwards costs nothing.
     ///
     /// # Errors
     ///
@@ -533,9 +759,9 @@ impl VideoSource {
             let wanted = match self.target {
                 Target::Rgba => ffmpeg::format::Pixel::RGBA,
                 Target::Planar { format, .. } => format,
-                Target::Interleaved { .. } => self.decoder.format(),
+                Target::Interleaved { .. } => self.format,
             };
-            format!("{:?} -> {:?}", self.decoder.format(), wanted)
+            format!("{:?} -> {:?}", self.format, wanted)
         })
     }
 
@@ -640,7 +866,8 @@ impl VideoSource {
         // no decoder for this codec, or no room for another session. Falling
         // back rather than failing is the whole point: the same binary has to
         // run on a machine with an RTX in it and on one without.
-        let (decoder, decoder_name) = Self::open_decoder(&path, parameters, threads, hardware)?;
+        let (decoder, decoder_name) =
+            Self::open_decoder(&path, parameters.clone(), threads, hardware)?;
 
         let size = SizePx::new(decoder.width(), decoder.height());
         if size.width > MAX_IMAGE_SIDE || size.height > MAX_IMAGE_SIDE {
@@ -656,39 +883,6 @@ impl VideoSource {
                 reason: "this clip has no picture size".to_owned(),
             });
         }
-
-        // At the clip's own size, whatever the conversion. Scaling to an
-        // output's size belongs to the compositor, which knows about mapping
-        // and rotation; doing it here would mean decoding the same clip twice
-        // for two walls.
-        let target = Target::for_format(decoder.format());
-        let depth = depth_of(decoder.format(), target);
-        let wanted = match target {
-            Target::Rgba => ffmpeg::format::Pixel::RGBA,
-            Target::Planar { format, .. } => format,
-            // Handed over as it is and split on the way out, so there is
-            // nothing for a converter to do.
-            Target::Interleaved { .. } => decoder.format(),
-        };
-        // Nothing at all when the decoder already produces what is wanted,
-        // which is the ordinary case for H.264, HEVC and AV1. An `SwsContext`
-        // asked to convert a format to itself still walks every pixel.
-        let scaler = if decoder.format() == wanted {
-            None
-        } else {
-            Some(Scaler(
-                ffmpeg::software::scaling::Context::get(
-                    decoder.format(),
-                    size.width,
-                    size.height,
-                    wanted,
-                    size.width,
-                    size.height,
-                    ffmpeg::software::scaling::Flags::BILINEAR,
-                )
-                .map_err(|error| undecodable(&path, &error))?,
-            ))
-        };
 
         // What the file says about its own colour, with a fallback that is the
         // convention rather than a guess: standard definition is BT.601 and
@@ -715,14 +909,16 @@ impl VideoSource {
             _ => ColourMatrix::Bt709,
         };
 
-        Ok(Self {
+        let mut source = Self {
             path,
             input,
             decoder,
             decoder_name,
-            scaler,
-            target,
-            depth,
+            // All four are decided by the first picture, in `start`.
+            scaler: None,
+            format: ffmpeg::format::Pixel::None,
+            target: Target::Rgba,
+            depth: SampleDepth::Eight,
             full_range,
             matrix,
             stream_index,
@@ -738,7 +934,99 @@ impl VideoSource {
             next_index: None,
             rgba: ffmpeg::frame::Video::empty(),
             decoded: ffmpeg::frame::Video::empty(),
-        })
+            downloaded: ffmpeg::frame::Video::empty(),
+        };
+
+        if let Err(error) = source.start() {
+            if source.decoder_name == PROCESSOR {
+                return Err(error);
+            }
+            // The card opened the clip and then could not decode it — a
+            // profile NVDEC has no engine for, on a decoder that has nothing
+            // to fall back to inside FFmpeg (AV1's own decoder decodes on a
+            // card or not at all). The processor gets the clip from the top.
+            tracing::info!(
+                clip = %source.path.display(),
+                decoder = source.decoder_name,
+                "this clip decodes on the processor: the card could not decode its first picture ({error})"
+            );
+            source.decoder = Self::open_codec(None, parameters, threads, None)
+                .map_err(|error| undecodable(&source.path, &error))?;
+            source.decoder_name = PROCESSOR;
+            source.seek(0)?;
+            source.start()?;
+        }
+        Ok(source)
+    }
+
+    /// Decodes the first picture and decides from it how every picture after
+    /// it is handled.
+    ///
+    /// Also where a clip that opened on the card and was decoded on the
+    /// processor anyway is found out. FFmpeg does that by itself when the
+    /// card's decoder cannot be set up — no engine for the profile, no session
+    /// left — and says nothing; a picture that is not in the CUDA format is the
+    /// only sign of it, and [`decoder_name`](Self::decoder_name) has to say so,
+    /// because it decides how far ahead the player decodes.
+    fn start(&mut self) -> Result<(), MediaError> {
+        let Some(index) = self.pull()? else {
+            return Err(MediaError::Undecodable {
+                path: self.path.clone(),
+                reason: "the clip has no picture in it".to_owned(),
+            });
+        };
+        if self.decoder_name != PROCESSOR && self.decoded.format() != ffmpeg::format::Pixel::CUDA {
+            tracing::info!(
+                clip = %self.path.display(),
+                decoder = self.decoder_name,
+                "this clip decodes on the processor: the card would not take it"
+            );
+            self.decoder_name = PROCESSOR;
+        }
+        self.next_index = Some(index.saturating_add(1));
+        let frame = Frame::new(index, self.convert()?);
+        self.last = Some(frame);
+        Ok(())
+    }
+
+    /// Decides what pictures in `format` are turned into, and makes the
+    /// converter for them when they need one.
+    ///
+    /// At the clip's own size, whatever the conversion. Scaling to an output's
+    /// size belongs to the compositor, which knows about mapping and rotation;
+    /// doing it here would mean decoding the same clip twice for two walls.
+    fn adopt(&mut self, format: ffmpeg::format::Pixel, size: SizePx) -> Result<(), MediaError> {
+        let target = Target::for_format(format);
+        let wanted = match target {
+            Target::Rgba => ffmpeg::format::Pixel::RGBA,
+            Target::Planar { format, .. } => format,
+            // Handed over as it is and split on the way out, so there is
+            // nothing for a converter to do.
+            Target::Interleaved { .. } => format,
+        };
+        // Nothing at all when the decoder already produces what is wanted,
+        // which is the ordinary case for H.264, HEVC and AV1. An `SwsContext`
+        // asked to convert a format to itself still walks every pixel.
+        self.scaler = if format == wanted {
+            None
+        } else {
+            Some(Scaler(
+                ffmpeg::software::scaling::Context::get(
+                    format,
+                    size.width,
+                    size.height,
+                    wanted,
+                    size.width,
+                    size.height,
+                    ffmpeg::software::scaling::Flags::BILINEAR,
+                )
+                .map_err(|error| undecodable(&self.path, &error))?,
+            ))
+        };
+        self.format = format;
+        self.target = target;
+        self.depth = depth_of(format, target);
+        Ok(())
     }
 
     /// The clip's own picture size.
@@ -792,11 +1080,15 @@ impl VideoSource {
         self.input
             .seek(target, ..target)
             .map_err(|error| undecodable(&self.path, &error))?;
-        // `avcodec_flush_buffers`, which is the expensive half of a seek on the
-        // card: measured on the test machine, 224 ms against 64 on the
-        // processor. Draining the decoder's output instead was tried and is
-        // wrong — it leaves the packets already sent in the decoder's input
-        // queue, so a backward seek to frame 5 came back with frame 26.
+        // `avcodec_flush_buffers`. On the `*_cuvid` decoders it was the
+        // expensive half of a seek on the card — 224 ms against 64 on the
+        // processor, measured on the test machine — because it destroyed the
+        // NVDEC decoder and made a new one. The accelerator keeps its decoder
+        // and forgets only the pictures, which is why a loop on the card now
+        // costs a ninth of what it did (`HARDWARE_FRAMES_AHEAD`). Draining the
+        // decoder's output instead was tried and is wrong — it leaves the
+        // packets already sent in the decoder's input queue, so a backward
+        // seek to frame 5 came back with frame 26.
         self.decoder.flush();
         self.next_index = None;
         Ok(())
@@ -888,15 +1180,44 @@ impl VideoSource {
     /// packed. Most clips need no conversion at all, and for those this is the
     /// copy and nothing else.
     fn convert(&mut self) -> Result<DecodedImage, MediaError> {
+        let on_card = self.decoded.format() == ffmpeg::format::Pixel::CUDA;
+        if on_card {
+            download(&self.path, &self.decoded, &mut self.downloaded)?;
+        }
+        // Once, at the first picture, and again only if a stream changes
+        // layout partway through — which is legal, and is otherwise a picture
+        // drawn through the wrong converter.
+        let (format, size) = {
+            let decoded = if on_card {
+                &self.downloaded
+            } else {
+                &self.decoded
+            };
+            (
+                decoded.format(),
+                SizePx::new(decoded.width(), decoded.height()),
+            )
+        };
+        if format != self.format {
+            self.adopt(format, size)?;
+        }
+        // Borrowed again, field by field, so the converter below can be
+        // borrowed mutably beside it.
+        let decoded = if on_card {
+            &self.downloaded
+        } else {
+            &self.decoded
+        };
+
         let picture = match &mut self.scaler {
             Some(scaler) => {
                 scaler
                     .0
-                    .run(&self.decoded, &mut self.rgba)
+                    .run(decoded, &mut self.rgba)
                     .map_err(|error| undecodable(&self.path, &error))?;
                 &self.rgba
             }
-            None => &self.decoded,
+            None => decoded,
         };
 
         let size = SizePx::new(picture.width(), picture.height());
@@ -992,7 +1313,10 @@ impl VideoSource {
 
         if hardware == Hardware::IfAllowed && hardware_decode_allowed() {
             if let Some((codec, name)) = hardware_decoder(id) {
-                match Self::open_codec(Some(codec), parameters.clone(), threads) {
+                let opened = cuda_device().and_then(|device| {
+                    Self::open_codec(Some(codec), parameters.clone(), threads, Some(device))
+                });
+                match opened {
                     Ok(decoder) => {
                         tracing::debug!(clip = %path.display(), decoder = name, "decoding on the card");
                         return Ok((decoder, name));
@@ -1010,16 +1334,18 @@ impl VideoSource {
             }
         }
 
-        Self::open_codec(None, parameters, threads)
+        Self::open_codec(None, parameters, threads, None)
             .map(|decoder| (decoder, PROCESSOR))
             .map_err(|error| undecodable(path, &error))
     }
 
-    /// Opens one decoder, either a named one or the codec's own.
+    /// Opens one decoder, either a named one or the codec's own, on the card
+    /// when it is given one.
     fn open_codec(
         codec: Option<ffmpeg::Codec>,
         parameters: ffmpeg::codec::Parameters,
         threads: usize,
+        card: Option<&CudaDevice>,
     ) -> Result<ffmpeg::decoder::Video, ffmpeg::Error> {
         let mut context = match codec {
             // `new_with_codec` fixes which decoder will be opened;
@@ -1033,8 +1359,37 @@ impl VideoSource {
             None => ffmpeg::codec::context::Context::from_parameters(parameters)?,
         };
 
-        // Ignored by a hardware decoder, which has no frame threads to
-        // configure, and set anyway so there is one path rather than two.
+        // A device is all the accelerator needs. FFmpeg's own choice of
+        // format, given one, is the card's whenever the card can take the
+        // stream and the processor's when it cannot — which is the fall-back
+        // this renderer wants, so no `get_format` of its own is written.
+        if let Some(card) = card {
+            // SAFETY: `context` is allocated and not yet opened, which is
+            // when FFmpeg reads `hw_device_ctx`, and nothing has set it.
+            // `av_buffer_ref` makes a new reference that the context owns from
+            // here on: `avcodec_free_context` gives it back when the decoder
+            // is dropped, and the shared one stays where it is.
+            unsafe {
+                let reference = ffi::av_buffer_ref(card.0.as_ptr());
+                if reference.is_null() {
+                    return Err(ffmpeg::Error::Other {
+                        errno: ffmpeg::error::ENOMEM,
+                    });
+                }
+                (*context.as_mut_ptr()).hw_device_ctx = reference;
+            }
+        }
+
+        // Kept on the card as well; the measurement is under `DECODE_THREADS`.
+        // Except FFmpeg's own default of one a core, which on the card is the
+        // one choice that can be refused: sixteen threads and a deep reference
+        // buffer ask NVDEC for more surfaces than it has. Only a measurement
+        // asks for the default, and it should measure what the renderer does.
+        let threads = if card.is_some() && threads == 0 {
+            DECODE_THREADS
+        } else {
+            threads
+        };
         context.set_threading(ffmpeg::threading::Config {
             kind: ffmpeg::threading::Type::Frame,
             count: threads,

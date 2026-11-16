@@ -407,7 +407,10 @@ mod unix {
         let mut sequential = Vec::new();
         let mut after_a_seek = Vec::new();
 
-        for round in 0..seeks {
+        // From one: round nought would land on frame 0, which a clip on the
+        // card has already decoded by the time it is open, and would count a
+        // jump that cost nothing.
+        for round in 1..=seeks {
             // A long way from wherever the last round finished, which is what
             // a loop point is and what a trigger is.
             let landing = (round * 97) % frames;
@@ -452,6 +455,27 @@ mod unix {
         println!(
             "a jump costs {:.0} sequential frames' worth of time",
             average(&after_a_seek) / average(&sequential).max(0.0001)
+        );
+
+        // And the jump a loop makes, on its own: the last frame, then the
+        // first. It lands on a keyframe, so nothing is decoded forward and
+        // what is left is the seek itself — which on the `*_cuvid` decoders
+        // was a whole new decoder.
+        let mut at_a_loop = Vec::new();
+        for _ in 0..seeks {
+            let _ = source.frame(frames.saturating_sub(2));
+            let _ = source.frame(frames - 1);
+            let began = Instant::now();
+            if source.frame(0).is_err() {
+                eprintln!("the clip would not give frame 0");
+                return ExitCode::from(1);
+            }
+            at_a_loop.push(began.elapsed());
+        }
+        println!(
+            "the first frame of a loop {:6.1} ms average, {:6.1} ms worst",
+            average(&at_a_loop),
+            worst(&at_a_loop)
         );
         ExitCode::SUCCESS
     }
