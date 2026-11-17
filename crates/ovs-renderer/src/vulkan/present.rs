@@ -40,7 +40,7 @@ use crate::backend::{BackendError, CompositionSource, FrameRequest, OutputBacken
 use crate::scene::Scene;
 
 use super::display::Display;
-use super::offscreen::VulkanOffscreenBackend;
+use super::offscreen::{reset_pool, VulkanOffscreenBackend};
 use super::{VulkanContext, VulkanError};
 
 /// How many frames may be in flight at once.
@@ -58,6 +58,10 @@ struct FrameSync {
     ready: vk::Semaphore,
     /// Signalled when the GPU is finished with this frame's command buffer.
     in_flight: vk::Fence,
+    /// A pool of this slot's own, holding only `command_buffer`, so that it can
+    /// be reset as a whole while the other slot's buffer is still in flight.
+    /// See [`reset_pool`] for why the buffer is never reset alone.
+    command_pool: vk::CommandPool,
     command_buffer: vk::CommandBuffer,
 }
 
@@ -83,7 +87,6 @@ pub struct VulkanDisplayBackend {
     /// eight-bit BGRA and takes the first offered format when it cannot have
     /// it, and that first one is whatever the panel and driver agreed on.
     format: vk::Format,
-    command_pool: vk::CommandPool,
     frames: Vec<FrameSync>,
     /// Which frame slot the next present uses.
     next: usize,
@@ -207,7 +210,6 @@ impl VulkanDisplayBackend {
                 width: display_mode.size.width,
                 height: display_mode.size.height,
             },
-            command_pool: vk::CommandPool::null(),
             frames: Vec::new(),
             next: 0,
             stale: false,
@@ -229,7 +231,7 @@ impl VulkanDisplayBackend {
         // ledger unless it is handed back here: `Drop` does not run on a value
         // that was never returned.
         if let Err(error) = backend
-            .create_command_pool()
+            .create_frames()
             .and_then(|()| backend.create_swapchain())
         {
             backend.context.release_display_plane(backend.plane);
@@ -316,6 +318,10 @@ impl VulkanDisplayBackend {
                 .map_err(call("vkResetFences"))?;
         }
 
+        // SAFETY: the slot's one buffer has finished — the fence wait above
+        // says so — and the pool holds nothing else.
+        unsafe { reset_pool(device, frame.command_pool) }?;
+
         self.record_blit(frame.command_buffer, self.images[index as usize])?;
 
         let wait = [frame.acquired];
@@ -373,7 +379,7 @@ impl VulkanDisplayBackend {
             .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
 
         // SAFETY: this buffer's previous submission has completed — the fence
-        // above says so — so it may be reset and recorded.
+        // above says so — and its pool was reset, so it may be recorded.
         unsafe {
             device
                 .begin_command_buffer(command_buffer, &begin)
@@ -473,26 +479,36 @@ impl VulkanDisplayBackend {
         Ok(())
     }
 
-    fn create_command_pool(&mut self) -> Result<(), VulkanError> {
+    /// Makes every frame slot: its semaphores, its fence, and a pool of its
+    /// own with the one command buffer the slot records into.
+    ///
+    /// No `RESET_COMMAND_BUFFER`: `show` resets the slot's pool as a whole,
+    /// never the buffer alone, for the reason on [`reset_pool`].
+    fn create_frames(&mut self) -> Result<(), VulkanError> {
         let device = self.context.device();
-        let create = vk::CommandPoolCreateInfo::default()
-            .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
-            .queue_family_index(self.context.graphics_family());
+        let create =
+            vk::CommandPoolCreateInfo::default().queue_family_index(self.context.graphics_family());
 
-        // SAFETY: the family index came from this device's own selection.
-        self.command_pool = unsafe { device.create_command_pool(&create, None) }
-            .map_err(call("vkCreateCommandPool"))?;
+        for _ in 0..FRAMES_IN_FLIGHT {
+            // SAFETY: the family index came from this device's own selection.
+            let command_pool = unsafe { device.create_command_pool(&create, None) }
+                .map_err(call("vkCreateCommandPool"))?;
 
-        let allocate = vk::CommandBufferAllocateInfo::default()
-            .command_pool(self.command_pool)
-            .level(vk::CommandBufferLevel::PRIMARY)
-            .command_buffer_count(u32::try_from(FRAMES_IN_FLIGHT).unwrap_or(2));
+            let allocate = vk::CommandBufferAllocateInfo::default()
+                .command_pool(command_pool)
+                .level(vk::CommandBufferLevel::PRIMARY)
+                .command_buffer_count(1);
 
-        // SAFETY: the pool was just created on this device.
-        let buffers = unsafe { device.allocate_command_buffers(&allocate) }
-            .map_err(call("vkAllocateCommandBuffers"))?;
+            // SAFETY: the pool was just created on this device.
+            let command_buffer = match unsafe { device.allocate_command_buffers(&allocate) } {
+                Ok(buffers) => buffers[0],
+                Err(result) => {
+                    // SAFETY: the pool is this function's alone and holds nothing.
+                    unsafe { device.destroy_command_pool(command_pool, None) };
+                    return Err(call("vkAllocateCommandBuffers")(result));
+                }
+            };
 
-        for command_buffer in buffers {
             let semaphore = vk::SemaphoreCreateInfo::default();
             // Created signalled: the first frame has nothing to wait for, and
             // an unsignalled fence would hang it.
@@ -510,6 +526,7 @@ impl VulkanDisplayBackend {
                     in_flight: device
                         .create_fence(&fence, None)
                         .map_err(call("vkCreateFence"))?,
+                    command_pool,
                     command_buffer,
                 });
             }
@@ -854,9 +871,7 @@ impl Drop for VulkanDisplayBackend {
                 device.destroy_semaphore(frame.acquired, None);
                 device.destroy_semaphore(frame.ready, None);
                 device.destroy_fence(frame.in_flight, None);
-            }
-            if self.command_pool != vk::CommandPool::null() {
-                device.destroy_command_pool(self.command_pool, None);
+                device.destroy_command_pool(frame.command_pool, None);
             }
             if self.swapchain != vk::SwapchainKHR::null() {
                 self.swapchain_device

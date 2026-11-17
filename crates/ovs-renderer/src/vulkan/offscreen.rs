@@ -756,12 +756,17 @@ const GENERATOR_SHADER_SPIRV: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/
 ///   about 30 MB an hour, from the first frame on.
 /// - `strace -k` put every new block inside `vkBeginCommandBuffer`, called
 ///   from [`begin_recording`](OffscreenTarget::begin_recording) and from
-///   [`submit_transfers`](OffscreenTarget::submit_transfers), never from the
-///   display's own buffers in `present.rs`.
+///   [`submit_transfers`](OffscreenTarget::submit_transfers).
 /// - `ovs-upload-cost --upload-once --frames 400000` went from 4 blocks to
 ///   10. With `vkResetCommandPool` before each recording: 4 to 4. Waiting for
 ///   the device to go idle before each recording did not help (+6), so it is
 ///   not the driver failing to see that the last submission had finished.
+/// - With that in 0.3.13 the renderer still gained one block every 1095 s,
+///   to the second: one per ~65,700 frames at sixty, the rate a single buffer
+///   reset implicitly once a frame gave `ovs-upload-cost` above. `strace -k`
+///   put both blocks of a half-hour inside `vkBeginCommandBuffer` from the
+///   display's blit in `present.rs`, which a short trace had missed at that
+///   rate. Each of its frame slots now has a pool of its own, reset here.
 ///
 /// No `RELEASE_RESOURCES`: the memory the pool kept from the last frame is
 /// exactly what this frame is about to need, so handing it back would only
@@ -770,7 +775,10 @@ const GENERATOR_SHADER_SPIRV: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/
 /// # Safety
 ///
 /// No buffer from `pool` may be pending on the device.
-unsafe fn reset_pool(device: &ash::Device, pool: vk::CommandPool) -> Result<(), VulkanError> {
+pub(super) unsafe fn reset_pool(
+    device: &ash::Device,
+    pool: vk::CommandPool,
+) -> Result<(), VulkanError> {
     // SAFETY: the caller guarantees nothing from the pool is in flight.
     unsafe { device.reset_command_pool(pool, vk::CommandPoolResetFlags::empty()) }.map_err(
         |result| VulkanError::Call {
